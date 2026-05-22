@@ -11,15 +11,59 @@ import type { MouseEvent } from 'react';
 type TweetTextProps = {
   text: string;
   className?: string;
+  linkClassName?: string;
+  tag?: 'p' | 'span' | 'div';
 };
 
 type TextPart =
   | { type: 'text'; value: string }
+  | { type: 'url'; value: string; href: string }
   | { type: 'hashtag'; value: string; tag: string }
   | { type: 'mention'; value: string; username: string };
 
 const entityRegex =
-  /#([A-Za-z0-9_]{1,139})|@([A-Za-z0-9_][A-Za-z0-9_.-]{0,251})/g;
+  /(https?:\/\/[^\s<>"']+|www\.[^\s<>"']+)|#([A-Za-z0-9_]{1,139})|@([A-Za-z0-9_][A-Za-z0-9_.-]{0,251})/gi;
+
+function getUrlHref(value: string): string {
+  return /^https?:\/\//i.test(value) ? value : `https://${value}`;
+}
+
+function countCharacter(value: string, target: string): number {
+  let count = 0;
+
+  for (let index = 0; index < value.length; index += 1)
+    if (value[index] === target) count += 1;
+
+  return count;
+}
+
+function trimUrlTrailingPunctuation(value: string): {
+  url: string;
+  trailing: string;
+} {
+  let url = value;
+  let trailing = '';
+  const moveLastCharacter = (): void => {
+    trailing = `${url.slice(-1)}${trailing}`;
+    url = url.slice(0, -1);
+  };
+
+  while (/[.,!?;:]$/.test(url)) moveLastCharacter();
+
+  const pairs: Record<string, string> = { ')': '(', ']': '[', '}': '{' };
+
+  while (/[)\]}]$/.test(url)) {
+    const close = url.slice(-1);
+    const open = pairs[close];
+    const openCount = countCharacter(url, open);
+    const closeCount = countCharacter(url, close);
+
+    if (closeCount <= openCount) break;
+    moveLastCharacter();
+  }
+
+  return { url, trailing };
+}
 
 function getTextParts(text: string): TextPart[] {
   const parts: TextPart[] = [];
@@ -28,8 +72,29 @@ function getTextParts(text: string): TextPart[] {
 
   while ((match = entityRegex.exec(text))) {
     const index = match.index;
+    const url = match[1];
+
+    if (url) {
+      const { url: trimmedUrl, trailing } = trimUrlTrailingPunctuation(url);
+
+      if (index > lastIndex)
+        parts.push({ type: 'text', value: text.slice(lastIndex, index) });
+
+      if (trimmedUrl)
+        parts.push({
+          type: 'url',
+          value: trimmedUrl,
+          href: getUrlHref(trimmedUrl)
+        });
+
+      if (trailing) parts.push({ type: 'text', value: trailing });
+
+      lastIndex = index + url.length;
+      continue;
+    }
+
     const previousCharacter = index > 0 ? text[index - 1] : '';
-    const isHashtag = !!match[1];
+    const isHashtag = !!match[2];
     const invalidPreviousCharacter = isHashtag
       ? /[A-Za-z0-9_]/.test(previousCharacter)
       : /[A-Za-z0-9_.-]/.test(previousCharacter);
@@ -43,14 +108,14 @@ function getTextParts(text: string): TextPart[] {
       parts.push({
         type: 'hashtag',
         value: match[0],
-        tag: normalizeHashtag(match[1])
+        tag: normalizeHashtag(match[2])
       });
 
       lastIndex = index + match[0].length;
       continue;
     }
 
-    const username = normalizeMention(match[2]);
+    const username = normalizeMention(match[3]);
     const value = `@${username}`;
 
     if (!username) continue;
@@ -65,15 +130,34 @@ function getTextParts(text: string): TextPart[] {
   return parts;
 }
 
-export function TweetText({ text, className }: TweetTextProps): JSX.Element {
+export function TweetText({
+  text,
+  className,
+  linkClassName,
+  tag
+}: TweetTextProps): JSX.Element {
   const stopEntityClick = (event: MouseEvent<HTMLAnchorElement>): void => {
     event.stopPropagation();
   };
+  const Tag = tag ?? 'p';
+  const entityClassName =
+    linkClassName ?? 'custom-underline text-main-accent outline-none';
 
   return (
-    <p className={cn('whitespace-pre-line break-words', className)}>
+    <Tag className={cn('whitespace-pre-line break-words', className)}>
       {getTextParts(text).map((part, index) =>
-        part.type === 'hashtag' ? (
+        part.type === 'url' ? (
+          <a
+            className={entityClassName}
+            href={part.href}
+            target='_blank'
+            rel='noreferrer noopener'
+            onClick={stopEntityClick}
+            key={`${part.value}-${index}`}
+          >
+            {part.value}
+          </a>
+        ) : part.type === 'hashtag' ? (
           <Link
             href={{
               pathname: '/explore',
@@ -84,10 +168,7 @@ export function TweetText({ text, className }: TweetTextProps): JSX.Element {
             }}
             key={`${part.value}-${index}`}
           >
-            <a
-              className='custom-underline text-main-accent outline-none'
-              onClick={stopEntityClick}
-            >
+            <a className={entityClassName} onClick={stopEntityClick}>
               {part.value}
             </a>
           </Link>
@@ -96,10 +177,7 @@ export function TweetText({ text, className }: TweetTextProps): JSX.Element {
             href={getUserPath(part.username)}
             key={`${part.value}-${index}`}
           >
-            <a
-              className='custom-underline text-main-accent outline-none'
-              onClick={stopEntityClick}
-            >
+            <a className={entityClassName} onClick={stopEntityClick}>
               {part.value}
             </a>
           </Link>
@@ -107,6 +185,6 @@ export function TweetText({ text, className }: TweetTextProps): JSX.Element {
           <span key={`${part.value}-${index}`}>{part.value}</span>
         )
       )}
-    </p>
+    </Tag>
   );
 }

@@ -85,6 +85,10 @@ export const variants: Variants = {
 
 const BLUESKY_POST_GRAPHEME_LIMIT = 300;
 
+function getErrorMessage(error: unknown): string | null {
+  return error instanceof Error && error.message ? error.message : null;
+}
+
 export function Input({
   modal,
   reply,
@@ -190,8 +194,13 @@ export function Input({
         ),
         { duration: 6000 }
       );
-    } catch {
-      toast.error('Tweet could not be sent');
+    } catch (error) {
+      const message = getErrorMessage(error);
+      toast.error(
+        message
+          ? `Tweet could not be sent: ${message}`
+          : 'Tweet could not be sent'
+      );
     } finally {
       setLoading(false);
     }
@@ -210,8 +219,7 @@ export function Input({
     const files = isClipboardEvent ? e.clipboardData.files : e.target.files;
 
     const imagesData = getImagesData(files, {
-      currentFiles: previewCount,
-      allowUploadingVideos: true
+      currentFiles: previewCount
     });
 
     if (!imagesData) {
@@ -445,7 +453,7 @@ export function Input({
           alt={name}
           username={username}
         />
-        <div className='flex w-full flex-col gap-4'>
+        <div className='flex w-full min-w-0 flex-col gap-4'>
           <InputForm
             modal={modal}
             reply={reply}
@@ -478,7 +486,9 @@ export function Input({
               />
             )}
             {quotedTweetPreview && (
-              <TweetEmbed card={null} quotedTweet={quotedTweetPreview} />
+              <div className='min-w-0 max-w-full overflow-hidden'>
+                <TweetEmbed card={null} quotedTweet={quotedTweetPreview} />
+              </div>
             )}
           </InputForm>
           <AnimatePresence initial={false}>

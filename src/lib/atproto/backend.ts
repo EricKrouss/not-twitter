@@ -10,7 +10,9 @@ import {
   Agent,
   AtpAgent,
   RichText,
+  type AppBskyActorProfile,
   type AppBskyActorDefs,
+  type AppBskyFeedPost,
   type AppBskyFeedThreadgate,
   type AppBskyNotificationListNotifications,
   type AtpSessionData,
@@ -43,6 +45,9 @@ const CREDENTIAL_SESSION_KEY = 'twitter-clone:bsky-credential-session';
 const OAUTH_SCOPE = 'atproto transition:generic transition:chat.bsky blob:*/*';
 const CHAT_SCOPE = 'transition:chat.bsky';
 const GENERIC_SCOPE = 'transition:generic';
+const BSKY_IMAGE_MAX_BYTES = 1_000_000;
+const BSKY_IMAGE_TARGET_BYTES = 950_000;
+const BSKY_IMAGE_MAX_DIMENSION = 2000;
 const THEME_KEY = 'twitter-clone:bsky-theme';
 const DEFAULT_PROFILE_PHOTO_URL = '/assets/twitter-default-egg.png';
 const DEFAULT_PROFILE_COVER_URL = '/assets/twitter-default-cover.png';
@@ -116,6 +121,16 @@ type BookmarksResponse = {
 type UploadedImage = {
   file: File;
   preview: ImagesPreview[number];
+};
+
+export type ProfileMediaFiles = Partial<
+  Record<'photoURL' | 'coverPhotoURL', FilesWithId>
+>;
+
+type PreparedImageUpload = {
+  file: Blob;
+  encoding: string;
+  aspectRatio: AppBskyEmbedImages.Image['aspectRatio'];
 };
 
 type ActorFeedPost = AppBskyFeedDefs.FeedViewPost;
@@ -906,32 +921,6 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
-function getCidString(value: unknown): string | null {
-  if (typeof value === 'string') return value;
-  if (!isPlainObject(value)) return null;
-
-  const link = value.$link;
-  if (typeof link === 'string') return link;
-
-  const cid = String(value);
-  return cid && cid !== '[object Object]' ? cid : null;
-}
-
-function toPdsCompatibleBlobRef(
-  blob: unknown
-): AppBskyEmbedImages.Image['image'] {
-  const blobRecord = isPlainObject(blob) ? blob : {};
-  const mimeType =
-    typeof blobRecord.mimeType === 'string'
-      ? blobRecord.mimeType
-      : 'application/octet-stream';
-  const cid = getCidString(blobRecord.cid) ?? getCidString(blobRecord.ref);
-
-  if (!cid) throw new Error('Bluesky did not return a valid media blob.');
-
-  return { cid, mimeType } as unknown as AppBskyEmbedImages.Image['image'];
-}
-
 function getPostRefFromValue(value: unknown): PostRef | null {
   if (!isPlainObject(value)) return null;
 
@@ -953,6 +942,157 @@ function getReplyRefFromRecord(record: unknown): PostReplyRef | null {
 function cachePostReplyRef(id: string, record: unknown): void {
   const replyRef = getReplyRefFromRecord(record);
   if (replyRef) postReplyRefCache.set(id, replyRef);
+}
+
+function getLocalProfileOverride(data: Partial<User>): Partial<User> {
+  const override: Partial<User> = {};
+
+  if ('theme' in data) override.theme = data.theme ?? null;
+  if ('accent' in data) override.accent = data.accent ?? null;
+  if ('website' in data) override.website = data.website ?? null;
+  if ('location' in data) override.location = data.location ?? null;
+
+  return override;
+}
+
+function getImageAspectRatio(
+  width: number,
+  height: number
+): PreparedImageUpload['aspectRatio'] {
+  return width > 0 && height > 0
+    ? {
+        width: Math.round(width),
+        height: Math.round(height)
+      }
+    : undefined;
+}
+
+function loadImageElement(file: Blob): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const src = URL.createObjectURL(file);
+    const image = new Image();
+
+    image.onload = (): void => {
+      URL.revokeObjectURL(src);
+      resolve(image);
+    };
+
+    image.onerror = (): void => {
+      URL.revokeObjectURL(src);
+      reject(new Error('Unable to load image.'));
+    };
+
+    image.src = src;
+  });
+}
+
+function canvasToBlob(
+  canvas: HTMLCanvasElement,
+  type: string,
+  quality: number
+): Promise<Blob | null> {
+  return new Promise((resolve) => canvas.toBlob(resolve, type, quality));
+}
+
+async function encodeCanvasImage(
+  canvas: HTMLCanvasElement,
+  targetBytes = BSKY_IMAGE_TARGET_BYTES
+): Promise<Blob> {
+  let fallbackBlob: Blob | null = null;
+  const qualities = [0.92, 0.84, 0.76, 0.68, 0.6];
+
+  for (const quality of qualities) {
+    const blob =
+      (await canvasToBlob(canvas, 'image/webp', quality)) ??
+      (await canvasToBlob(canvas, 'image/jpeg', quality));
+
+    if (!blob) continue;
+
+    fallbackBlob = blob;
+    if (blob.size <= targetBytes) return blob;
+  }
+
+  if (fallbackBlob) return fallbackBlob;
+
+  throw new Error('Unable to prepare image for Bluesky.');
+}
+
+async function prepareImageForBluesky(
+  file: File
+): Promise<PreparedImageUpload> {
+  const image = await loadImageElement(file);
+  const originalAspectRatio = getImageAspectRatio(
+    image.naturalWidth,
+    image.naturalHeight
+  );
+
+  if (
+    file.size <= BSKY_IMAGE_MAX_BYTES &&
+    /^image\/(jpe?g|png|webp|gif)$/i.test(file.type)
+  ) {
+    return {
+      file,
+      encoding: file.type || 'image/jpeg',
+      aspectRatio: originalAspectRatio
+    };
+  }
+
+  const scale = Math.min(
+    1,
+    BSKY_IMAGE_MAX_DIMENSION / Math.max(image.naturalWidth, image.naturalHeight)
+  );
+  const canvas = document.createElement('canvas');
+  const width = Math.max(1, Math.round(image.naturalWidth * scale));
+  const height = Math.max(1, Math.round(image.naturalHeight * scale));
+
+  canvas.width = width;
+  canvas.height = height;
+
+  const context = canvas.getContext('2d');
+
+  if (!context) throw new Error('Unable to prepare image for Bluesky.');
+
+  context.drawImage(image, 0, 0, width, height);
+
+  let blob = await encodeCanvasImage(canvas);
+
+  while (
+    blob.size > BSKY_IMAGE_MAX_BYTES &&
+    canvas.width > 640 &&
+    canvas.height > 640
+  ) {
+    const nextWidth = Math.max(1, Math.round(canvas.width * 0.82));
+    const nextHeight = Math.max(1, Math.round(canvas.height * 0.82));
+    const nextCanvas = document.createElement('canvas');
+
+    nextCanvas.width = nextWidth;
+    nextCanvas.height = nextHeight;
+
+    const nextContext = nextCanvas.getContext('2d');
+
+    if (!nextContext) break;
+
+    nextContext.drawImage(canvas, 0, 0, nextWidth, nextHeight);
+    canvas.width = nextWidth;
+    canvas.height = nextHeight;
+    const resizedContext = canvas.getContext('2d');
+
+    if (!resizedContext) break;
+
+    resizedContext.drawImage(nextCanvas, 0, 0);
+
+    blob = await encodeCanvasImage(canvas);
+  }
+
+  if (blob.size > BSKY_IMAGE_MAX_BYTES) {
+    throw new Error('Image is too large for Bluesky.');
+  }
+
+  return {
+    file: blob,
+    encoding: blob.type || 'image/jpeg',
+    aspectRatio: getImageAspectRatio(canvas.width, canvas.height)
+  };
 }
 
 function normalizeSettingsLabelPreference(
@@ -1555,11 +1695,14 @@ function getThemeOverride(did: string): Partial<User> {
 function writeThemeOverride(did: string, data: Partial<User>): void {
   if (!hasStorage()) return;
 
+  const override = getLocalProfileOverride(data);
+  if (!Object.keys(override).length) return;
+
   const themes = JSON.parse(
     window.localStorage.getItem(THEME_KEY) ?? '{}'
   ) as Record<string, Partial<User>>;
 
-  themes[did] = { ...(themes[did] ?? {}), ...data };
+  themes[did] = { ...(themes[did] ?? {}), ...override };
   window.localStorage.setItem(THEME_KEY, JSON.stringify(themes));
 }
 
@@ -3772,13 +3915,15 @@ export async function addTweet(data: AddTweetData): Promise<Tweet> {
         $type: 'app.bsky.embed.images',
         images: await Promise.all(
           images.slice(0, 4).map(async ({ file, preview }) => {
-            const upload = await api.uploadBlob(file, {
-              encoding: file.type || 'image/jpeg'
+            const preparedImage = await prepareImageForBluesky(file);
+            const upload = await api.uploadBlob(preparedImage.file, {
+              encoding: preparedImage.encoding
             });
 
             return {
-              image: toPdsCompatibleBlobRef(upload.data.blob),
-              alt: preview.alt || ''
+              image: upload.data.blob,
+              alt: preview.alt || '',
+              aspectRatio: preparedImage.aspectRatio
             };
           })
         )
@@ -3813,12 +3958,19 @@ export async function addTweet(data: AddTweetData): Promise<Tweet> {
       }
     : undefined;
 
-  const result = await api.post({
+  const postRecord: AppBskyFeedPost.Record = {
     text: richText.text,
     facets: richText.facets,
     embed,
-    reply: replyRef
-  });
+    reply: replyRef,
+    createdAt: new Date().toISOString()
+  };
+  const result = mediaEmbed
+    ? await api.app.bsky.feed.post.create(
+        { repo: api.accountDid, validate: false },
+        postRecord
+      )
+    : await api.post(postRecord);
   await createThreadgate(api, result.uri, data.replySetting);
 
   const tweet: Tweet = {
@@ -3862,18 +4014,113 @@ export function stageImages(userId: string, files: FilesWithId): ImagesPreview {
   return previews;
 }
 
+async function upsertProfileRecord(
+  api: Agent,
+  updateRecord: (
+    existing: Partial<AppBskyActorProfile.Record>
+  ) => Partial<AppBskyActorProfile.Record>,
+  skipValidation: boolean
+): Promise<void> {
+  const repo = api.accountDid;
+  const collection = 'app.bsky.actor.profile';
+  const rkey = 'self';
+  let retries = 5;
+
+  while (retries >= 0) {
+    const existingRecord = await api.com.atproto.repo
+      .getRecord({ repo, collection, rkey })
+      .catch((error) => {
+        if (isRecordNotFoundError(error)) return null;
+        throw error;
+      });
+    const record: Record<string, unknown> = {
+      ...(updateRecord(
+        (existingRecord?.data.value ??
+          {}) as Partial<AppBskyActorProfile.Record>
+      ) as Record<string, unknown>),
+      $type: 'app.bsky.actor.profile'
+    };
+    const hasBlob = !!record.avatar || !!record.banner;
+
+    try {
+      await api.com.atproto.repo.putRecord(
+        {
+          repo,
+          collection,
+          rkey,
+          record,
+          swapRecord: existingRecord?.data.cid ?? null,
+          validate: skipValidation || hasBlob ? false : undefined
+        },
+        { encoding: 'application/json' }
+      );
+      return;
+    } catch (error) {
+      const errorName = (error as { error?: unknown })?.error;
+      if (retries > 0 && errorName === 'InvalidSwap') {
+        retries -= 1;
+        continue;
+      }
+
+      throw error;
+    }
+  }
+}
+
 export async function updateProfile(
   userId: string,
-  data: Partial<User>
+  data: Partial<User>,
+  mediaFiles?: ProfileMediaFiles
 ): Promise<void> {
   writeThemeOverride(userId, data);
 
-  if (data.name || data.bio) {
-    await getAgent().upsertProfile((existing) => ({
-      ...existing,
-      displayName: data.name ?? existing?.displayName,
-      description: data.bio ?? existing?.description
-    }));
+  const avatarFile = mediaFiles?.photoURL?.[0];
+  const bannerFile = mediaFiles?.coverPhotoURL?.[0];
+  const api = getAgent();
+  const [avatarUpload, bannerUpload] = await Promise.all([
+    avatarFile
+      ? prepareImageForBluesky(avatarFile).then((preparedImage) =>
+          api
+            .uploadBlob(preparedImage.file, {
+              encoding: preparedImage.encoding
+            })
+            .then(({ data }) => data.blob)
+        )
+      : null,
+    bannerFile
+      ? prepareImageForBluesky(bannerFile).then((preparedImage) =>
+          api
+            .uploadBlob(preparedImage.file, {
+              encoding: preparedImage.encoding
+            })
+            .then(({ data }) => data.blob)
+        )
+      : null
+  ]);
+  const shouldUpdateProfile =
+    'name' in data ||
+    'bio' in data ||
+    !!avatarUpload ||
+    !!bannerUpload ||
+    ('coverPhotoURL' in data && data.coverPhotoURL === null);
+
+  if (shouldUpdateProfile) {
+    await upsertProfileRecord(
+      api,
+      (existing) => {
+        const nextProfile = { ...existing };
+
+        if ('name' in data) nextProfile.displayName = data.name ?? '';
+        if ('bio' in data) nextProfile.description = data.bio ?? '';
+        if (avatarUpload) nextProfile.avatar = avatarUpload;
+        if (bannerUpload) nextProfile.banner = bannerUpload;
+        else if ('coverPhotoURL' in data && data.coverPhotoURL === null)
+          delete nextProfile.banner;
+
+        return nextProfile;
+      },
+      !!avatarUpload || !!bannerUpload
+    );
   }
 
   await refreshCurrentUser();

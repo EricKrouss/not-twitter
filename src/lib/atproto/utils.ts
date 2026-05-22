@@ -7,7 +7,8 @@ import {
   setBookmark,
   stageImages,
   unfollowUser,
-  updateProfile
+  updateProfile,
+  type ProfileMediaFiles
 } from '@lib/atproto/backend';
 import type { Query } from '@lib/atproto/store';
 import type { EditableUserData } from '@lib/types/user';
@@ -31,9 +32,10 @@ export async function getCollectionCount<T>(
 
 export async function updateUserData(
   userId: string,
-  userData: EditableUserData
+  userData: EditableUserData,
+  mediaFiles?: ProfileMediaFiles
 ): Promise<void> {
-  await updateProfile(userId, userData);
+  await updateProfile(userId, userData, mediaFiles);
 }
 
 export async function updateUserTheme(

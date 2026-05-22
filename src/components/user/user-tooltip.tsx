@@ -5,6 +5,7 @@ import { formatNumber } from '@lib/date';
 import { getUserPath } from '@lib/routes';
 import { FollowButton } from '@components/ui/follow-button';
 import { NextImage } from '@components/ui/next-image';
+import { TweetText } from '@components/tweet/tweet-text';
 import { UserAvatar } from './user-avatar';
 import { UserName } from './user-name';
 import { UserFollowing } from './user-following';
@@ -128,7 +129,7 @@ export function UserTooltip({
               </div>
             </div>
           </div>
-          {bio && <p>{bio}</p>}
+          {bio && <TweetText text={bio} />}
           <div className='text-secondary flex gap-4'>
             {allStats.map(([id, label, stat]) => (
               <Link href={`${userLink}/${id}`} key={id}>

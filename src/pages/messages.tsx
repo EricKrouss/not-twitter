@@ -43,6 +43,7 @@ import { NextImage } from '@components/ui/next-image';
 import { Button } from '@components/ui/button';
 import { CustomIcon, type CustomIconName } from '@components/ui/custom-icon';
 import { Loading } from '@components/ui/loading';
+import { TweetText } from '@components/tweet/tweet-text';
 import type {
   ChangeEvent,
   FormEvent,
@@ -619,7 +620,10 @@ function ChatSettingsPanel({
                       />
                     )}
                     {saving && (
-                      <CustomIcon className='h-3.5 w-3.5' iconName='SpinnerIcon' />
+                      <CustomIcon
+                        className='h-3.5 w-3.5'
+                        iconName='SpinnerIcon'
+                      />
                     )}
                   </span>
                 </Button>
@@ -1497,7 +1501,9 @@ export default function Messages(): JSX.Element {
     }
   };
 
-  const handleAllowIncomingSelect = (allowIncoming: ChatAllowIncoming): void => {
+  const handleAllowIncomingSelect = (
+    allowIncoming: ChatAllowIncoming
+  ): void => {
     void updateAllowIncoming(allowIncoming);
   };
 
@@ -1983,6 +1989,18 @@ export default function Messages(): JSX.Element {
                               isMine
                             );
                             const reacting = reactingMessageId === message.id;
+                            const messageBubbleClassName = cn(
+                              'px-5 py-3 text-[17px] leading-6',
+                              isMine
+                                ? 'rounded-[28px] rounded-br bg-main-accent text-white'
+                                : 'rounded-[28px] rounded-bl bg-main-sidebar-background',
+                              groupedWithPrevious &&
+                                (isMine ? 'rounded-tr-lg' : 'rounded-tl-lg'),
+                              groupedWithNext &&
+                                (isMine ? 'rounded-br-lg' : 'rounded-bl-lg'),
+                              message.deleted &&
+                                'italic text-light-secondary dark:text-dark-secondary'
+                            );
 
                             return (
                               <div
@@ -2011,28 +2029,22 @@ export default function Messages(): JSX.Element {
                                   )}
                                 >
                                   <div className='relative'>
-                                    <p
-                                      className={cn(
-                                        'px-5 py-3 text-[17px] leading-6',
-                                        isMine
-                                          ? 'rounded-[28px] rounded-br bg-main-accent text-white'
-                                          : 'rounded-[28px] rounded-bl bg-main-sidebar-background',
-                                        groupedWithPrevious &&
-                                          (isMine
-                                            ? 'rounded-tr-lg'
-                                            : 'rounded-tl-lg'),
-                                        groupedWithNext &&
-                                          (isMine
-                                            ? 'rounded-br-lg'
-                                            : 'rounded-bl-lg'),
-                                        message.deleted &&
-                                          'italic text-light-secondary dark:text-dark-secondary'
-                                      )}
-                                    >
-                                      {message.deleted
-                                        ? 'This message was deleted'
-                                        : message.text}
-                                    </p>
+                                    {message.deleted ? (
+                                      <p className={messageBubbleClassName}>
+                                        This message was deleted
+                                      </p>
+                                    ) : (
+                                      <TweetText
+                                        className={messageBubbleClassName}
+                                        linkClassName={cn(
+                                          'custom-underline outline-none',
+                                          isMine
+                                            ? 'text-white'
+                                            : 'text-main-accent'
+                                        )}
+                                        text={message.text ?? ''}
+                                      />
+                                    )}
                                     {!message.deleted && (
                                       <div
                                         className={cn(
@@ -2151,9 +2163,9 @@ export default function Messages(): JSX.Element {
                 <div className='max-w-sm'>
                   <h2 className='text-3xl font-extrabold'>Select a message</h2>
                   <p className='mt-2 text-light-secondary dark:text-dark-secondary'>
-                    {showChatSettings
-                      ? 'Choose who can start new message requests with you.'
-                      : showMessageRequests ? (
+                    {showChatSettings ? (
+                      'Choose who can start new message requests with you.'
+                    ) : showMessageRequests ? (
                       <>
                         Message requests from people you don&apos;t follow live
                         here. To reply to their messages, you need to accept the

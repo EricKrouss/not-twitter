@@ -53,7 +53,7 @@ function CardShell({
   return (
     <div
       className={cn(
-        `group mt-2 block cursor-pointer overflow-hidden rounded-2xl border
+        `group mt-2 block min-w-0 max-w-full cursor-pointer overflow-hidden rounded-2xl border
          border-light-border text-left outline-none transition-colors
          hover:bg-light-primary/5 focus-visible:ring-2 focus-visible:ring-main-accent
          dark:border-dark-border dark:hover:bg-dark-primary/5`,
@@ -140,7 +140,7 @@ function TweetLinkCard({ card, compact }: LinkCardProps): JSX.Element {
         onClick={openCard}
         onKeyDown={onEnterOrSpace(openCard)}
       >
-        <div className='flex h-full min-h-[112px]'>
+        <div className='flex h-full min-h-[112px] min-w-0 max-w-full'>
           <LinkCardImage card={card} compact />
           <div className='flex min-w-0 flex-1 flex-col justify-center px-3 py-2'>
             <p className='truncate text-sm text-light-secondary dark:text-dark-secondary'>
@@ -166,7 +166,7 @@ function TweetLinkCard({ card, compact }: LinkCardProps): JSX.Element {
       onKeyDown={onEnterOrSpace(openCard)}
     >
       <LinkCardImage card={card} />
-      <div className='px-3 py-2'>
+      <div className='min-w-0 px-3 py-2'>
         <p className='truncate text-sm text-light-secondary dark:text-dark-secondary'>
           {card.domain ?? card.url}
         </p>
@@ -230,7 +230,7 @@ function QuotedTweetCard({
       onClick={openTweet}
       onKeyDown={onEnterOrSpace(openTweet)}
     >
-      <div className='px-3 py-2'>
+      <div className='min-w-0 px-3 py-2'>
         <div className='flex min-w-0 items-center gap-1 text-[15px]'>
           {quotedTweet.authorAvatar && (
             <NextImage

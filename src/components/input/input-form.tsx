@@ -175,10 +175,10 @@ export function InputForm({
 
   const selectedAudience = audienceOptions.find(
     ({ value }) => value === audience
-  ) as (typeof audienceOptions)[number];
+  ) as typeof audienceOptions[number];
   const selectedReplyOption = replyOptions.find(
     ({ value }) => value === replySetting
-  ) as (typeof replyOptions)[number];
+  ) as typeof replyOptions[number];
   const isVisibilityShown = visited && !reply && !replyModal && !loading;
 
   useEffect(() => handleShowHideNav(true), []);
@@ -298,7 +298,7 @@ export function InputForm({
     };
 
   return (
-    <div className='flex min-h-[48px] w-full flex-col justify-center gap-4'>
+    <div className='flex min-h-[48px] w-full min-w-0 flex-col justify-center gap-4'>
       <Modal
         modalClassName='max-w-xs bg-main-background w-full p-8 rounded-2xl'
         open={open}
@@ -313,7 +313,7 @@ export function InputForm({
           closeModal={closeModal}
         />
       </Modal>
-      <div className='flex flex-col gap-6'>
+      <div className='flex min-w-0 flex-col gap-6'>
         {isVisibilityShown && (
           <motion.div className='relative self-start' {...fromTop}>
             <button

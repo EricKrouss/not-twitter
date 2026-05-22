@@ -3,7 +3,7 @@ import { toast } from 'react-hot-toast';
 import cn from 'clsx';
 import { useUser } from '@lib/context/user-context';
 import { useModal } from '@lib/hooks/useModal';
-import { updateUserData, uploadImages } from '@lib/atproto/utils';
+import { updateUserData } from '@lib/atproto/utils';
 import { sleep } from '@lib/utils';
 import { getImagesData } from '@lib/validation';
 import { Modal } from '@components/modal/modal';
@@ -40,6 +40,10 @@ type UserEditProfileProps = {
 
 function revokeObjectURL(src?: string | null): void {
   if (src?.startsWith('blob:')) URL.revokeObjectURL(src);
+}
+
+function getErrorMessage(error: unknown): string | null {
+  return error instanceof Error && error.message ? error.message : null;
 }
 
 export function UserEditProfile({ hide }: UserEditProfileProps): JSX.Element {
@@ -79,52 +83,58 @@ export function UserEditProfile({ hide }: UserEditProfileProps): JSX.Element {
   const updateData = async (): Promise<void> => {
     setLoading(true);
 
-    const userId = user?.id as string;
+    try {
+      const userId = user?.id as string;
 
-    const { photoURL, coverPhotoURL: coverURL } = userImages;
+      const newImages: Partial<Pick<User, 'photoURL' | 'coverPhotoURL'>> = {
+        coverPhotoURL:
+          coverPhotoURL === editUserData.coverPhotoURL
+            ? coverPhotoURL
+            : editUserData.coverPhotoURL,
+        ...(userImages.photoURL.length && {
+          photoURL: editUserData.photoURL as string
+        })
+      };
 
-    const [newPhotoURL, newCoverPhotoURL] = await Promise.all(
-      [photoURL, coverURL].map((image) => uploadImages(userId, image))
-    );
+      const trimmedKeys: Readonly<EditableData[]> = [
+        'name',
+        'bio',
+        'location',
+        'website'
+      ];
 
-    const newImages: Partial<Pick<User, 'photoURL' | 'coverPhotoURL'>> = {
-      coverPhotoURL:
-        coverPhotoURL === editUserData.coverPhotoURL
-          ? coverPhotoURL
-          : newCoverPhotoURL?.[0].src ?? null,
-      ...(newPhotoURL && { photoURL: newPhotoURL[0].src })
-    };
+      const trimmedTexts = trimmedKeys.reduce(
+        (acc, curr) => ({ ...acc, [curr]: editUserData[curr]?.trim() ?? null }),
+        {} as TrimmedTexts
+      );
 
-    const trimmedKeys: Readonly<EditableData[]> = [
-      'name',
-      'bio',
-      'location',
-      'website'
-    ];
+      const newUserData: Readonly<EditableUserData> = {
+        ...editUserData,
+        ...trimmedTexts,
+        ...newImages
+      };
 
-    const trimmedTexts = trimmedKeys.reduce(
-      (acc, curr) => ({ ...acc, [curr]: editUserData[curr]?.trim() ?? null }),
-      {} as TrimmedTexts
-    );
+      await sleep(500);
 
-    const newUserData: Readonly<EditableUserData> = {
-      ...editUserData,
-      ...trimmedTexts,
-      ...newImages
-    };
+      await updateUserData(userId, newUserData, userImages);
 
-    await sleep(500);
+      closeModal();
 
-    await updateUserData(userId, newUserData);
+      cleanImage();
 
-    closeModal();
+      setEditUserData(newUserData);
 
-    cleanImage();
-
-    setLoading(false);
-    setEditUserData(newUserData);
-
-    toast.success('Profile updated successfully');
+      toast.success('Profile updated successfully');
+    } catch (error) {
+      const message = getErrorMessage(error);
+      toast.error(
+        message
+          ? `Profile could not be updated: ${message}`
+          : 'Profile could not be updated'
+      );
+    } finally {
+      setLoading(false);
+    }
   };
 
   const editImage =
