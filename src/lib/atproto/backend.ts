@@ -22,12 +22,14 @@ import {
   type ChatBskyActorDeclaration,
   type ChatBskyConvoDefs
 } from '@atproto/api';
-import { ensureValidDid, isValidHandle } from '@atproto/syntax';
 import { BrowserOAuthClient } from '@atproto/oauth-client-browser';
 import { buildAtprotoLoopbackClientMetadata } from '@atproto/oauth-types';
-import type { OAuthSession } from '@atproto/oauth-client';
+import { ensureValidDid, isValidHandle } from '@atproto/syntax';
 import { CID } from 'multiformats/cid';
+import { decode as decodeMultihash } from 'multiformats/hashes/digest';
 
+import { Timestamp } from './timestamp';
+import type { OAuthSession } from '@atproto/oauth-client';
 import type { Bookmark } from '@lib/types/bookmark';
 import type { ImagesPreview, FilesWithId } from '@lib/types/file';
 import type { Stats } from '@lib/types/stats';
@@ -39,7 +41,6 @@ import type {
   TweetWithUser
 } from '@lib/types/tweet';
 import type { User } from '@lib/types/user';
-import { Timestamp } from './timestamp';
 
 const OAUTH_SUB_KEY = 'twitter-clone:bsky-oauth-sub';
 const OAUTH_ACCOUNTS_KEY = 'twitter-clone:bsky-oauth-accounts';
@@ -936,15 +937,76 @@ function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function getIndexedByteArray(value: unknown): Uint8Array | null {
+  if (value instanceof Uint8Array) return value;
+  if (!isPlainObject(value)) return null;
+
+  const entries = Object.entries(value);
+  if (!entries.length) return null;
+
+  const bytes: number[] = [];
+  for (const [key, byte] of entries) {
+    const index = Number(key);
+    if (
+      !Number.isSafeInteger(index) ||
+      index < 0 ||
+      typeof byte !== 'number' ||
+      !Number.isInteger(byte) ||
+      byte < 0 ||
+      byte > 255
+    )
+      return null;
+
+    bytes[index] = byte;
+  }
+
+  if (
+    bytes.length !== entries.length ||
+    bytes.some((byte) => typeof byte !== 'number')
+  )
+    return null;
+
+  return Uint8Array.from(bytes);
+}
+
+function getSerializedCidString(value: unknown): string | null {
+  if (!isPlainObject(value)) return null;
+
+  const { code, version, hash } = value;
+  if (
+    typeof code !== 'number' ||
+    typeof version !== 'number' ||
+    !Number.isSafeInteger(code) ||
+    !Number.isSafeInteger(version) ||
+    (version !== 0 && version !== 1)
+  )
+    return null;
+
+  const hashBytes = getIndexedByteArray(hash);
+  if (!hashBytes) return null;
+
+  try {
+    return CID.create(version, code, decodeMultihash(hashBytes)).toString();
+  } catch {
+    return null;
+  }
+}
+
 function getCidString(value: unknown): string | null {
   if (typeof value === 'string') return value;
   if (!value || typeof value !== 'object') return null;
 
+  const cid = CID.asCID(value);
+  if (cid) return cid.toString();
+
   if (isPlainObject(value) && typeof value.$link === 'string')
     return value.$link;
 
-  const cid = String(value);
-  return cid && cid !== '[object Object]' ? cid : null;
+  const serializedCid = getSerializedCidString(value);
+  if (serializedCid) return serializedCid;
+
+  const cidString = String(value);
+  return cidString && cidString !== '[object Object]' ? cidString : null;
 }
 
 function getBlobCid(value: unknown): string | null {
@@ -976,9 +1038,7 @@ function getBlobSize(value: unknown): number {
   return size;
 }
 
-function toPdsCompatibleBlobRef(
-  blob: unknown
-): AppBskyEmbedImages.Image['image'] {
+function toPdsCompatibleBlobRef(blob: unknown): BlobRef {
   const blobRecord = isPlainObject(blob) ? blob : {};
   const mimeType =
     typeof blobRecord.mimeType === 'string'
@@ -990,12 +1050,7 @@ function toPdsCompatibleBlobRef(
 
   const size = getBlobSize(blobRecord);
 
-  return new BlobRef(CID.parse(cid), mimeType, size, {
-    $type: 'blob',
-    ref: { $link: cid },
-    mimeType,
-    size
-  } as unknown as ConstructorParameters<typeof BlobRef>[3]) as AppBskyEmbedImages.Image['image'];
+  return new BlobRef(CID.parse(cid), mimeType, size);
 }
 
 function isSerializedCidObject(value: unknown): boolean {
@@ -4309,6 +4364,36 @@ export function stageImages(userId: string, files: FilesWithId): ImagesPreview {
   return previews;
 }
 
+function normalizeProfileBlobForWrite(blob: unknown): BlobRef | null {
+  if (!blob) return null;
+
+  try {
+    return toPdsCompatibleBlobRef(blob);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeProfileRecordForWrite(
+  profile: Partial<AppBskyActorProfile.Record>
+): Partial<AppBskyActorProfile.Record> {
+  const nextProfile = { ...profile };
+
+  if ('avatar' in nextProfile) {
+    const avatar = normalizeProfileBlobForWrite(nextProfile.avatar);
+    if (avatar) nextProfile.avatar = avatar;
+    else delete nextProfile.avatar;
+  }
+
+  if ('banner' in nextProfile) {
+    const banner = normalizeProfileBlobForWrite(nextProfile.banner);
+    if (banner) nextProfile.banner = banner;
+    else delete nextProfile.banner;
+  }
+
+  return nextProfile;
+}
+
 async function upsertProfileRecord(
   api: Agent,
   updateRecord: (
@@ -4328,11 +4413,13 @@ async function upsertProfileRecord(
         if (isRecordNotFoundError(error)) return null;
         throw error;
       });
+    const existing = (existingRecord?.data.value ??
+      {}) as Partial<AppBskyActorProfile.Record>;
     const record: Record<string, unknown> = {
-      ...(updateRecord(
-        (existingRecord?.data.value ??
-          {}) as Partial<AppBskyActorProfile.Record>
-      ) as Record<string, unknown>),
+      ...(normalizeProfileRecordForWrite(updateRecord(existing)) as Record<
+        string,
+        unknown
+      >),
       $type: 'app.bsky.actor.profile'
     };
     try {
