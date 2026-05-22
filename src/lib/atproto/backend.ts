@@ -2510,6 +2510,66 @@ function mapThreadParents(
   return parents;
 }
 
+function getVisibleThreadReplies(
+  thread: AppBskyFeedDefs.ThreadViewPost
+): AppBskyFeedDefs.ThreadViewPost[] {
+  return (thread.replies ?? []).filter(AppBskyFeedDefs.isThreadViewPost);
+}
+
+function compareThreadPostsByCreatedAt(
+  a: AppBskyFeedDefs.ThreadViewPost,
+  b: AppBskyFeedDefs.ThreadViewPost
+): number {
+  const createdAtDifference =
+    getPostCreatedAt(a.post.record, a.post.indexedAt).toDate().getTime() -
+    getPostCreatedAt(b.post.record, b.post.indexedAt).toDate().getTime();
+
+  return createdAtDifference || a.post.uri.localeCompare(b.post.uri);
+}
+
+function collectAuthorThreadReplies(
+  thread: AppBskyFeedDefs.ThreadViewPost,
+  authorDid: string,
+  seenUris: Set<string>
+): AppBskyFeedDefs.ThreadViewPost[] {
+  const authorReplies = getVisibleThreadReplies(thread)
+    .filter((reply) => reply.post.author.did === authorDid)
+    .sort(compareThreadPostsByCreatedAt);
+  const threadReplies: AppBskyFeedDefs.ThreadViewPost[] = [];
+
+  authorReplies.forEach((reply) => {
+    if (seenUris.has(reply.post.uri)) return;
+
+    seenUris.add(reply.post.uri);
+    threadReplies.push(
+      reply,
+      ...collectAuthorThreadReplies(reply, authorDid, seenUris)
+    );
+  });
+
+  return threadReplies;
+}
+
+function mapThreadReplies(thread: AppBskyFeedDefs.ThreadViewPost): {
+  threadReplies: TweetWithUser[];
+  replies: TweetWithUser[];
+} {
+  const threadReplyUris = new Set<string>();
+  const authorThreadReplies = collectAuthorThreadReplies(
+    thread,
+    thread.post.author.did,
+    threadReplyUris
+  );
+  const replies = getVisibleThreadReplies(thread).filter(
+    (reply) => !threadReplyUris.has(reply.post.uri)
+  );
+
+  return {
+    threadReplies: authorThreadReplies.map(mapThreadPost),
+    replies: replies.map(mapThreadPost)
+  };
+}
+
 function postHasVisibleMedia(post: AppBskyFeedDefs.PostView): boolean {
   return !!mapMedia(post.embed)?.length;
 }
@@ -3861,19 +3921,20 @@ export async function getTweetThread(
   try {
     const response = await getAgent().getPostThread({
       uri,
-      depth: 2,
+      depth: BSKY_THREAD_REPLY_DEPTH,
       parentHeight: 100
     });
     const { thread } = response.data;
 
     if (!AppBskyFeedDefs.isThreadViewPost(thread)) return null;
 
+    const { threadReplies, replies } = mapThreadReplies(thread);
+
     return {
       tweet: mapThreadPost(thread),
       parents: mapThreadParents(thread),
-      replies: (thread.replies ?? [])
-        .filter(AppBskyFeedDefs.isThreadViewPost)
-        .map(mapThreadPost)
+      threadReplies,
+      replies
     };
   } catch (error) {
     if (isRecordNotFoundError(error)) return null;

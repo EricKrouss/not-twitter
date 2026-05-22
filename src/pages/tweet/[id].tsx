@@ -40,12 +40,15 @@ export default function TweetId(): JSX.Element {
   const tweetLoading = !!tweetId && !error && threadData === undefined;
   const tweetData = threadData?.tweet ?? null;
   const parentTweets = threadData?.parents ?? [];
+  const threadReplies = threadData?.threadReplies ?? [];
   const repliesData = threadData?.replies ?? [];
 
   const { text, images } = tweetData ?? {};
 
   const imagesLength = images?.length ?? 0;
   const hasParentTweets = parentTweets.length > 0;
+  const hasThreadReplies = threadReplies.length > 0;
+  const hasThread = hasParentTweets || hasThreadReplies;
 
   const pageTitle = tweetData
     ? `${tweetData.user.name} on Not Twitter: "${text ?? ''}${
@@ -62,7 +65,7 @@ export default function TweetId(): JSX.Element {
     <MainContainer className='!pb-[1280px]'>
       <MainHeader
         useActionButton
-        title={hasParentTweets ? 'Thread' : 'Tweet'}
+        title={hasThread ? 'Thread' : 'Tweet'}
         action={back}
       />
       <section>
@@ -81,6 +84,9 @@ export default function TweetId(): JSX.Element {
             ))}
             <ViewTweet viewTweetRef={viewTweetRef} {...tweetData} />
             <AnimatePresence>
+              {threadReplies.map((tweet) => (
+                <Tweet {...tweet} key={tweet.id} />
+              ))}
               {repliesData.map((tweet) => (
                 <Tweet {...tweet} key={tweet.id} />
               ))}
