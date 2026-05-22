@@ -22,6 +22,9 @@ const nextConfig = {
   env: {
     NEXT_PUBLIC_BASE_PATH: basePath
   },
+  sassOptions: {
+    additionalData: `$asset-prefix: '${basePath}';`
+  },
   images: {
     unoptimized: true
   }

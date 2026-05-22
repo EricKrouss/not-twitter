@@ -1,4 +1,5 @@
 import cn from 'clsx';
+import { publicAsset } from '@lib/assets';
 import type { ReactNode } from 'react';
 
 type IconProps = {
@@ -94,9 +95,12 @@ function TwitterVerifiedIcon({ className }: IconProps): JSX.Element {
   return (
     <span
       className={cn(
-        'inline-block shrink-0 bg-[url("/assets/twitter-verified.svg")] bg-contain bg-center bg-no-repeat',
+        'inline-block shrink-0 bg-contain bg-center bg-no-repeat',
         className
       )}
+      style={{
+        backgroundImage: `url(${publicAsset('/assets/twitter-verified.svg')})`
+      }}
       role='img'
       aria-label='Verified account'
     />

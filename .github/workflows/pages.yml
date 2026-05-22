@@ -26,14 +26,15 @@ jobs:
       - name: Configure GitHub Pages URL
         run: |
           repo_name="${GITHUB_REPOSITORY#*/}"
+          owner_name="${GITHUB_REPOSITORY_OWNER,,}"
           if [ "${repo_name,,}" = "${GITHUB_REPOSITORY_OWNER,,}.github.io" ]; then
             echo "NEXT_PUBLIC_BASE_PATH=" >> "$GITHUB_ENV"
-            echo "NEXT_PUBLIC_SITE_URL=https://${GITHUB_REPOSITORY_OWNER}.github.io" >> "$GITHUB_ENV"
-            echo "NEXT_PUBLIC_URL=https://${GITHUB_REPOSITORY_OWNER}.github.io" >> "$GITHUB_ENV"
+            echo "NEXT_PUBLIC_SITE_URL=https://${owner_name}.github.io" >> "$GITHUB_ENV"
+            echo "NEXT_PUBLIC_URL=https://${owner_name}.github.io" >> "$GITHUB_ENV"
           else
             echo "NEXT_PUBLIC_BASE_PATH=/${repo_name}" >> "$GITHUB_ENV"
-            echo "NEXT_PUBLIC_SITE_URL=https://${GITHUB_REPOSITORY_OWNER}.github.io/${repo_name}" >> "$GITHUB_ENV"
-            echo "NEXT_PUBLIC_URL=https://${GITHUB_REPOSITORY_OWNER}.github.io/${repo_name}" >> "$GITHUB_ENV"
+            echo "NEXT_PUBLIC_SITE_URL=https://${owner_name}.github.io/${repo_name}" >> "$GITHUB_ENV"
+            echo "NEXT_PUBLIC_URL=https://${owner_name}.github.io/${repo_name}" >> "$GITHUB_ENV"
           fi
       - run: npm ci
       - run: npm run export

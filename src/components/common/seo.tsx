@@ -1,5 +1,6 @@
 import { useRouter } from 'next/router';
 import Head from 'next/head';
+import { absolutePublicAsset } from '@lib/assets';
 import { siteURL } from '@lib/env';
 
 type MainLayoutProps = {
@@ -21,7 +22,9 @@ export function SEO({
       <meta name='og:title' content={title} />
       {description && <meta name='description' content={description} />}
       {description && <meta name='og:description' content={description} />}
-      {image && <meta property='og:image' content={image} />}
+      {image && (
+        <meta property='og:image' content={absolutePublicAsset(image)} />
+      )}
       <meta
         name='og:url'
         content={`${siteURL}${asPath === '/' ? '' : asPath}`}

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import Image from 'next/image';
 import cn from 'clsx';
+import { publicAsset } from '@lib/assets';
 import type { ReactNode } from 'react';
 import type { ImageProps } from 'next/image';
 
@@ -33,6 +34,7 @@ export function NextImage({
   ...rest
 }: NextImageProps): JSX.Element {
   const [loading, setLoading] = useState(!!useSkeleton);
+  const imageSrc = typeof src === 'string' ? publicAsset(src) : src;
 
   const handleLoad = (): void => setLoading(false);
 
@@ -48,7 +50,7 @@ export function NextImage({
             ? '!h-auto !min-h-0 !w-auto !min-w-0 rounded-lg object-contain'
             : 'object-cover'
         )}
-        src={src}
+        src={imageSrc}
         width={width}
         height={height}
         alt={alt}

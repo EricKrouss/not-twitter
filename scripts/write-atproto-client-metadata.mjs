@@ -6,12 +6,17 @@ const OAUTH_SCOPE = 'atproto transition:generic transition:chat.bsky blob:*/*';
 function normalizeSiteUrl(value) {
   if (!value) return '';
 
-  return value.trim().replace(/\/+$/g, '');
+  const url = new URL(value.trim());
+
+  url.protocol = url.protocol.toLowerCase();
+  url.hostname = url.hostname.toLowerCase();
+
+  return url.toString().replace(/\/+$/g, '');
 }
 
 function getGithubPagesSiteUrl() {
   const repository = process.env.GITHUB_REPOSITORY;
-  const owner = process.env.GITHUB_REPOSITORY_OWNER;
+  const owner = process.env.GITHUB_REPOSITORY_OWNER?.toLowerCase();
 
   if (!repository || !owner) return '';
 
