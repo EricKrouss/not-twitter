@@ -414,6 +414,7 @@ let oauthInitPromise: Promise<AuthUser | null> | null = null;
 let sessionDid: string | null = null;
 let currentUser: User | null = null;
 let currentFollowing = new Set<string>();
+let malformedMediaRepairPromise: Promise<void> | null = null;
 
 function hasStorage(): boolean {
   return typeof window !== 'undefined' && !!window.localStorage;
@@ -553,6 +554,7 @@ function clearActiveAuthState(): void {
   sessionDid = null;
   currentUser = null;
   currentFollowing = new Set();
+  malformedMediaRepairPromise = null;
 
   if (hasStorage()) window.localStorage.removeItem(OAUTH_SUB_KEY);
   writeCredentialSession();
@@ -980,11 +982,97 @@ function toPdsCompatibleBlobRef(
 
   if (!cid) throw new Error('Bluesky did not return a valid media blob.');
 
-  return new BlobRef(
-    CID.parse(cid),
+  const size = getBlobSize(blobRecord);
+
+  return new BlobRef(CID.parse(cid), mimeType, size, {
+    $type: 'blob',
+    ref: { $link: cid },
     mimeType,
-    getBlobSize(blobRecord)
-  ) as AppBskyEmbedImages.Image['image'];
+    size
+  } as unknown as ConstructorParameters<typeof BlobRef>[3]) as AppBskyEmbedImages.Image['image'];
+}
+
+function isSerializedCidObject(value: unknown): boolean {
+  if (!isPlainObject(value)) return false;
+
+  return (
+    typeof value.$link !== 'string' &&
+    typeof value.code === 'number' &&
+    typeof value.version === 'number' &&
+    (isPlainObject(value.hash) || value.hash instanceof Uint8Array)
+  );
+}
+
+function isMalformedImageBlob(value: unknown): boolean {
+  if (!isPlainObject(value)) return false;
+
+  return value.$type === 'blob' && isSerializedCidObject(value.ref);
+}
+
+function embedHasMalformedImageBlob(embed: unknown): boolean {
+  if (!isPlainObject(embed)) return false;
+
+  if (
+    embed.$type === 'app.bsky.embed.recordWithMedia' &&
+    embedHasMalformedImageBlob(embed.media)
+  )
+    return true;
+
+  if (embed.$type !== 'app.bsky.embed.images' || !Array.isArray(embed.images))
+    return false;
+
+  return embed.images.some(
+    (image) => isPlainObject(image) && isMalformedImageBlob(image.image)
+  );
+}
+
+function recordHasMalformedImageBlob(record: unknown): boolean {
+  return isPlainObject(record) && embedHasMalformedImageBlob(record.embed);
+}
+
+async function repairMalformedOwnImagePosts(api: Agent): Promise<void> {
+  if (!sessionDid || malformedMediaRepairPromise) {
+    await malformedMediaRepairPromise;
+    return;
+  }
+
+  malformedMediaRepairPromise = (async (): Promise<void> => {
+    let cursor: string | undefined;
+    let checkedRecords = 0;
+    let deletedRecords = 0;
+
+    do {
+      const response = await api.com.atproto.repo.listRecords({
+        repo: sessionDid as string,
+        collection: 'app.bsky.feed.post',
+        limit: 100,
+        cursor
+      });
+
+      for (const record of response.data.records) {
+        checkedRecords += 1;
+        if (!recordHasMalformedImageBlob(record.value)) continue;
+
+        const rkey = getRkeyFromAtUri(record.uri);
+        if (!rkey) continue;
+
+        await api.com.atproto.repo.deleteRecord({
+          repo: sessionDid as string,
+          collection: 'app.bsky.feed.post',
+          rkey
+        });
+        deletedRecords += 1;
+      }
+
+      cursor = response.data.cursor;
+    } while (cursor && checkedRecords < 500);
+
+    if (deletedRecords > 0) notify();
+  })().finally(() => {
+    malformedMediaRepairPromise = null;
+  });
+
+  await malformedMediaRepairPromise;
 }
 
 function getPostRefFromValue(value: unknown): PostRef | null {
@@ -3308,6 +3396,8 @@ async function refreshCurrentUser(): Promise<User | null> {
   currentUser.following = Array.from(currentFollowing);
   userCache.set(currentUser.id, currentUser);
   userHandleCache.set(currentUser.username, currentUser);
+
+  void repairMalformedOwnImagePosts(api).catch(() => undefined);
 
   return currentUser;
 }
