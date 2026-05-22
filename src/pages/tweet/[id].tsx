@@ -1,9 +1,8 @@
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { useRouter } from 'next/router';
 import { AnimatePresence } from 'framer-motion';
-import { tweetsCollection } from '@lib/atproto/collections';
-import { useCollection } from '@lib/hooks/useCollection';
-import { useDocument } from '@lib/hooks/useDocument';
+import useSWR from 'swr';
+import { getTweetThread } from '@lib/atproto/backend';
 import { isPlural } from '@lib/utils';
 import { getTweetRouteId } from '@lib/static-routes';
 import { PublicTweetLayout } from '@components/layout/common-layout';
@@ -14,9 +13,8 @@ import { ViewTweet } from '@components/view/view-tweet';
 import { SEO } from '@components/common/seo';
 import { Loading } from '@components/ui/loading';
 import { Error } from '@components/ui/error';
-import { ViewParentTweet } from '@components/view/view-parent-tweet';
-import { doc, query, where, orderBy } from '@lib/atproto/store';
 import type { ReactElement, ReactNode } from 'react';
+import type { TweetThreadPage } from '@lib/atproto/backend';
 
 function getRouteParam(value: string | string[] | undefined): string | null {
   if (Array.isArray(value)) return value[0] ?? null;
@@ -31,26 +29,23 @@ export default function TweetId(): JSX.Element {
     getTweetRouteId(asPath);
   const tweetPathId = tweetId ?? 'null';
 
-  const { data: tweetData, loading: tweetLoading } = useDocument(
-    doc(tweetsCollection, tweetPathId),
-    { includeUser: true, allowNull: true }
+  const { data: threadData, error } = useSWR<TweetThreadPage | null, Error>(
+    tweetId ? ['tweet-thread', tweetPathId] : null,
+    () => getTweetThread(tweetPathId),
+    { revalidateOnFocus: false }
   );
 
   const viewTweetRef = useRef<HTMLElement>(null);
 
-  const { data: repliesData, loading: repliesLoading } = useCollection(
-    query(
-      tweetsCollection,
-      where('parent.id', '==', tweetPathId),
-      orderBy('createdAt', 'desc')
-    ),
-    { includeUser: true, allowNull: true }
-  );
+  const tweetLoading = !!tweetId && !error && threadData === undefined;
+  const tweetData = threadData?.tweet ?? null;
+  const parentTweets = threadData?.parents ?? [];
+  const repliesData = threadData?.replies ?? [];
 
   const { text, images } = tweetData ?? {};
 
   const imagesLength = images?.length ?? 0;
-  const parentId = tweetData?.parent?.id;
+  const hasParentTweets = parentTweets.length > 0;
 
   const pageTitle = tweetData
     ? `${tweetData.user.name} on Not Twitter: "${text ?? ''}${
@@ -58,11 +53,16 @@ export default function TweetId(): JSX.Element {
       }" / Not Twitter`
     : null;
 
+  useEffect(() => {
+    if (!tweetLoading && hasParentTweets)
+      viewTweetRef.current?.scrollIntoView();
+  }, [hasParentTweets, tweetData?.id, tweetLoading]);
+
   return (
     <MainContainer className='!pb-[1280px]'>
       <MainHeader
         useActionButton
-        title={parentId ? 'Thread' : 'Tweet'}
+        title={hasParentTweets ? 'Thread' : 'Tweet'}
         action={back}
       />
       <section>
@@ -76,23 +76,15 @@ export default function TweetId(): JSX.Element {
         ) : (
           <>
             {pageTitle && <SEO title={pageTitle} />}
-            {parentId && (
-              <ViewParentTweet
-                parentId={parentId}
-                viewTweetRef={viewTweetRef}
-              />
-            )}
+            {parentTweets.map((parentTweet) => (
+              <Tweet parentTweet {...parentTweet} key={parentTweet.id} />
+            ))}
             <ViewTweet viewTweetRef={viewTweetRef} {...tweetData} />
-            {tweetData &&
-              (repliesLoading ? (
-                <Loading className='mt-5' />
-              ) : (
-                <AnimatePresence>
-                  {repliesData?.map((tweet) => (
-                    <Tweet {...tweet} key={tweet.id} />
-                  ))}
-                </AnimatePresence>
+            <AnimatePresence>
+              {repliesData.map((tweet) => (
+                <Tweet {...tweet} key={tweet.id} />
               ))}
+            </AnimatePresence>
           </>
         )}
       </section>

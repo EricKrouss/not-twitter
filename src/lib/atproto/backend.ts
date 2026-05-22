@@ -110,6 +110,12 @@ type PostReplyRef = {
   parent: PostRef;
 };
 
+export type TweetThreadPage = {
+  tweet: TweetWithUser;
+  parents: TweetWithUser[];
+  replies: TweetWithUser[];
+};
+
 type BookmarkView = {
   subject?: PostRef;
   createdAt?: string;
@@ -2411,6 +2417,40 @@ function mapPost(
   return tweet;
 }
 
+function getThreadParent(
+  thread: AppBskyFeedDefs.ThreadViewPost
+): { id: string; username: string } | null {
+  const { parent } = thread;
+
+  return AppBskyFeedDefs.isThreadViewPost(parent)
+    ? {
+        id: postIdFromUri(parent.post.uri),
+        username: parent.post.author.handle
+      }
+    : null;
+}
+
+function mapThreadPost(thread: AppBskyFeedDefs.ThreadViewPost): TweetWithUser {
+  return {
+    ...mapPost(thread.post, getThreadParent(thread)),
+    user: mapProfile(thread.post.author)
+  };
+}
+
+function mapThreadParents(
+  thread: AppBskyFeedDefs.ThreadViewPost
+): TweetWithUser[] {
+  const parents: TweetWithUser[] = [];
+  let currentParent = thread.parent;
+
+  while (AppBskyFeedDefs.isThreadViewPost(currentParent)) {
+    parents.unshift(mapThreadPost(currentParent));
+    currentParent = currentParent.parent;
+  }
+
+  return parents;
+}
+
 function postHasVisibleMedia(post: AppBskyFeedDefs.PostView): boolean {
   return !!mapMedia(post.embed)?.length;
 }
@@ -3749,6 +3789,37 @@ export async function getTweet(id: string): Promise<Tweet | null> {
   const post = response.data.posts[0];
 
   return post ? mapPost(post) : null;
+}
+
+export async function getTweetThread(
+  id: string
+): Promise<TweetThreadPage | null> {
+  if (!agent) return null;
+  if (!id || id === 'null') return null;
+
+  const uri = uriFromPostId(id);
+
+  try {
+    const response = await getAgent().getPostThread({
+      uri,
+      depth: 2,
+      parentHeight: 100
+    });
+    const { thread } = response.data;
+
+    if (!AppBskyFeedDefs.isThreadViewPost(thread)) return null;
+
+    return {
+      tweet: mapThreadPost(thread),
+      parents: mapThreadParents(thread),
+      replies: (thread.replies ?? [])
+        .filter(AppBskyFeedDefs.isThreadViewPost)
+        .map(mapThreadPost)
+    };
+  } catch (error) {
+    if (isRecordNotFoundError(error)) return null;
+    throw error;
+  }
 }
 
 async function getPostRef(id: string): Promise<PostRef | null> {
