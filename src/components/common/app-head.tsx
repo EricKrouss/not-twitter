@@ -11,6 +11,11 @@ export function AppHead(): JSX.Element {
       <meta property='og:title' content='Not Twitter' key='og:title' />
       <meta property='og:image' content={absoluteImage} key='og:image' />
       <meta name='twitter:image' content={absoluteImage} key='twitter:image' />
+      <meta
+        name='viewport'
+        content='width=device-width, initial-scale=1, viewport-fit=cover'
+        key='viewport'
+      />
       <link rel='icon' href={publicAsset('/favicon.ico')} />
       <link
         rel='manifest'

@@ -38,7 +38,7 @@ export function Sidebar(): JSX.Element {
       </Modal>
       <div
         className='fixed bottom-0 z-10 flex w-full flex-col justify-between border-t border-light-border 
-                   bg-main-background py-0 dark:border-dark-border xs:top-0 xs:h-full xs:w-auto xs:border-0 
+                   bg-main-background py-0 pb-[env(safe-area-inset-bottom)] dark:border-dark-border xs:top-0 xs:h-full xs:w-auto xs:border-0
                    xs:bg-transparent xs:px-2 xs:py-3 xs:pt-2 md:px-4 xl:w-72'
       >
         <section className='flex flex-col justify-center gap-2 xs:items-center xl:items-stretch'>
