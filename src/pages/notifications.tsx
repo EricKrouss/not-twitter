@@ -9,9 +9,10 @@ import {
   listNotificationsPage,
   markNotificationsSeen
 } from '@lib/atproto/backend';
-import { manageBookmark, manageRetweet } from '@lib/atproto/utils';
+import { manageBookmark, manageLike, manageRetweet } from '@lib/atproto/utils';
 import { useAuth } from '@lib/context/auth-context';
 import { useLiveUpdates } from '@lib/context/live-updates-context';
+import { useModal } from '@lib/hooks/useModal';
 import { formatDate, formatNumber } from '@lib/date';
 import {
   getNotificationsPath,
@@ -22,6 +23,8 @@ import {
 import { preventBubbling } from '@lib/utils';
 import { HomeLayout, ProtectedLayout } from '@components/layout/common-layout';
 import { MainLayout } from '@components/layout/main-layout';
+import { Modal } from '@components/modal/modal';
+import { TweetReplyModal } from '@components/modal/tweet-reply-modal';
 import { SEO } from '@components/common/seo';
 import { MainContainer } from '@components/home/main-container';
 import { MobileSidebar } from '@components/sidebar/mobile-sidebar';
@@ -510,22 +513,32 @@ function MentionActionButton({
   action,
   tweet,
   tweetUser,
-  viewerId
+  viewerId,
+  openReplyModal
 }: {
   action: MentionAction;
   tweet: NotificationItem['tweet'];
   tweetUser: NotificationItem['user'];
   viewerId: string | undefined;
+  openReplyModal: () => void;
 }): JSX.Element {
   const { userBookmarks } = useAuth();
+  const [optimisticLikes, setOptimisticLikes] = useState(
+    tweet?.userLikes ?? []
+  );
   const [optimisticRetweets, setOptimisticRetweets] = useState(
     tweet?.userRetweets ?? []
   );
   const [optimisticBookmarked, setOptimisticBookmarked] = useState(
     !!(tweet && userBookmarks?.some(({ id }) => id === tweet.id))
   );
+  const [updatingLike, setUpdatingLike] = useState(false);
   const [updatingRetweet, setUpdatingRetweet] = useState(false);
   const [updatingBookmark, setUpdatingBookmark] = useState(false);
+
+  useEffect(() => {
+    setOptimisticLikes(tweet?.userLikes ?? []);
+  }, [tweet?.userLikes]);
 
   useEffect(() => {
     setOptimisticRetweets(tweet?.userRetweets ?? []);
@@ -539,12 +552,34 @@ function MentionActionButton({
     setOptimisticBookmarked(bookmarked);
   }, [bookmarked]);
 
-  const liked = !!(tweet && viewerId && tweet.userLikes.includes(viewerId));
+  const liked = !!(tweet && viewerId && optimisticLikes.includes(viewerId));
   const retweeted = !!(
     tweet &&
     viewerId &&
     optimisticRetweets.includes(viewerId)
   );
+  const handleLike = useCallback(async (): Promise<void> => {
+    if (!tweet || !viewerId || updatingLike) return;
+
+    const shouldLike = !liked;
+    const previousLikes = optimisticLikes;
+
+    setUpdatingLike(true);
+    setOptimisticLikes((currentLikes) =>
+      shouldLike
+        ? [viewerId, ...currentLikes.filter((id) => id !== viewerId)]
+        : currentLikes.filter((id) => id !== viewerId)
+    );
+
+    try {
+      await manageLike(shouldLike ? 'like' : 'unlike', viewerId, tweet.id)();
+    } catch {
+      setOptimisticLikes(previousLikes);
+      toast.error('Tweet could not be liked');
+    } finally {
+      setUpdatingLike(false);
+    }
+  }, [liked, optimisticLikes, tweet, updatingLike, viewerId]);
   const handleRetweet = useCallback(async (): Promise<void> => {
     if (!tweet || !viewerId || updatingRetweet) return;
 
@@ -608,7 +643,7 @@ function MentionActionButton({
       : action.kind === 'retweet'
       ? optimisticRetweets.length
       : action.kind === 'like'
-      ? tweet?.userLikes.length ?? 0
+      ? optimisticLikes.length
       : 0;
   const iconName =
     action.kind === 'like' && liked
@@ -617,17 +652,29 @@ function MentionActionButton({
       ? 'TwitterBookmarksFilledIcon'
       : action.iconName;
   const onClick =
-    action.kind === 'bookmark'
+    action.kind === 'reply'
+      ? preventBubbling(() => {
+          if (tweet && viewerId) openReplyModal();
+        })
+      : action.kind === 'like'
+      ? preventBubbling(() => {
+          void handleLike();
+        })
+      : action.kind === 'bookmark'
       ? preventBubbling(() => {
           void handleBookmark();
         })
       : undefined;
+  const disabled =
+    !tweet ||
+    (action.kind === 'like' && updatingLike) ||
+    (action.kind === 'bookmark' && updatingBookmark);
 
   if (action.kind === 'retweet')
     return (
       <TweetRetweetMenu
         className={cn(
-          `dark-bg-tab -ml-2 flex h-9 min-w-[36px] items-center gap-1 rounded-full p-0
+          `dark-bg-tab -ml-2 flex h-9 min-w-[36px] items-center gap-2 rounded-full p-0
            text-light-secondary transition dark:text-dark-secondary`,
           action.hoverClassName,
           active && action.activeClassName
@@ -637,6 +684,7 @@ function MentionActionButton({
         tip={retweeted ? 'Undo Retweet' : action.label}
         move={0}
         stats={stats}
+        statsContainerClassName='ml-0'
         iconSizeClassName='h-[18.75px] w-[18.75px]'
         onRetweet={handleRetweet}
         retweeted={retweeted}
@@ -648,22 +696,34 @@ function MentionActionButton({
   return (
     <Button
       className={cn(
-        `dark-bg-tab -ml-2 flex h-9 min-w-[36px] items-center gap-1 rounded-full p-0
+        `dark-bg-tab -ml-2 flex h-9 min-w-[36px] items-center gap-2 rounded-full p-0
          text-light-secondary transition dark:text-dark-secondary`,
         action.hoverClassName,
         active && action.activeClassName
       )}
-      aria-label={action.label}
-      title={action.label}
+      aria-label={
+        action.kind === 'like' && liked
+          ? 'Unlike'
+          : action.kind === 'bookmark' && optimisticBookmarked
+          ? 'Remove from Bookmarks'
+          : action.label
+      }
+      title={
+        action.kind === 'like' && liked
+          ? 'Unlike'
+          : action.kind === 'bookmark' && optimisticBookmarked
+          ? 'Remove from Bookmarks'
+          : action.label
+      }
       onClick={onClick}
-      disabled={action.kind === 'bookmark' && updatingBookmark}
+      disabled={disabled}
     >
       <CustomIcon
         className='h-[18.75px] w-[18.75px] shrink-0'
         iconName={iconName}
       />
       {!!stats && (
-        <span className='-ml-1.5 min-w-[10px] text-left text-[13px] leading-4'>
+        <span className='min-w-[10px] text-left text-[13px] leading-4'>
           {formatNumber(stats)}
         </span>
       )}
@@ -685,84 +745,106 @@ function TweetNotificationRow({
   const targetHref = getTargetHref(latestNotification, viewerUsername);
   const quotedTweet =
     reason === 'quote' ? group.tweet?.quotedTweet ?? null : null;
+  const {
+    open: replyOpen,
+    openModal: openReplyModal,
+    closeModal: closeReplyModal
+  } = useModal();
+  const tweetWithUser = group.tweet ? { ...group.tweet, user } : null;
 
   return (
-    <article
-      className={cn(
-        `hover-card border-b border-light-border px-4 py-3 outline-none duration-200
-         dark:border-dark-border`,
-        !isRead && 'bg-main-accent/[0.07]'
-      )}
-    >
-      <div className='grid grid-cols-[48px,1fr] gap-3'>
-        <UserAvatar
-          className='mt-0.5 [&>figure>span]:[transition:200ms]'
-          username={user.username}
-          src={user.photoURL}
-          alt={user.name}
-        />
-        <div className='min-w-0'>
-          <div className='flex items-start justify-between gap-3'>
-            <div className='min-w-0'>
-              <div className='flex min-w-0 items-center gap-1 text-[15px] leading-5 text-light-secondary dark:text-dark-secondary'>
-                <UserName
-                  name={user.name}
-                  username={user.username}
-                  verified={user.verified}
-                  iconClassName='h-4 w-4'
-                  className='min-w-0 text-light-primary dark:text-dark-primary'
+    <>
+      <Modal
+        className='flex items-start justify-center'
+        modalClassName='bg-main-background rounded-2xl max-w-xl w-full my-8 overflow-hidden'
+        open={replyOpen}
+        closeModal={closeReplyModal}
+      >
+        {tweetWithUser && (
+          <TweetReplyModal tweet={tweetWithUser} closeModal={closeReplyModal} />
+        )}
+      </Modal>
+      <article
+        className={cn(
+          `hover-card border-b border-light-border px-4 py-3 outline-none duration-200
+           dark:border-dark-border`,
+          !isRead && 'bg-main-accent/[0.07]'
+        )}
+      >
+        <div className='grid grid-cols-[48px,1fr] gap-3'>
+          <UserAvatar
+            className='mt-0.5 [&>figure>span]:[transition:200ms]'
+            username={user.username}
+            src={user.photoURL}
+            alt={user.name}
+          />
+          <div className='min-w-0'>
+            <div className='flex items-start justify-between gap-3'>
+              <div className='min-w-0'>
+                <div className='flex min-w-0 items-center gap-1 text-[15px] leading-5 text-light-secondary dark:text-dark-secondary'>
+                  <UserName
+                    name={user.name}
+                    username={user.username}
+                    verified={user.verified}
+                    iconClassName='h-4 w-4'
+                    className='min-w-0 text-light-primary dark:text-dark-primary'
+                  />
+                  <UserUsername
+                    username={user.username}
+                    className='hidden min-w-0 xs:block'
+                  />
+                  <span>·</span>
+                  <Link href={targetHref}>
+                    <a className='custom-underline shrink-0'>
+                      <time>{formatDate(createdAt, 'tweet')}</time>
+                    </a>
+                  </Link>
+                  {!isRead && (
+                    <i className='ml-1 h-2 w-2 shrink-0 rounded-full bg-main-accent' />
+                  )}
+                </div>
+                <MentionContext
+                  reason={reason}
+                  viewerUsername={viewerUsername}
                 />
-                <UserUsername
-                  username={user.username}
-                  className='hidden min-w-0 xs:block'
-                />
-                <span>·</span>
-                <Link href={targetHref}>
-                  <a className='custom-underline shrink-0'>
-                    <time>{formatDate(createdAt, 'tweet')}</time>
-                  </a>
-                </Link>
-                {!isRead && (
-                  <i className='ml-1 h-2 w-2 shrink-0 rounded-full bg-main-accent' />
-                )}
               </div>
-              <MentionContext reason={reason} viewerUsername={viewerUsername} />
+              <Button
+                className='dark-bg-tab -mt-2 shrink-0 p-2 text-light-secondary hover:bg-main-accent/10
+                           hover:text-main-accent dark:text-dark-secondary'
+                aria-label='More'
+                title='More'
+              >
+                <CustomIcon className='h-5 w-5' iconName='TwitterMoreIcon' />
+              </Button>
             </div>
-            <Button
-              className='dark-bg-tab -mt-2 shrink-0 p-2 text-light-secondary hover:bg-main-accent/10
-                         hover:text-main-accent dark:text-dark-secondary'
-              aria-label='More'
-              title='More'
-            >
-              <CustomIcon className='h-5 w-5' iconName='TwitterMoreIcon' />
-            </Button>
-          </div>
-          {text && (
-            <Link href={targetHref}>
-              <a className='mt-1 block'>
-                <TweetText className='text-[15px] leading-5' text={text} />
-              </a>
-            </Link>
-          )}
-          {quotedTweet && (
-            <div className='mt-3 max-w-xl'>
-              <TweetEmbed card={null} quotedTweet={quotedTweet} />
+            {text && (
+              <Link href={targetHref}>
+                <a className='mt-1 block'>
+                  <TweetText className='text-[15px] leading-5' text={text} />
+                </a>
+              </Link>
+            )}
+            {quotedTweet && (
+              <div className='mt-3 max-w-xl'>
+                <TweetEmbed card={null} quotedTweet={quotedTweet} />
+              </div>
+            )}
+            <div className='mt-3 flex max-w-md justify-between pr-8'>
+              {mentionActions.map((action) => (
+                <MentionActionButton
+                  action={action}
+                  tweet={group.tweet}
+                  tweetUser={user}
+                  viewerId={viewerId}
+                  openReplyModal={openReplyModal}
+                  key={action.label}
+                />
+              ))}
             </div>
-          )}
-          <div className='mt-3 flex max-w-md justify-between pr-8'>
-            {mentionActions.map((action) => (
-              <MentionActionButton
-                action={action}
-                tweet={group.tweet}
-                tweetUser={user}
-                viewerId={viewerId}
-                key={action.label}
-              />
-            ))}
           </div>
         </div>
-      </div>
-    </article>
+      </article>
+    </>
   );
 }
 

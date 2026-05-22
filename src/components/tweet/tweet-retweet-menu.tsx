@@ -23,6 +23,7 @@ type TweetRetweetMenuProps = {
   className?: string;
   iconClassName: string;
   iconSizeClassName?: string;
+  statsContainerClassName?: string;
   onRetweet: () => Promise<void> | void;
 };
 
@@ -37,6 +38,7 @@ export function TweetRetweetMenu({
   className,
   iconClassName,
   iconSizeClassName,
+  statsContainerClassName,
   onRetweet
 }: TweetRetweetMenuProps): JSX.Element {
   const { open: modalOpen, openModal, closeModal } = useModal();
@@ -100,7 +102,7 @@ export function TweetRetweetMenu({
               {!viewTweet && (
                 <NumberStats
                   className='min-w-[10px] text-left text-[13px] leading-4'
-                  containerClassName='-ml-1.5'
+                  containerClassName={statsContainerClassName ?? '-ml-1.5'}
                   move={move as number}
                   stats={stats as number}
                 />

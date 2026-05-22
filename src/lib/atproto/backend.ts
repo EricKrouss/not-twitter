@@ -10,6 +10,7 @@ import {
   Agent,
   AtpAgent,
   BlobRef,
+  jsonToLex,
   RichText,
   type AppBskyActorProfile,
   type AppBskyActorDefs,
@@ -25,8 +26,6 @@ import {
 import { BrowserOAuthClient } from '@atproto/oauth-client-browser';
 import { buildAtprotoLoopbackClientMetadata } from '@atproto/oauth-types';
 import { ensureValidDid, isValidHandle } from '@atproto/syntax';
-import { CID } from 'multiformats/cid';
-import { decode as decodeMultihash } from 'multiformats/hashes/digest';
 
 import { Timestamp } from './timestamp';
 import type { OAuthSession } from '@atproto/oauth-client';
@@ -144,8 +143,6 @@ type PreparedImageUpload = {
   encoding: string;
   aspectRatio: AppBskyEmbedImages.Image['aspectRatio'];
 };
-
-type ProfileBlobField = 'avatar' | 'banner';
 
 type ActorFeedPost = AppBskyFeedDefs.FeedViewPost;
 type ActorProfileView =
@@ -941,120 +938,13 @@ function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function getIndexedByteArray(value: unknown): Uint8Array | null {
-  if (value instanceof Uint8Array) return value;
-  if (!isPlainObject(value)) return null;
-
-  const entries = Object.entries(value);
-  if (!entries.length) return null;
-
-  const bytes: number[] = [];
-  for (const [key, byte] of entries) {
-    const index = Number(key);
-    if (
-      !Number.isSafeInteger(index) ||
-      index < 0 ||
-      typeof byte !== 'number' ||
-      !Number.isInteger(byte) ||
-      byte < 0 ||
-      byte > 255
-    )
-      return null;
-
-    bytes[index] = byte;
-  }
-
-  if (
-    bytes.length !== entries.length ||
-    bytes.some((byte) => typeof byte !== 'number')
-  )
-    return null;
-
-  return Uint8Array.from(bytes);
-}
-
-function getSerializedCidString(value: unknown): string | null {
-  if (!isPlainObject(value)) return null;
-
-  const { code, version, hash } = value;
-  if (
-    typeof code !== 'number' ||
-    typeof version !== 'number' ||
-    !Number.isSafeInteger(code) ||
-    !Number.isSafeInteger(version) ||
-    (version !== 0 && version !== 1)
-  )
-    return null;
-
-  const hashBytes = getIndexedByteArray(hash);
-  if (!hashBytes) return null;
-
-  try {
-    return CID.create(version, code, decodeMultihash(hashBytes)).toString();
-  } catch {
-    return null;
-  }
-}
-
-function getCidString(value: unknown): string | null {
-  if (typeof value === 'string') return value;
-  if (!value || typeof value !== 'object') return null;
-
-  const cid = CID.asCID(value);
-  if (cid) return cid.toString();
-
-  if (isPlainObject(value) && typeof value.$link === 'string')
-    return value.$link;
-
-  const serializedCid = getSerializedCidString(value);
-  if (serializedCid) return serializedCid;
-
-  const cidString = String(value);
-  return cidString && cidString !== '[object Object]' ? cidString : null;
-}
-
-function getBlobCid(value: unknown): string | null {
-  if (!isPlainObject(value)) return null;
-
-  const original = value.original;
-  const originalCid = isPlainObject(original)
-    ? getCidString(original.cid) ?? getCidString(original.ref)
-    : null;
-
-  return (
-    getCidString(value.cid) ?? getCidString(value.ref) ?? originalCid ?? null
-  );
-}
-
-function getBlobSize(value: unknown): number {
-  const blobRecord = isPlainObject(value) ? value : {};
-  const original = blobRecord.original;
-  const size =
-    typeof blobRecord.size === 'number'
-      ? blobRecord.size
-      : isPlainObject(original) && typeof original.size === 'number'
-      ? original.size
-      : null;
-
-  if (typeof size !== 'number' || !Number.isSafeInteger(size) || size < 0)
-    throw new Error('Bluesky did not return a valid media blob size.');
-
-  return size;
-}
-
 function toPdsCompatibleBlobRef(blob: unknown): BlobRef {
-  const blobRecord = isPlainObject(blob) ? blob : {};
-  const mimeType =
-    typeof blobRecord.mimeType === 'string'
-      ? blobRecord.mimeType
-      : 'application/octet-stream';
-  const cid = getBlobCid(blobRecord);
+  if (blob instanceof BlobRef) return blob;
 
-  if (!cid) throw new Error('Bluesky did not return a valid media blob.');
+  const parsedBlob = jsonToLex(blob as Parameters<typeof jsonToLex>[0]);
+  if (parsedBlob instanceof BlobRef) return parsedBlob;
 
-  const size = getBlobSize(blobRecord);
-
-  return new BlobRef(CID.parse(cid), mimeType, size);
+  throw new Error('Bluesky did not return a valid media blob.');
 }
 
 function isSerializedCidObject(value: unknown): boolean {
@@ -2059,6 +1949,7 @@ function getProfileCoverURL(
 function mapProfile(profile: AppBskyActorDefs.ProfileViewDetailed): User;
 function mapProfile(profile: AppBskyActorDefs.ProfileView): User;
 function mapProfile(profile: AppBskyActorDefs.ProfileViewBasic): User;
+function mapProfile(profile: ActorProfileView): User;
 function mapProfile(profile: ActorProfileView): User {
   const existing = userCache.get(profile.did);
   const detailedProfile = profile as AppBskyActorDefs.ProfileViewDetailed;
@@ -2293,7 +2184,7 @@ function mapMedia(embed: unknown): ImagesPreview | null {
   if (!embed) return null;
 
   if (AppBskyEmbedImages.isView(embed))
-    return embed.images.map((image, index) => ({
+    return (embed as AppBskyEmbedImages.View).images.map((image, index) => ({
       id: `${image.fullsize}-${index}`,
       src: image.fullsize,
       alt: image.alt ? image.alt : 'Image',
@@ -2305,21 +2196,23 @@ function mapMedia(embed: unknown): ImagesPreview | null {
     const { viewCount } = embed as AppBskyEmbedVideo.View & {
       viewCount?: number;
     };
+    const videoEmbed = embed as AppBskyEmbedVideo.View;
 
     return [
       {
-        id: `${embed.cid}-video`,
-        src: embed.playlist,
-        alt: embed.alt ? embed.alt : 'Video',
+        id: `${videoEmbed.cid}-video`,
+        src: videoEmbed.playlist,
+        alt: videoEmbed.alt ? videoEmbed.alt : 'Video',
         type: 'video',
-        poster: embed.thumbnail ?? null,
+        poster: videoEmbed.thumbnail ?? null,
         viewCount: viewCount ?? null,
-        aspectRatio: embed.aspectRatio ?? null
+        aspectRatio: videoEmbed.aspectRatio ?? null
       }
     ];
   }
 
-  if (AppBskyEmbedRecordWithMedia.isView(embed)) return mapMedia(embed.media);
+  if (AppBskyEmbedRecordWithMedia.isView(embed))
+    return mapMedia((embed as AppBskyEmbedRecordWithMedia.View).media);
 
   return null;
 }
@@ -2327,16 +2220,18 @@ function mapMedia(embed: unknown): ImagesPreview | null {
 function mapCard(embed: unknown): TweetCard | null {
   if (!embed) return null;
 
-  if (AppBskyEmbedExternal.isView(embed)) return mapExternalCard(embed);
+  if (AppBskyEmbedExternal.isView(embed))
+    return mapExternalCard(embed as AppBskyEmbedExternal.View);
 
   if (AppBskyEmbedRecordWithMedia.isView(embed)) {
-    const mediaCard = mapCard(embed.media);
+    const recordWithMedia = embed as AppBskyEmbedRecordWithMedia.View;
+    const mediaCard = mapCard(recordWithMedia.media);
     if (mediaCard) return mediaCard;
-    return mapRecordSummaryCard(embed.record.record);
+    return mapRecordSummaryCard(recordWithMedia.record.record);
   }
 
   if (AppBskyEmbedRecord.isView(embed))
-    return mapRecordSummaryCard(embed.record);
+    return mapRecordSummaryCard((embed as AppBskyEmbedRecord.View).record);
 
   return null;
 }
@@ -2424,9 +2319,12 @@ function mapQuotedTweet(embed: unknown): EmbeddedTweet | null {
   if (!embed) return null;
 
   if (AppBskyEmbedRecordWithMedia.isView(embed))
-    return mapEmbeddedRecord(embed.record.record);
+    return mapEmbeddedRecord(
+      (embed as AppBskyEmbedRecordWithMedia.View).record.record
+    );
 
-  if (AppBskyEmbedRecord.isView(embed)) return mapEmbeddedRecord(embed.record);
+  if (AppBskyEmbedRecord.isView(embed))
+    return mapEmbeddedRecord((embed as AppBskyEmbedRecord.View).record);
 
   return null;
 }
@@ -3096,7 +2994,11 @@ export async function listNotificationsPage(
 }
 
 export async function markNotificationsSeen(): Promise<void> {
-  await getAgent().updateSeenNotifications(new Date().toISOString());
+  await getAgent().updateSeenNotifications(
+    new Date().toISOString() as Parameters<
+      Agent['updateSeenNotifications']
+    >[0]
+  );
   notify();
 }
 
@@ -4181,7 +4083,8 @@ async function readBookmarks(_userId: string): Promise<Bookmark[]> {
       const id = postIdFromUri(subject.uri);
 
       postRefCache.set(id, subject);
-      if (AppBskyFeedDefs.isPostView(item)) mapPost(item);
+      if (AppBskyFeedDefs.isPostView(item))
+        mapPost(item as AppBskyFeedDefs.PostView);
       bookmarks.push({
         id,
         createdAt: createdAt
@@ -4328,7 +4231,7 @@ export async function addTweet(data: AddTweetData): Promise<Tweet> {
             });
 
             return {
-              image: toPdsCompatibleBlobRef(upload.data.blob),
+              image: upload.data.blob,
               alt: preview.alt || '',
               aspectRatio: preparedImage.aspectRatio
             };
@@ -4366,6 +4269,7 @@ export async function addTweet(data: AddTweetData): Promise<Tweet> {
     : undefined;
 
   const postRecord: AppBskyFeedPost.Record = {
+    $type: 'app.bsky.feed.post',
     text: richText.text,
     facets: richText.facets,
     embed,
@@ -4459,185 +4363,19 @@ function normalizeProfileRecordForWrite(
   return nextProfile;
 }
 
-function getRejectedProfileBlobField(error: unknown): ProfileBlobField | null {
-  const message = getUnknownErrorMessage(error);
-  if (
-    !/Expected blob value type|Invalid app\.bsky\.actor\.profile record/i.test(
-      message
-    )
-  )
-    return null;
-
-  const field = /\$\.record\.(avatar|banner)\b/.exec(message)?.[1];
-  return field === 'avatar' || field === 'banner' ? field : null;
-}
-
-function isReusableRemoteImageUrl(
-  url: string | null | undefined
-): url is string {
-  return !!url && /^https?:\/\//i.test(url);
-}
-
-function getProfileBlobUrlFromCache(field: ProfileBlobField): string | null {
-  if (!currentUser) return null;
-
-  return field === 'avatar'
-    ? currentUser.photoURL
-    : currentUser.coverPhotoURL ?? null;
-}
-
-async function getProfileBlobUrl(
-  api: Agent,
-  field: ProfileBlobField
-): Promise<string | null> {
-  const cachedUrl = getProfileBlobUrlFromCache(field);
-  if (isReusableRemoteImageUrl(cachedUrl)) return cachedUrl;
-
-  if (!api.accountDid) return null;
-
-  const profile = await api
-    .getProfile({ actor: api.accountDid })
-    .catch(() => null);
-  const profileUrl =
-    field === 'avatar' ? profile?.data.avatar : profile?.data.banner;
-
-  return isReusableRemoteImageUrl(profileUrl) ? profileUrl : null;
-}
-
-function getFileExtensionFromMimeType(mimeType: string): string {
-  if (/png/i.test(mimeType)) return 'png';
-  if (/webp/i.test(mimeType)) return 'webp';
-  if (/gif/i.test(mimeType)) return 'gif';
-
-  return 'jpg';
-}
-
-async function uploadProfileBlobFromUrl(
-  api: Agent,
-  field: ProfileBlobField
-): Promise<BlobRef | null> {
-  const url = await getProfileBlobUrl(api, field);
-  if (!url) return null;
-
-  const response = await fetch(url).catch(() => null);
-  if (!response?.ok) return null;
-
-  const blob = await response.blob();
-  if (!blob.size) return null;
-
-  const responseMimeType = response.headers.get('content-type');
-  const mimeType = (blob.type ? blob.type : responseMimeType ?? 'image/jpeg')
-    .split(';')[0]
-    .trim();
-  const file = new File(
-    [blob],
-    `profile-${field}.${getFileExtensionFromMimeType(mimeType)}`,
-    { type: mimeType }
-  );
-  const preparedImage = await prepareImageForBluesky(file);
-  const upload = await api.uploadBlob(preparedImage.file, {
-    encoding: preparedImage.encoding
-  });
-
-  return toPdsCompatibleBlobRef(upload.data.blob);
-}
-
 async function upsertProfileRecord(
   api: Agent,
   updateRecord: (
     existing: Partial<AppBskyActorProfile.Record>
-  ) => Partial<AppBskyActorProfile.Record>,
-  skipValidation: boolean,
-  recoverableBlobFields: ReadonlySet<ProfileBlobField> = new Set()
+  ) => Partial<AppBskyActorProfile.Record>
 ): Promise<void> {
-  const repo = api.accountDid;
-  const collection = 'app.bsky.actor.profile';
-  const rkey = 'self';
-  let retries = 5;
-  const droppedBlobFields = new Set<ProfileBlobField>();
-
-  while (retries >= 0) {
-    const existingRecord = await api.com.atproto.repo
-      .getRecord({ repo, collection, rkey })
-      .catch((error) => {
-        if (isRecordNotFoundError(error)) return null;
-        throw error;
-      });
-    const existing = (existingRecord?.data.value ??
-      {}) as Partial<AppBskyActorProfile.Record>;
-    const record: Record<string, unknown> = {
-      ...(normalizeProfileRecordForWrite(updateRecord(existing)) as Record<
-        string,
-        unknown
-      >),
-      $type: 'app.bsky.actor.profile'
-    };
-
-    droppedBlobFields.forEach((field) => {
-      delete record[field];
-    });
-
-    try {
-      await api.com.atproto.repo.putRecord(
-        {
-          repo,
-          collection,
-          rkey,
-          record,
-          swapRecord: existingRecord?.data.cid ?? null,
-          validate: skipValidation ? false : undefined
-        },
-        { encoding: 'application/json' }
-      );
-      return;
-    } catch (error) {
-      const errorName = (error as { error?: unknown })?.error;
-      if (retries > 0 && errorName === 'InvalidSwap') {
-        retries -= 1;
-        continue;
-      }
-
-      const rejectedBlobField = getRejectedProfileBlobField(error);
-      if (
-        rejectedBlobField &&
-        recoverableBlobFields.has(rejectedBlobField) &&
-        !droppedBlobFields.has(rejectedBlobField)
-      ) {
-        const repairedBlob = await uploadProfileBlobFromUrl(
-          api,
-          rejectedBlobField
-        ).catch(() => null);
-
-        if (repairedBlob) {
-          try {
-            await api.com.atproto.repo.putRecord(
-              {
-                repo,
-                collection,
-                rkey,
-                record: {
-                  ...record,
-                  [rejectedBlobField]: repairedBlob
-                },
-                swapRecord: existingRecord?.data.cid ?? null,
-                validate: skipValidation ? false : undefined
-              },
-              { encoding: 'application/json' }
-            );
-            return;
-          } catch (repairError) {
-            if (getRejectedProfileBlobField(repairError) !== rejectedBlobField)
-              throw repairError;
-          }
-        }
-
-        droppedBlobFields.add(rejectedBlobField);
-        continue;
-      }
-
-      throw error;
-    }
-  }
+  await api.upsertProfile((existing) => {
+    const updated = normalizeProfileRecordForWrite(
+      updateRecord(existing ?? {})
+    ) as AppBskyActorProfile.Record;
+    updated.$type = 'app.bsky.actor.profile';
+    return updated;
+  });
 }
 
 export async function updateProfile(
@@ -4659,9 +4397,7 @@ export async function updateProfile(
             })
             .then(
               ({ data }) =>
-                toPdsCompatibleBlobRef(
-                  data.blob
-                ) as AppBskyActorProfile.Record['avatar']
+                data.blob as AppBskyActorProfile.Record['avatar']
             )
         )
       : null,
@@ -4673,9 +4409,7 @@ export async function updateProfile(
             })
             .then(
               ({ data }) =>
-                toPdsCompatibleBlobRef(
-                  data.blob
-                ) as AppBskyActorProfile.Record['banner']
+                data.blob as AppBskyActorProfile.Record['banner']
             )
         )
       : null
@@ -4686,29 +4420,20 @@ export async function updateProfile(
     !!avatarUpload ||
     !!bannerUpload ||
     ('coverPhotoURL' in data && data.coverPhotoURL === null);
-  const recoverableBlobFields = new Set<ProfileBlobField>();
-
-  if (!avatarUpload) recoverableBlobFields.add('avatar');
-  if (!bannerUpload) recoverableBlobFields.add('banner');
 
   if (shouldUpdateProfile) {
-    await upsertProfileRecord(
-      api,
-      (existing) => {
-        const nextProfile = { ...existing };
+    await upsertProfileRecord(api, (existing) => {
+      const nextProfile = { ...existing };
 
-        if ('name' in data) nextProfile.displayName = data.name ?? '';
-        if ('bio' in data) nextProfile.description = data.bio ?? '';
-        if (avatarUpload) nextProfile.avatar = avatarUpload;
-        if (bannerUpload) nextProfile.banner = bannerUpload;
-        else if ('coverPhotoURL' in data && data.coverPhotoURL === null)
-          delete nextProfile.banner;
+      if ('name' in data) nextProfile.displayName = data.name ?? '';
+      if ('bio' in data) nextProfile.description = data.bio ?? '';
+      if (avatarUpload) nextProfile.avatar = avatarUpload;
+      if (bannerUpload) nextProfile.banner = bannerUpload;
+      else if ('coverPhotoURL' in data && data.coverPhotoURL === null)
+        delete nextProfile.banner;
 
-        return nextProfile;
-      },
-      false,
-      recoverableBlobFields
-    );
+      return nextProfile;
+    });
   }
 
   await refreshCurrentUser().catch(() => null);

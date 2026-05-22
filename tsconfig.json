@@ -19,6 +19,7 @@
       "@components/*": ["components/*"],
       "@lib/*": ["lib/*"],
       "@styles/*": ["styles/*"],
+      "@atproto/api": ["../node_modules/@atproto/api/dist/index.d.ts"],
       "@atproto/oauth-client": [
         "../node_modules/@atproto/oauth-client/dist/index.d.ts"
       ],
@@ -27,6 +28,9 @@
       ],
       "@atproto/oauth-types": [
         "../node_modules/@atproto/oauth-types/dist/index.d.ts"
+      ],
+      "@atproto/syntax": [
+        "../node_modules/@atproto/syntax/dist/index.d.ts"
       ]
     }
   },

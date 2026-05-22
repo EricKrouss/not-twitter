@@ -15,8 +15,9 @@
     "prepare": "husky install"
   },
   "dependencies": {
-    "@atproto/api": "^0.13.35",
+    "@atproto/api": "^0.19.0",
     "@atproto/oauth-client-browser": "^0.4.0",
+    "@atproto/syntax": "^0.6.1",
     "@headlessui/react": "^1.7.2",
     "@heroicons/react": "^2.0.11",
     "clsx": "^1.2.1",
