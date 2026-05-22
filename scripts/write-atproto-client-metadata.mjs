@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-const OAUTH_SCOPE = 'atproto transition:generic transition:chat.bsky blob:*/*';
+const OAUTH_SCOPE = 'atproto transition:generic transition:chat.bsky';
 
 function normalizeSiteUrl(value) {
   if (!value) return '';

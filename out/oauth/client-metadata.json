@@ -5,7 +5,7 @@
   "redirect_uris": [
     "https://erickrouss.github.io/not-twitter/"
   ],
-  "scope": "atproto transition:generic transition:chat.bsky blob:*/*",
+  "scope": "atproto transition:generic transition:chat.bsky",
   "grant_types": [
     "authorization_code",
     "refresh_token"

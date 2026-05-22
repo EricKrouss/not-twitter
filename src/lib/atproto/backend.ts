@@ -44,7 +44,7 @@ import { Timestamp } from './timestamp';
 const OAUTH_SUB_KEY = 'twitter-clone:bsky-oauth-sub';
 const OAUTH_ACCOUNTS_KEY = 'twitter-clone:bsky-oauth-accounts';
 const CREDENTIAL_SESSION_KEY = 'twitter-clone:bsky-credential-session';
-const OAUTH_SCOPE = 'atproto transition:generic transition:chat.bsky blob:*/*';
+const OAUTH_SCOPE = 'atproto transition:generic transition:chat.bsky';
 const CHAT_SCOPE = 'transition:chat.bsky';
 const GENERIC_SCOPE = 'transition:generic';
 const BSKY_IMAGE_MAX_BYTES = 1_000_000;
