@@ -26,15 +26,18 @@ export function UserName({
     <Link href={username ? getUserPath(username) : '#'}>
       <a
         className={cn(
-          'flex items-center gap-1 truncate font-bold',
+          `inline-flex min-w-0 max-w-full items-center gap-1 truncate
+           align-bottom font-bold leading-[inherit]`,
           username ? 'custom-underline' : 'pointer-events-none',
           className
         )}
         tabIndex={username ? 0 : -1}
       >
-        <CustomTag className='truncate'>{name}</CustomTag>
+        <CustomTag className='min-w-0 truncate leading-[inherit]'>
+          {name}
+        </CustomTag>
         {verified && (
-          <i>
+          <i className='inline-flex shrink-0 items-center leading-none'>
             <CustomIcon
               className={iconClassName ?? 'h-5 w-5'}
               iconName='TwitterVerifiedIcon'

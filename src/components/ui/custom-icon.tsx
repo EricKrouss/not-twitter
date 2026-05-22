@@ -95,7 +95,8 @@ function TwitterVerifiedIcon({ className }: IconProps): JSX.Element {
   return (
     <span
       className={cn(
-        'inline-block shrink-0 bg-contain bg-center bg-no-repeat',
+        `relative top-[0.0625em] inline-block shrink-0 bg-contain bg-center
+         bg-no-repeat align-text-bottom leading-none`,
         className
       )}
       style={{
