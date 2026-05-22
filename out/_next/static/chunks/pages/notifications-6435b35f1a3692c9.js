@@ -1,1 +1,0 @@
-(self.webpackChunk_N_E=self.webpackChunk_N_E||[]).push([[769],{81865:function(n,u,_){(window.__NEXT_P=window.__NEXT_P||[]).push(["/notifications",function(){return _(12182)}])}},function(n){n.O(0,[412,824,612,119,807,22,182,774,888,179],function(){return n(n.s=81865)}),_N_E=n.O()}]);

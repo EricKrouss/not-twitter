@@ -9,25 +9,42 @@ type MainLayoutProps = {
   description?: string;
 };
 
+export const DEFAULT_SEO_IMAGE = '/assets/twitter-banner.png';
+
 export function SEO({
   title,
-  image,
+  image = DEFAULT_SEO_IMAGE,
   description
 }: MainLayoutProps): JSX.Element {
   const { asPath } = useRouter();
+  const absoluteImage = absolutePublicAsset(image);
 
   return (
     <Head>
       <title>{title}</title>
-      <meta name='og:title' content={title} />
+      <meta property='og:title' content={title} key='og:title' />
+      <meta name='twitter:title' content={title} key='twitter:title' />
       {description && <meta name='description' content={description} />}
-      {description && <meta name='og:description' content={description} />}
-      {image && (
-        <meta property='og:image' content={absolutePublicAsset(image)} />
+      {description && (
+        <meta
+          property='og:description'
+          content={description}
+          key='og:description'
+        />
       )}
+      {description && (
+        <meta
+          name='twitter:description'
+          content={description}
+          key='twitter:description'
+        />
+      )}
+      <meta property='og:image' content={absoluteImage} key='og:image' />
+      <meta name='twitter:image' content={absoluteImage} key='twitter:image' />
       <meta
-        name='og:url'
+        property='og:url'
         content={`${siteURL}${asPath === '/' ? '' : asPath}`}
+        key='og:url'
       />
     </Head>
   );
