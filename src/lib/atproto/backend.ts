@@ -52,6 +52,7 @@ const BSKY_IMAGE_MAX_BYTES = 1_000_000;
 const BSKY_IMAGE_TARGET_BYTES = 950_000;
 const BSKY_IMAGE_MAX_DIMENSION = 2000;
 const BSKY_MEDIA_POST_VISIBILITY_RETRIES = 8;
+const BSKY_THREAD_REPLY_DEPTH = 25;
 const THEME_KEY = 'twitter-clone:bsky-theme';
 const DEFAULT_PROFILE_PHOTO_URL = '/assets/twitter-default-egg.png';
 const DEFAULT_PROFILE_COVER_URL = '/assets/twitter-default-cover.png';
@@ -114,6 +115,7 @@ type PostReplyRef = {
 export type TweetThreadPage = {
   tweet: TweetWithUser;
   parents: TweetWithUser[];
+  threadReplies: TweetWithUser[];
   replies: TweetWithUser[];
 };
 
@@ -142,6 +144,8 @@ type PreparedImageUpload = {
   encoding: string;
   aspectRatio: AppBskyEmbedImages.Image['aspectRatio'];
 };
+
+type ProfileBlobField = 'avatar' | 'banner';
 
 type ActorFeedPost = AppBskyFeedDefs.FeedViewPost;
 type ActorProfileView =
@@ -4394,17 +4398,102 @@ function normalizeProfileRecordForWrite(
   return nextProfile;
 }
 
+function getRejectedProfileBlobField(error: unknown): ProfileBlobField | null {
+  const message = getUnknownErrorMessage(error);
+  if (
+    !/Expected blob value type|Invalid app\.bsky\.actor\.profile record/i.test(
+      message
+    )
+  )
+    return null;
+
+  const field = /\$\.record\.(avatar|banner)\b/.exec(message)?.[1];
+  return field === 'avatar' || field === 'banner' ? field : null;
+}
+
+function isReusableRemoteImageUrl(
+  url: string | null | undefined
+): url is string {
+  return !!url && /^https?:\/\//i.test(url);
+}
+
+function getProfileBlobUrlFromCache(field: ProfileBlobField): string | null {
+  if (!currentUser) return null;
+
+  return field === 'avatar'
+    ? currentUser.photoURL
+    : currentUser.coverPhotoURL ?? null;
+}
+
+async function getProfileBlobUrl(
+  api: Agent,
+  field: ProfileBlobField
+): Promise<string | null> {
+  const cachedUrl = getProfileBlobUrlFromCache(field);
+  if (isReusableRemoteImageUrl(cachedUrl)) return cachedUrl;
+
+  if (!api.accountDid) return null;
+
+  const profile = await api
+    .getProfile({ actor: api.accountDid })
+    .catch(() => null);
+  const profileUrl =
+    field === 'avatar' ? profile?.data.avatar : profile?.data.banner;
+
+  return isReusableRemoteImageUrl(profileUrl) ? profileUrl : null;
+}
+
+function getFileExtensionFromMimeType(mimeType: string): string {
+  if (/png/i.test(mimeType)) return 'png';
+  if (/webp/i.test(mimeType)) return 'webp';
+  if (/gif/i.test(mimeType)) return 'gif';
+
+  return 'jpg';
+}
+
+async function uploadProfileBlobFromUrl(
+  api: Agent,
+  field: ProfileBlobField
+): Promise<BlobRef | null> {
+  const url = await getProfileBlobUrl(api, field);
+  if (!url) return null;
+
+  const response = await fetch(url).catch(() => null);
+  if (!response?.ok) return null;
+
+  const blob = await response.blob();
+  if (!blob.size) return null;
+
+  const responseMimeType = response.headers.get('content-type');
+  const mimeType = (blob.type ? blob.type : responseMimeType ?? 'image/jpeg')
+    .split(';')[0]
+    .trim();
+  const file = new File(
+    [blob],
+    `profile-${field}.${getFileExtensionFromMimeType(mimeType)}`,
+    { type: mimeType }
+  );
+  const preparedImage = await prepareImageForBluesky(file);
+  const upload = await api.uploadBlob(preparedImage.file, {
+    encoding: preparedImage.encoding
+  });
+
+  return toPdsCompatibleBlobRef(upload.data.blob);
+}
+
 async function upsertProfileRecord(
   api: Agent,
   updateRecord: (
     existing: Partial<AppBskyActorProfile.Record>
   ) => Partial<AppBskyActorProfile.Record>,
-  skipValidation: boolean
+  skipValidation: boolean,
+  recoverableBlobFields: ReadonlySet<ProfileBlobField> = new Set()
 ): Promise<void> {
   const repo = api.accountDid;
   const collection = 'app.bsky.actor.profile';
   const rkey = 'self';
   let retries = 5;
+  const droppedBlobFields = new Set<ProfileBlobField>();
 
   while (retries >= 0) {
     const existingRecord = await api.com.atproto.repo
@@ -4422,6 +4511,11 @@ async function upsertProfileRecord(
       >),
       $type: 'app.bsky.actor.profile'
     };
+
+    droppedBlobFields.forEach((field) => {
+      delete record[field];
+    });
+
     try {
       await api.com.atproto.repo.putRecord(
         {
@@ -4439,6 +4533,44 @@ async function upsertProfileRecord(
       const errorName = (error as { error?: unknown })?.error;
       if (retries > 0 && errorName === 'InvalidSwap') {
         retries -= 1;
+        continue;
+      }
+
+      const rejectedBlobField = getRejectedProfileBlobField(error);
+      if (
+        rejectedBlobField &&
+        recoverableBlobFields.has(rejectedBlobField) &&
+        !droppedBlobFields.has(rejectedBlobField)
+      ) {
+        const repairedBlob = await uploadProfileBlobFromUrl(
+          api,
+          rejectedBlobField
+        ).catch(() => null);
+
+        if (repairedBlob) {
+          try {
+            await api.com.atproto.repo.putRecord(
+              {
+                repo,
+                collection,
+                rkey,
+                record: {
+                  ...record,
+                  [rejectedBlobField]: repairedBlob
+                },
+                swapRecord: existingRecord?.data.cid ?? null,
+                validate: skipValidation ? false : undefined
+              },
+              { encoding: 'application/json' }
+            );
+            return;
+          } catch (repairError) {
+            if (getRejectedProfileBlobField(repairError) !== rejectedBlobField)
+              throw repairError;
+          }
+        }
+
+        droppedBlobFields.add(rejectedBlobField);
         continue;
       }
 
@@ -4493,6 +4625,10 @@ export async function updateProfile(
     !!avatarUpload ||
     !!bannerUpload ||
     ('coverPhotoURL' in data && data.coverPhotoURL === null);
+  const recoverableBlobFields = new Set<ProfileBlobField>();
+
+  if (!avatarUpload) recoverableBlobFields.add('avatar');
+  if (!bannerUpload) recoverableBlobFields.add('banner');
 
   if (shouldUpdateProfile) {
     await upsertProfileRecord(
@@ -4509,7 +4645,8 @@ export async function updateProfile(
 
         return nextProfile;
       },
-      false
+      false,
+      recoverableBlobFields
     );
   }
 

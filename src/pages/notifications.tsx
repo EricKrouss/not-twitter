@@ -34,6 +34,7 @@ import { HeroIcon } from '@components/ui/hero-icon';
 import { Loading } from '@components/ui/loading';
 import { Error as ErrorMessage } from '@components/ui/error';
 import { ToolTip } from '@components/ui/tooltip';
+import { TweetEmbed } from '@components/tweet/tweet-embed';
 import { TweetRetweetMenu } from '@components/tweet/tweet-retweet-menu';
 import { TweetText } from '@components/tweet/tweet-text';
 import type {
@@ -502,13 +503,6 @@ function MentionContext({
       </p>
     );
 
-  if (reason === 'quote')
-    return (
-      <p className='text-[15px] leading-5 text-light-secondary dark:text-dark-secondary'>
-        Quoted your Tweet
-      </p>
-    );
-
   return null;
 }
 
@@ -689,6 +683,8 @@ function TweetNotificationRow({
   const { latestNotification, reason, text, isRead, createdAt } = group;
   const { user } = latestNotification;
   const targetHref = getTargetHref(latestNotification, viewerUsername);
+  const quotedTweet =
+    reason === 'quote' ? group.tweet?.quotedTweet ?? null : null;
 
   return (
     <article
@@ -747,6 +743,11 @@ function TweetNotificationRow({
                 <TweetText className='text-[15px] leading-5' text={text} />
               </a>
             </Link>
+          )}
+          {quotedTweet && (
+            <div className='mt-3 max-w-xl'>
+              <TweetEmbed card={null} quotedTweet={quotedTweet} />
+            </div>
           )}
           <div className='mt-3 flex max-w-md justify-between pr-8'>
             {mentionActions.map((action) => (
@@ -868,7 +869,11 @@ export default function Notifications(): JSX.Element {
   return (
     <MainContainer>
       <SEO
-        title={mentionsOnly ? 'Mentions / Not Twitter' : 'Notifications / Not Twitter'}
+        title={
+          mentionsOnly
+            ? 'Mentions / Not Twitter'
+            : 'Notifications / Not Twitter'
+        }
       />
       <header className='hover-animation sticky top-0 z-20 bg-main-background/80 backdrop-blur-md'>
         <div className='flex h-[53px] items-center justify-between px-4'>
