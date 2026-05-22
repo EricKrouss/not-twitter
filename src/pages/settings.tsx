@@ -1390,14 +1390,14 @@ export default function Settings(): JSX.Element {
         </SettingsRow>
         <SettingsRow title='Prioritize people you follow'>
           <Toggle
-            checked={settings.threadView.prioritizeFollowedUsers}
+            checked={settings.threadView.prioritizeFollowedUsers === true}
             disabled={!!savingKey}
             label='Prioritize followed users'
             onChange={(): void =>
               void runUpdate('thread-followed', () =>
                 setThreadViewSetting({
                   prioritizeFollowedUsers:
-                    !settings.threadView.prioritizeFollowedUsers
+                    settings.threadView.prioritizeFollowedUsers !== true
                 })
               )
             }
