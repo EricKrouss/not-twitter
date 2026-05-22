@@ -1,7 +1,7 @@
-import { query, where } from 'firebase/firestore';
+import { query, where } from '@lib/atproto/store';
 import { useUser } from '@lib/context/user-context';
 import { useCollection } from '@lib/hooks/useCollection';
-import { usersCollection } from '@lib/firebase/collections';
+import { usersCollection } from '@lib/atproto/collections';
 import { SEO } from '@components/common/seo';
 import { UserCards } from '@components/user/user-cards';
 import type { User } from '@lib/types/user';

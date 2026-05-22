@@ -1,7 +1,7 @@
 import { useRouter } from 'next/router';
 import { useAuth } from '@lib/context/auth-context';
 import { useModal } from '@lib/hooks/useModal';
-import { manageFollow } from '@lib/firebase/utils';
+import { manageFollow } from '@lib/atproto/utils';
 import { preventBubbling } from '@lib/utils';
 import { Modal } from '@components/modal/modal';
 import { ActionModal } from '@components/modal/action-modal';

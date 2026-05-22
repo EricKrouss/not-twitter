@@ -1,8 +1,8 @@
 import { useRouter } from 'next/router';
-import { query, where, limit } from 'firebase/firestore';
+import { query, where, limit } from '@lib/atproto/store';
 import { UserContextProvider } from '@lib/context/user-context';
 import { useCollection } from '@lib/hooks/useCollection';
-import { usersCollection } from '@lib/firebase/collections';
+import { usersCollection } from '@lib/atproto/collections';
 import { getProfileRouteId } from '@lib/static-routes';
 import { SEO } from '@components/common/seo';
 import { MainContainer } from '@components/home/main-container';

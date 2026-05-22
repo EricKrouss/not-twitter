@@ -5,7 +5,7 @@ import { useRouter } from 'next/router';
 import cn from 'clsx';
 import { toast } from 'react-hot-toast';
 import { useAuth } from '@lib/context/auth-context';
-import { manageRetweet, manageLike, manageBookmark } from '@lib/firebase/utils';
+import { manageRetweet, manageLike, manageBookmark } from '@lib/atproto/utils';
 import { ViewTweetStats } from '@components/view/view-tweet-stats';
 import { TweetOption } from './tweet-option';
 import { TweetRetweetMenu } from './tweet-retweet-menu';

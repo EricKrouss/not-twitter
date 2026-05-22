@@ -3,9 +3,9 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { useDocument } from '@lib/hooks/useDocument';
 import { useUser } from '@lib/context/user-context';
 import { isPlural } from '@lib/utils';
-import { userStatsCollection } from '@lib/firebase/collections';
+import { userStatsCollection } from '@lib/atproto/collections';
 import { getProfileRouteId, getProfileRouteView } from '@lib/static-routes';
-import { doc } from 'firebase/firestore';
+import { doc } from '@lib/atproto/store';
 import { UserName } from './user-name';
 import type { Variants } from 'framer-motion';
 

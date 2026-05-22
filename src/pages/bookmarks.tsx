@@ -1,16 +1,16 @@
 import { useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { toast } from 'react-hot-toast';
-import { orderBy, query } from 'firebase/firestore';
+import { orderBy, query } from '@lib/atproto/store';
 import { useAuth } from '@lib/context/auth-context';
 import { useModal } from '@lib/hooks/useModal';
 import { useCollection } from '@lib/hooks/useCollection';
 import { useArrayDocument } from '@lib/hooks/useArrayDocument';
-import { clearAllBookmarks } from '@lib/firebase/utils';
+import { clearAllBookmarks } from '@lib/atproto/utils';
 import {
   tweetsCollection,
   userBookmarksCollection
-} from '@lib/firebase/collections';
+} from '@lib/atproto/collections';
 import { HomeLayout, ProtectedLayout } from '@components/layout/common-layout';
 import { MainLayout } from '@components/layout/main-layout';
 import { SEO } from '@components/common/seo';

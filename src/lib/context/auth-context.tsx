@@ -12,30 +12,30 @@ import {
   signInWithBluesky as signInWithBlueskyAuth,
   switchBlueskyAccount as switchBlueskyAccountAuth,
   onAuthStateChanged,
-  signOut as signOutFirebase
-} from 'firebase/auth';
+  signOut as signOutAtproto
+} from '@lib/atproto/auth';
 import {
   doc,
   getDoc,
   setDoc,
   onSnapshot,
   serverTimestamp
-} from 'firebase/firestore';
-import { auth } from '@lib/firebase/app';
+} from '@lib/atproto/store';
+import { auth } from '@lib/atproto/app';
 import {
   usersCollection,
   userStatsCollection,
   userBookmarksCollection
-} from '@lib/firebase/collections';
+} from '@lib/atproto/collections';
 import {
   DEFAULT_PROFILE_COVER_URL,
   DEFAULT_PROFILE_PHOTO_URL
 } from '@lib/default-images';
 import { getRandomId, getRandomInt } from '@lib/random';
-import { checkUsernameAvailability } from '@lib/firebase/utils';
+import { checkUsernameAvailability } from '@lib/atproto/utils';
 import type { ReactNode } from 'react';
-import type { BlueskyAccount, User as AuthUser } from 'firebase/auth';
-import type { WithFieldValue } from 'firebase/firestore';
+import type { BlueskyAccount, User as AuthUser } from '@lib/atproto/auth';
+import type { WithFieldValue } from '@lib/atproto/store';
 import type { User } from '@lib/types/user';
 import type { Bookmark } from '@lib/types/bookmark';
 import type { Stats } from '@lib/types/stats';
@@ -222,7 +222,7 @@ export function AuthContextProvider({
 
   const signOut = async (): Promise<void> => {
     try {
-      await signOutFirebase(auth);
+      await signOutAtproto(auth);
       syncAccounts();
     } catch (error) {
       setError(error as Error);

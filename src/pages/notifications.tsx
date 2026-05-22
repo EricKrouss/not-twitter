@@ -9,7 +9,7 @@ import {
   listNotificationsPage,
   markNotificationsSeen
 } from '@lib/atproto/backend';
-import { manageBookmark, manageRetweet } from '@lib/firebase/utils';
+import { manageBookmark, manageRetweet } from '@lib/atproto/utils';
 import { useAuth } from '@lib/context/auth-context';
 import { useLiveUpdates } from '@lib/context/live-updates-context';
 import { formatDate, formatNumber } from '@lib/date';

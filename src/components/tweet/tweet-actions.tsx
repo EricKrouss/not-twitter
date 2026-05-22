@@ -6,7 +6,7 @@ import cn from 'clsx';
 import { toast } from 'react-hot-toast';
 import { useAuth } from '@lib/context/auth-context';
 import { useModal } from '@lib/hooks/useModal';
-import { tweetsCollection } from '@lib/firebase/collections';
+import { tweetsCollection } from '@lib/atproto/collections';
 import { getTweetPath } from '@lib/routes';
 import {
   removeTweet,
@@ -15,7 +15,7 @@ import {
   managePinnedTweet,
   manageTotalTweets,
   manageTotalPhotos
-} from '@lib/firebase/utils';
+} from '@lib/atproto/utils';
 import { delayScroll, preventBubbling, sleep } from '@lib/utils';
 import { Modal } from '@components/modal/modal';
 import { ActionModal } from '@components/modal/action-modal';
@@ -23,7 +23,7 @@ import { Button } from '@components/ui/button';
 import { ToolTip } from '@components/ui/tooltip';
 import { HeroIcon } from '@components/ui/hero-icon';
 import { CustomIcon } from '@components/ui/custom-icon';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc } from '@lib/atproto/store';
 import type { Variants } from 'framer-motion';
 import type { Tweet } from '@lib/types/tweet';
 

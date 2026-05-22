@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
-import { doc, getDoc } from 'firebase/firestore';
-import { usersCollection } from '@lib/firebase/collections';
-import type { CollectionReference } from 'firebase/firestore';
+import { doc, getDoc } from '@lib/atproto/store';
+import { usersCollection } from '@lib/atproto/collections';
+import type { CollectionReference } from '@lib/atproto/store';
 import type { User } from '@lib/types/user';
 
 type UserArrayDocument<T> = {

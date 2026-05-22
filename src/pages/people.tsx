@@ -1,8 +1,8 @@
 import { useRouter } from 'next/router';
 import { motion } from 'framer-motion';
-import { where } from 'firebase/firestore';
+import { where } from '@lib/atproto/store';
 import { useAuth } from '@lib/context/auth-context';
-import { usersCollection } from '@lib/firebase/collections';
+import { usersCollection } from '@lib/atproto/collections';
 import { useInfiniteScroll } from '@lib/hooks/useInfiniteScroll';
 import {
   PeopleLayout,

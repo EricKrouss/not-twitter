@@ -1,4 +1,4 @@
-import type { Timestamp, FirestoreDataConverter } from 'firebase/firestore';
+import type { Timestamp, DataConverter } from '@lib/atproto/store';
 import type { ImagesPreview } from './file';
 import type { User } from './user';
 
@@ -52,11 +52,11 @@ export type Tweet = {
 
 export type TweetWithUser = Tweet & { user: User };
 
-export const tweetConverter: FirestoreDataConverter<Tweet> = {
-  toFirestore(tweet) {
+export const tweetConverter: DataConverter<Tweet> = {
+  toStore(tweet) {
     return { ...tweet };
   },
-  fromFirestore(snapshot, options) {
+  fromStore(snapshot, options) {
     const { id } = snapshot;
     const data = snapshot.data(options);
 

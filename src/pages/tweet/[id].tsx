@@ -1,7 +1,7 @@
 import { useRef } from 'react';
 import { useRouter } from 'next/router';
 import { AnimatePresence } from 'framer-motion';
-import { tweetsCollection } from '@lib/firebase/collections';
+import { tweetsCollection } from '@lib/atproto/collections';
 import { useCollection } from '@lib/hooks/useCollection';
 import { useDocument } from '@lib/hooks/useDocument';
 import { isPlural } from '@lib/utils';
@@ -15,7 +15,7 @@ import { SEO } from '@components/common/seo';
 import { Loading } from '@components/ui/loading';
 import { Error } from '@components/ui/error';
 import { ViewParentTweet } from '@components/view/view-parent-tweet';
-import { doc, query, where, orderBy } from 'firebase/firestore';
+import { doc, query, where, orderBy } from '@lib/atproto/store';
 import type { ReactElement, ReactNode } from 'react';
 
 function getRouteParam(value: string | string[] | undefined): string | null {

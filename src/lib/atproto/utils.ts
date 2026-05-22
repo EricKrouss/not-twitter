@@ -9,7 +9,7 @@ import {
   unfollowUser,
   updateProfile
 } from '@lib/atproto/backend';
-import type { Query } from 'firebase/firestore';
+import type { Query } from '@lib/atproto/store';
 import type { EditableUserData } from '@lib/types/user';
 import type { FilesWithId, ImagesPreview } from '@lib/types/file';
 import type { Theme, Accent } from '@lib/types/theme';
@@ -24,7 +24,7 @@ export function checkUsernameAvailability(
 export async function getCollectionCount<T>(
   collection: Query<T>
 ): Promise<number> {
-  const { getDocs } = await import('firebase/firestore');
+  const { getDocs } = await import('@lib/atproto/store');
   const snapshot = await getDocs(collection);
   return snapshot.size;
 }
@@ -61,7 +61,7 @@ export function managePinnedTweet(
   void _type;
   void _userId;
   void _tweetId;
-  // Bluesky pinned-post preferences are outside the old Firestore model.
+  // Bluesky pinned-post preferences are outside the old Store model.
   return Promise.resolve();
 }
 

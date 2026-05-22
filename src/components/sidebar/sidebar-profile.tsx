@@ -16,7 +16,7 @@ import { UserName } from '@components/user/user-name';
 import { UserUsername } from '@components/user/user-username';
 import { variants } from './more-settings';
 import type { ChangeEvent, FormEvent } from 'react';
-import type { BlueskyAccount } from 'firebase/auth';
+import type { BlueskyAccount } from '@lib/atproto/auth';
 import type { User } from '@lib/types/user';
 
 function getErrorMessage(error: unknown, fallback: string): string {

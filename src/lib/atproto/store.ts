@@ -14,13 +14,13 @@ type Unsubscribe = () => void;
 
 export { Timestamp };
 
-export type Firestore = { backend: 'atproto' };
+export type Store = { backend: 'atproto' };
 export type QueryConstraint = BackendConstraint;
 export type WithFieldValue<T> = T;
 
-export type FirestoreDataConverter<T> = {
-  toFirestore(data: T): unknown;
-  fromFirestore(
+export type DataConverter<T> = {
+  toStore(data: T): unknown;
+  fromStore(
     snapshot: QueryDocumentSnapshot<T>,
     options: SnapshotOptions
   ): T;
@@ -32,7 +32,7 @@ export type CollectionReference<T = unknown> = {
   constraints: BackendConstraint[];
   readonly __type?: T;
   withConverter<U>(
-    converter: FirestoreDataConverter<U>
+    converter: DataConverter<U>
   ): CollectionReference<U>;
 };
 
@@ -93,12 +93,12 @@ export class QuerySnapshot<T = unknown> {
 
 function withConverter<T>(
   this: CollectionReference,
-  _converter: FirestoreDataConverter<T>
+  _converter: DataConverter<T>
 ): CollectionReference<T> {
   return this as unknown as CollectionReference<T>;
 }
 
-export function collection(_db: Firestore, path: string): CollectionReference {
+export function collection(_db: Store, path: string): CollectionReference {
   return {
     type: 'collection',
     collection: getCollection(path),

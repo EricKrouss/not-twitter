@@ -1,4 +1,4 @@
-import type { Timestamp, FirestoreDataConverter } from 'firebase/firestore';
+import type { Timestamp, DataConverter } from '@lib/atproto/store';
 
 export type Stats = {
   likes: string[];
@@ -6,11 +6,11 @@ export type Stats = {
   updatedAt: Timestamp | null;
 };
 
-export const statsConverter: FirestoreDataConverter<Stats> = {
-  toFirestore(bookmark) {
+export const statsConverter: DataConverter<Stats> = {
+  toStore(bookmark) {
     return { ...bookmark };
   },
-  fromFirestore(snapshot, options) {
+  fromStore(snapshot, options) {
     const data = snapshot.data(options);
 
     return { ...data } as Stats;

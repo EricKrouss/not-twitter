@@ -1,15 +1,15 @@
-import type { Timestamp, FirestoreDataConverter } from 'firebase/firestore';
+import type { Timestamp, DataConverter } from '@lib/atproto/store';
 
 export type Bookmark = {
   id: string;
   createdAt: Timestamp;
 };
 
-export const bookmarkConverter: FirestoreDataConverter<Bookmark> = {
-  toFirestore(bookmark) {
+export const bookmarkConverter: DataConverter<Bookmark> = {
+  toStore(bookmark) {
     return { ...bookmark };
   },
-  fromFirestore(snapshot, options) {
+  fromStore(snapshot, options) {
     const data = snapshot.data(options);
 
     return { ...data } as Bookmark;

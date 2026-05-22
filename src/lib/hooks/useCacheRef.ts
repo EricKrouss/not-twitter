@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { refEqual } from 'firebase/firestore';
-import type { DocumentReference } from 'firebase/firestore';
+import { refEqual } from '@lib/atproto/store';
+import type { DocumentReference } from '@lib/atproto/store';
 
 export function useCacheRef<T>(
   ref: DocumentReference<T>

@@ -27,12 +27,7 @@
       ],
       "@atproto/oauth-types": [
         "../node_modules/@atproto/oauth-types/dist/index.d.ts"
-      ],
-      "firebase/app": ["lib/atproto/app"],
-      "firebase/auth": ["lib/atproto/auth"],
-      "firebase/firestore": ["lib/atproto/firestore"],
-      "firebase/functions": ["lib/atproto/functions"],
-      "firebase/storage": ["lib/atproto/storage"]
+      ]
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx"],

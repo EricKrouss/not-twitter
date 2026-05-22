@@ -1,4 +1,4 @@
-import type { Timestamp } from 'firebase/firestore';
+import type { Timestamp } from '@lib/atproto/store';
 
 type DataWithDate<T> = T & { createdAt: Timestamp };
 

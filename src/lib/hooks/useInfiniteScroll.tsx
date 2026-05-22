@@ -2,12 +2,12 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { query, limit } from 'firebase/firestore';
-import { getCollectionCount } from '@lib/firebase/utils';
+import { query, limit } from '@lib/atproto/store';
+import { getCollectionCount } from '@lib/atproto/utils';
 import { Loading } from '@components/ui/loading';
 import { useCollection } from './useCollection';
 import type { UseCollectionOptions } from './useCollection';
-import type { Query, QueryConstraint } from 'firebase/firestore';
+import type { Query, QueryConstraint } from '@lib/atproto/store';
 import type { User } from '@lib/types/user';
 
 type InfiniteScroll<T> = {

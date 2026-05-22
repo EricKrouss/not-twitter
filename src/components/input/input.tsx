@@ -3,14 +3,14 @@ import { useState, useEffect, useRef, useId } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import cn from 'clsx';
 import { toast } from 'react-hot-toast';
-import { tweetsCollection } from '@lib/firebase/collections';
+import { tweetsCollection } from '@lib/atproto/collections';
 import { getTweetPath, getUserPath } from '@lib/routes';
 import {
   manageReply,
   uploadImages,
   manageTotalTweets,
   manageTotalPhotos
-} from '@lib/firebase/utils';
+} from '@lib/atproto/utils';
 import { useAuth } from '@lib/context/auth-context';
 import {
   getHashtagSearchQuery,
@@ -22,13 +22,13 @@ import { sleep } from '@lib/utils';
 import { getImagesData } from '@lib/validation';
 import { UserAvatar } from '@components/user/user-avatar';
 import { TweetEmbed } from '@components/tweet/tweet-embed';
-import { addDoc, getDoc, serverTimestamp } from 'firebase/firestore';
+import { addDoc, getDoc, serverTimestamp } from '@lib/atproto/store';
 import { InputForm, fromTop } from './input-form';
 import { ImagePreview } from './image-preview';
 import { InputOptions } from './input-options';
 import type { GifSelection } from './twitter-compose-picker';
 import type { ReactNode, FormEvent, ChangeEvent, ClipboardEvent } from 'react';
-import type { WithFieldValue } from 'firebase/firestore';
+import type { WithFieldValue } from '@lib/atproto/store';
 import type { Variants } from 'framer-motion';
 import type { User } from '@lib/types/user';
 import type {

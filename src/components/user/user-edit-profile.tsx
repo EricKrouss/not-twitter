@@ -3,7 +3,7 @@ import { toast } from 'react-hot-toast';
 import cn from 'clsx';
 import { useUser } from '@lib/context/user-context';
 import { useModal } from '@lib/hooks/useModal';
-import { updateUserData, uploadImages } from '@lib/firebase/utils';
+import { updateUserData, uploadImages } from '@lib/atproto/utils';
 import { sleep } from '@lib/utils';
 import { getImagesData } from '@lib/validation';
 import { Modal } from '@components/modal/modal';

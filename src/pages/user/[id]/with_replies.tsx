@@ -1,8 +1,8 @@
 import { AnimatePresence } from 'framer-motion';
-import { doc, query, where, orderBy } from 'firebase/firestore';
+import { doc, query, where, orderBy } from '@lib/atproto/store';
 import { useCollection } from '@lib/hooks/useCollection';
 import { useDocument } from '@lib/hooks/useDocument';
-import { tweetsCollection } from '@lib/firebase/collections';
+import { tweetsCollection } from '@lib/atproto/collections';
 import { useUser } from '@lib/context/user-context';
 import { PublicUserLayout } from '@components/layout/common-layout';
 import { SEO } from '@components/common/seo';

@@ -1,6 +1,6 @@
-export type FirebaseStorage = { backend: 'atproto' };
+export type AtprotoStorage = { backend: 'atproto' };
 
-export function getStorage(): FirebaseStorage {
+export function getStorage(): AtprotoStorage {
   return { backend: 'atproto' };
 }
 
