@@ -7,13 +7,12 @@ even trigger the same muscle memory as Twitter. But legally, spiritually, and
 with a straight face, it is Not Twitter.
 
 Under the trench coat, this is a Bluesky interface built on AT Protocol. The
-goal is simple: keep the familiar timeline experience, swap out the billionaire
-chaos engine, and let posts come from a network that is not actively trying to
-turn every refresh into a product management hostage note.
+goal is simple: keep the familiar timeline experience, remove the "Everything App" non-sense, and let posts come from a network that is not actively trying to
+turn every refresh into 50 posts from Elon Musk.
 
 ## What Is This?
 
-Not Twitter is a Twitter-style frontend backed by Bluesky.
+Not Twitter is a frontend for Bluesky.
 
 It keeps the cozy old layout people remember:
 
@@ -29,15 +28,14 @@ It keeps the cozy old layout people remember:
 
 But the data comes from Bluesky/AT Protocol, not the platform currently doing
 side quests as a finance app, video app, hiring app, banking app, and public
-group chat for people who reply "interesting" to everything.
+group chat for people who reply "concerning" to everything.
 
 ## Why?
 
-Because sometimes you want the old Twitter shape without the new Twitter smell.
+Because sometimes you want the old social app experience without the new "Everything App" smell.
 
 Also because making a Bluesky client that looks like Twitter is objectively
-funny. It is the software equivalent of wearing fake glasses and saying,
-"Twitter? Never heard of her."
+funny.
 
 ## Development
 
@@ -87,7 +85,7 @@ For non-loopback deployments outside that workflow, set
 URL, or set `NEXT_PUBLIC_SITE_URL`/`NEXT_PUBLIC_URL` so the build can generate
 one.
 
-## Important Legal-ish Mumbling
+## Important Legal Stuff
 
 Not Twitter is not Twitter, not X, not X Corp, not affiliated with Elon Musk,
 and not responsible for any sudden urge to post "the old site was better."
@@ -109,4 +107,4 @@ be a very silly way to spend an afternoon.
 If Twitter is now X, this is Not Twitter.
 
 If someone asks whether this is just Twitter with Bluesky underneath, politely
-tell them no, then slowly close your laptop before they can inspect the CSS.
+tell them no, this is not Twitter
