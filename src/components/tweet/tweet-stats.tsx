@@ -16,7 +16,6 @@ type TweetStatsProps = Pick<
   Tweet,
   'userLikes' | 'userRetweets' | 'userReplies' | 'userQuotes' | 'bookmarkCount'
 > & {
-  reply?: boolean;
   userId: string;
   tweetId: string;
   username?: string;
@@ -26,7 +25,6 @@ type TweetStatsProps = Pick<
 };
 
 export function TweetStats({
-  reply,
   userId,
   tweetId,
   username,
@@ -271,7 +269,6 @@ export function TweetStats({
           viewTweet={viewTweet}
           iconSizeClassName={iconSizeClassName}
           onClick={userId ? openModal : redirectToLogin}
-          disabled={reply}
         />
         <TweetRetweetMenu
           className={cn(

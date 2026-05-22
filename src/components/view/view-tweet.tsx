@@ -150,7 +150,6 @@ export function ViewTweet(tweet: ViewTweetProps): JSX.Element {
           <TweetDate viewTweet tweetLink={tweetLink} createdAt={createdAt} />
           <TweetStats
             viewTweet
-            reply={reply}
             userId={userId}
             tweetId={tweetId}
             username={username}

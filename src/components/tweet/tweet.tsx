@@ -198,7 +198,6 @@ export function Tweet(tweet: TweetProps): JSX.Element {
                 <TweetEmbed card={card} quotedTweet={quotedTweet} />
                 {!modal && (
                   <TweetStats
-                    reply={reply}
                     userId={userId}
                     tweetId={tweetId}
                     username={username}
@@ -208,7 +207,7 @@ export function Tweet(tweet: TweetProps): JSX.Element {
                     userReplies={userReplies}
                     userQuotes={userQuotes}
                     userRetweets={userRetweets}
-                    openModal={!parent ? openModal : undefined}
+                    openModal={openModal}
                   />
                 )}
               </div>
