@@ -26,6 +26,7 @@ import { ensureValidDid, isValidHandle } from '@atproto/syntax';
 import { BrowserOAuthClient } from '@atproto/oauth-client-browser';
 import { buildAtprotoLoopbackClientMetadata } from '@atproto/oauth-types';
 import type { OAuthSession } from '@atproto/oauth-client';
+import { CID } from 'multiformats/cid';
 
 import type { Bookmark } from '@lib/types/bookmark';
 import type { ImagesPreview, FilesWithId } from '@lib/types/file';
@@ -951,6 +952,22 @@ function getBlobCid(value: unknown): string | null {
   );
 }
 
+function getBlobSize(value: unknown): number {
+  const blobRecord = isPlainObject(value) ? value : {};
+  const original = blobRecord.original;
+  const size =
+    typeof blobRecord.size === 'number'
+      ? blobRecord.size
+      : isPlainObject(original) && typeof original.size === 'number'
+      ? original.size
+      : null;
+
+  if (typeof size !== 'number' || !Number.isSafeInteger(size) || size < 0)
+    throw new Error('Bluesky did not return a valid media blob size.');
+
+  return size;
+}
+
 function toPdsCompatibleBlobRef(
   blob: unknown
 ): AppBskyEmbedImages.Image['image'] {
@@ -963,10 +980,11 @@ function toPdsCompatibleBlobRef(
 
   if (!cid) throw new Error('Bluesky did not return a valid media blob.');
 
-  return BlobRef.fromJsonRef({
-    cid,
-    mimeType
-  }) as AppBskyEmbedImages.Image['image'];
+  return new BlobRef(
+    CID.parse(cid),
+    mimeType,
+    getBlobSize(blobRecord)
+  ) as AppBskyEmbedImages.Image['image'];
 }
 
 function getPostRefFromValue(value: unknown): PostRef | null {
