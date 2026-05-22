@@ -1,0 +1,40 @@
+import { useModal } from '@lib/hooks/useModal';
+import { Button } from '@components/ui/button';
+import { NextImage } from '@components/ui/next-image';
+import { Modal } from '@components/modal/modal';
+import { ImageModal } from '@components/modal/image-modal';
+import type { ImageData } from '@lib/types/file';
+
+type UserHomeCoverProps = {
+  coverData?: ImageData | null;
+};
+
+export function UserHomeCover({ coverData }: UserHomeCoverProps): JSX.Element {
+  const { open, openModal, closeModal } = useModal();
+
+  return (
+    <div className='mt-0.5 h-36 xs:h-48 sm:h-52'>
+      <Modal open={open} closeModal={closeModal}>
+        <ImageModal imageData={coverData as ImageData} previewCount={1} />
+      </Modal>
+      {coverData ? (
+        <Button
+          className='accent-tab group relative h-full w-full rounded-none p-0 transition-colors'
+          onClick={openModal}
+        >
+          <NextImage
+            useSkeleton
+            layout='fill'
+            imgClassName='object-cover'
+            src={coverData.src}
+            alt={coverData.alt}
+            key={coverData.src}
+          />
+          <span className='pointer-events-none absolute inset-0 bg-black/0 transition-colors duration-200 group-hover:bg-black/10' />
+        </Button>
+      ) : (
+        <div className='h-full bg-light-line-reply dark:bg-dark-line-reply' />
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,318 @@
+import Link from 'next/link';
+import { useRouter } from 'next/router';
+import { AnimatePresence, motion } from 'framer-motion';
+import cn from 'clsx';
+import { useSearchTweets, useSearchUsers } from '@lib/api/search';
+import {
+  TrendsLayout,
+  ProtectedLayout
+} from '@components/layout/common-layout';
+import { MainLayout } from '@components/layout/main-layout';
+import { SEO } from '@components/common/seo';
+import { MainContainer } from '@components/home/main-container';
+import { AsideTrends, variants } from '@components/aside/aside-trends';
+import { SearchBar } from '@components/aside/search-bar';
+import { MobileSidebar } from '@components/sidebar/mobile-sidebar';
+import { Tweet } from '@components/tweet/tweet';
+import { UserCard } from '@components/user/user-card';
+import { Button } from '@components/ui/button';
+import { Error } from '@components/ui/error';
+import { HeroIcon } from '@components/ui/hero-icon';
+import { Loading } from '@components/ui/loading';
+import { ToolTip } from '@components/ui/tooltip';
+import type {
+  SearchPeopleFilter,
+  SearchPostFilter
+} from '@lib/atproto/backend';
+import type { ReactElement, ReactNode } from 'react';
+import type { ParsedUrlQuery } from 'querystring';
+
+type SearchTab = 'top' | 'live' | 'user' | 'image' | 'video';
+
+type SearchTabData = {
+  label: string;
+  value: SearchTab;
+};
+
+const searchTabs: Readonly<SearchTabData[]> = [
+  { label: 'Top', value: 'top' },
+  { label: 'Latest', value: 'live' },
+  { label: 'People', value: 'user' },
+  { label: 'Photos', value: 'image' },
+  { label: 'Videos', value: 'video' }
+];
+
+function getRouteParam(value: string | string[] | undefined): string {
+  return Array.isArray(value) ? value[0] ?? '' : value ?? '';
+}
+
+function getSearchTab(value: string | string[] | undefined): SearchTab {
+  const tab = getRouteParam(value);
+  return searchTabs.some(({ value }) => value === tab)
+    ? (tab as SearchTab)
+    : 'top';
+}
+
+function getPeopleFilter(query: ParsedUrlQuery): SearchPeopleFilter {
+  return query.pf === 'on' ? 'followed' : 'anyone';
+}
+
+function getPostFilter(tab: SearchTab): SearchPostFilter {
+  if (tab === 'live') return 'latest';
+  if (tab === 'image') return 'photos';
+  if (tab === 'video') return 'videos';
+  return 'top';
+}
+
+function cleanQuery(
+  query: Record<string, string | undefined>
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(query).filter(
+      (entry): entry is [string, string] => !!entry[1]
+    )
+  );
+}
+
+function getTabQuery(
+  searchQuery: string,
+  tab: SearchTab,
+  query: ParsedUrlQuery
+): Record<string, string> {
+  return cleanQuery({
+    q: searchQuery,
+    src: getRouteParam(query.src) || 'typed_query',
+    f: tab === 'top' ? undefined : tab,
+    pf: query.pf === 'on' ? 'on' : undefined,
+    lf: query.lf === 'on' ? 'on' : undefined
+  });
+}
+
+function ExploreSearchHeader(): JSX.Element {
+  return (
+    <header
+      className='hover-animation sticky top-0 z-20 flex items-center gap-2 bg-main-background/90
+                 px-4 py-1.5 backdrop-blur-md'
+    >
+      <MobileSidebar />
+      <SearchBar className='min-w-0 flex-1 bg-transparent p-0' sticky={false} />
+      <Button
+        className='group relative p-2 hover:bg-light-primary/10 active:bg-light-primary/20 
+                   dark:hover:bg-dark-primary/10 dark:active:bg-dark-primary/20'
+        aria-label='Explore settings'
+      >
+        <HeroIcon className='h-5 w-5' iconName='Cog6ToothIcon' />
+        <ToolTip tip='Settings' />
+      </Button>
+    </header>
+  );
+}
+
+function SearchTabs({
+  activeTab,
+  searchQuery,
+  query
+}: {
+  activeTab: SearchTab;
+  searchQuery: string;
+  query: ParsedUrlQuery;
+}): JSX.Element {
+  return (
+    <nav className='flex border-b border-light-border dark:border-dark-border'>
+      {searchTabs.map(({ label, value }) => {
+        const active = activeTab === value;
+
+        return (
+          <Link
+            href={{
+              pathname: '/explore',
+              query: getTabQuery(searchQuery, value, query)
+            }}
+            shallow
+            key={value}
+          >
+            <a
+              className={cn(
+                `accent-tab hover-card relative flex h-[53px] flex-1 items-center justify-center
+                 text-[15px] font-bold outline-none`,
+                active
+                  ? 'text-light-primary dark:text-dark-primary'
+                  : 'text-light-secondary dark:text-dark-secondary'
+              )}
+            >
+              <span>{label}</span>
+              {active && (
+                <i className='absolute bottom-0 h-1 w-14 rounded-full bg-main-accent' />
+              )}
+            </a>
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}
+
+function SearchEmptyState({
+  searchQuery
+}: {
+  searchQuery: string;
+}): JSX.Element {
+  return (
+    <div className='mx-auto flex max-w-sm flex-col px-8 py-10'>
+      <h2 className='text-[31px] font-extrabold leading-9'>
+        No results for &quot;{searchQuery}&quot;
+      </h2>
+      <p className='mt-2 text-[15px] text-light-secondary dark:text-dark-secondary'>
+        The term you entered did not bring up any results.
+      </p>
+    </div>
+  );
+}
+
+function SearchResults({
+  activeTab,
+  searchQuery,
+  query
+}: {
+  activeTab: SearchTab;
+  searchQuery: string;
+  query: ParsedUrlQuery;
+}): JSX.Element {
+  const people = getPeopleFilter(query);
+  const showUsers = activeTab === 'top' || activeTab === 'user';
+  const showTweets = activeTab !== 'user';
+  const {
+    data: tweetsData,
+    loading: tweetsLoading,
+    error: tweetsError
+  } = useSearchTweets(
+    searchQuery,
+    {
+      filter: getPostFilter(activeTab),
+      people,
+      disabled: !showTweets
+    },
+    { revalidateOnFocus: false }
+  );
+  const {
+    data: usersData,
+    loading: usersLoading,
+    error: usersError
+  } = useSearchUsers(
+    searchQuery,
+    {
+      people,
+      disabled: !showUsers
+    },
+    { revalidateOnFocus: false }
+  );
+  const loading = (showTweets && tweetsLoading) || (showUsers && usersLoading);
+  const error = tweetsError ?? usersError;
+  const tweets = tweetsData?.tweets ?? [];
+  const users = usersData?.users ?? [];
+  const hasUsers = users.length > 0;
+  const hasTweets = tweets.length > 0;
+
+  if (loading) return <Loading className='mt-5' />;
+
+  if (error) return <Error message='Something went wrong while searching.' />;
+
+  if (activeTab === 'user')
+    return hasUsers ? (
+      <motion.div className='mt-0.5' {...variants}>
+        {users.map((user) => (
+          <UserCard {...user} key={user.id} follow />
+        ))}
+      </motion.div>
+    ) : (
+      <SearchEmptyState searchQuery={searchQuery} />
+    );
+
+  if (!hasUsers && !hasTweets)
+    return <SearchEmptyState searchQuery={searchQuery} />;
+
+  return (
+    <section className='mt-0.5'>
+      {activeTab === 'top' && hasUsers && (
+        <motion.div
+          className='border-b border-light-border dark:border-dark-border'
+          {...variants}
+        >
+          <div className='px-4 py-3 text-xl font-extrabold'>People</div>
+          {users.slice(0, 3).map((user) => (
+            <UserCard {...user} key={user.id} follow />
+          ))}
+          <Link
+            href={{
+              pathname: '/explore',
+              query: getTabQuery(searchQuery, 'user', query)
+            }}
+            shallow
+          >
+            <a className='accent-tab hover-card block px-4 py-3 text-main-accent'>
+              View all
+            </a>
+          </Link>
+        </motion.div>
+      )}
+      {hasTweets ? (
+        <AnimatePresence>
+          {tweets.map((tweet) => (
+            <Tweet {...tweet} key={tweet.id} />
+          ))}
+        </AnimatePresence>
+      ) : (
+        <SearchEmptyState searchQuery={searchQuery} />
+      )}
+    </section>
+  );
+}
+
+export default function Explore(): JSX.Element {
+  const { query } = useRouter();
+  const searchQuery = getRouteParam(query.q).trim();
+  const activeTab = getSearchTab(query.f);
+  const searching = !!searchQuery;
+
+  return (
+    <MainContainer>
+      <SEO
+        title={
+          searching
+            ? `${searchQuery} - Not Twitter Search / Not Twitter`
+            : 'Explore / Not Twitter'
+        }
+      />
+      <ExploreSearchHeader />
+      {searching ? (
+        <>
+          <SearchTabs
+            activeTab={activeTab}
+            searchQuery={searchQuery}
+            query={query}
+          />
+          <SearchResults
+            activeTab={activeTab}
+            searchQuery={searchQuery}
+            query={query}
+          />
+        </>
+      ) : (
+        <>
+          <div className='border-y border-light-border px-4 py-3 dark:border-dark-border'>
+            <h1 className='text-xl font-extrabold'>Trends for you</h1>
+          </div>
+          <AsideTrends inTrendsPage />
+        </>
+      )}
+    </MainContainer>
+  );
+}
+
+Explore.getLayout = (page: ReactElement): ReactNode => (
+  <ProtectedLayout>
+    <MainLayout>
+      <TrendsLayout>{page}</TrendsLayout>
+    </MainLayout>
+  </ProtectedLayout>
+);
