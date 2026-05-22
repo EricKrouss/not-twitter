@@ -1,5 +1,4 @@
 import Link from 'next/link';
-import { useRouter } from 'next/router';
 import { useEffect, useState } from 'react';
 import { matchStaticRoute } from '@lib/static-routes';
 import { SEO } from '@components/common/seo';
@@ -26,9 +25,8 @@ function renderPage(Page: RoutedPage): ReactNode {
 }
 
 export default function NotFound(): JSX.Element {
-  const { asPath } = useRouter();
-  const [fallbackPath, setFallbackPath] = useState(asPath);
-  const staticRoute = matchStaticRoute(fallbackPath);
+  const [fallbackPath, setFallbackPath] = useState<string | null>(null);
+  const staticRoute = fallbackPath ? matchStaticRoute(fallbackPath) : null;
 
   useEffect(() => {
     setFallbackPath(`${window.location.pathname}${window.location.search}`);

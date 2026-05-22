@@ -938,13 +938,37 @@ function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function toPdsCompatibleBlobRef(blob: unknown): BlobRef {
+function parseBlobRef(blob: unknown): BlobRef {
   if (blob instanceof BlobRef) return blob;
 
-  const parsedBlob = jsonToLex(blob as Parameters<typeof jsonToLex>[0]);
+  const jsonBlob =
+    typeof (blob as { toJSON?: unknown })?.toJSON === 'function'
+      ? (blob as { toJSON: () => unknown }).toJSON()
+      : blob;
+  const parsedBlob = jsonToLex(jsonBlob as Parameters<typeof jsonToLex>[0]);
   if (parsedBlob instanceof BlobRef) return parsedBlob;
 
   throw new Error('Bluesky did not return a valid media blob.');
+}
+
+function getBlobRefSize(blob: BlobRef): number | null {
+  return Number.isFinite(blob.size) && blob.size > 0 ? blob.size : null;
+}
+
+function toPdsCompatibleBlobRef(
+  blob: unknown,
+  sizeOverride?: number
+): BlobRef {
+  const parsedBlob = parseBlobRef(blob);
+  const size =
+    typeof sizeOverride === 'number' && sizeOverride > 0
+      ? sizeOverride
+      : getBlobRefSize(parsedBlob);
+
+  if (!size)
+    throw new Error('Bluesky returned a media blob without a valid size.');
+
+  return new BlobRef(parsedBlob.ref, parsedBlob.mimeType, size);
 }
 
 function isSerializedCidObject(value: unknown): boolean {
@@ -4231,7 +4255,10 @@ export async function addTweet(data: AddTweetData): Promise<Tweet> {
             });
 
             return {
-              image: upload.data.blob,
+              image: toPdsCompatibleBlobRef(
+                upload.data.blob,
+                preparedImage.file.size
+              ),
               alt: preview.alt || '',
               aspectRatio: preparedImage.aspectRatio
             };
@@ -4333,29 +4360,63 @@ export function stageImages(userId: string, files: FilesWithId): ImagesPreview {
   return previews;
 }
 
-function normalizeProfileBlobForWrite(blob: unknown): BlobRef | null {
-  if (!blob) return null;
+async function fetchStoredBlobSize(
+  api: Agent,
+  blob: BlobRef
+): Promise<number | null> {
+  if (!sessionDid) return null;
 
   try {
-    return toPdsCompatibleBlobRef(blob);
+    const response = await api.com.atproto.sync.getBlob({
+      did: sessionDid,
+      cid: blob.ref.toString()
+    });
+
+    return response.data.byteLength > 0 ? response.data.byteLength : null;
   } catch {
     return null;
   }
 }
 
-function normalizeProfileRecordForWrite(
+async function normalizeProfileBlobForWrite(
+  api: Agent,
+  blob: unknown
+): Promise<BlobRef | null> {
+  if (!blob) return null;
+
+  let parsedBlob: BlobRef;
+
+  try {
+    parsedBlob = parseBlobRef(blob);
+  } catch {
+    return null;
+  }
+
+  const size =
+    getBlobRefSize(parsedBlob) ?? (await fetchStoredBlobSize(api, parsedBlob));
+
+  if (!size)
+    throw new Error(
+      'Bluesky did not provide a size for existing profile media.'
+    );
+
+  return toPdsCompatibleBlobRef(parsedBlob, size);
+}
+
+async function normalizeProfileRecordForWrite(
+  api: Agent,
   profile: Partial<AppBskyActorProfile.Record>
-): Partial<AppBskyActorProfile.Record> {
+): Promise<Partial<AppBskyActorProfile.Record>> {
   const nextProfile = { ...profile };
 
   if ('avatar' in nextProfile) {
-    const avatar = normalizeProfileBlobForWrite(nextProfile.avatar);
+    const avatar = await normalizeProfileBlobForWrite(api, nextProfile.avatar);
     if (avatar) nextProfile.avatar = avatar;
     else delete nextProfile.avatar;
   }
 
   if ('banner' in nextProfile) {
-    const banner = normalizeProfileBlobForWrite(nextProfile.banner);
+    const banner = await normalizeProfileBlobForWrite(api, nextProfile.banner);
     if (banner) nextProfile.banner = banner;
     else delete nextProfile.banner;
   }
@@ -4369,10 +4430,11 @@ async function upsertProfileRecord(
     existing: Partial<AppBskyActorProfile.Record>
   ) => Partial<AppBskyActorProfile.Record>
 ): Promise<void> {
-  await api.upsertProfile((existing) => {
-    const updated = normalizeProfileRecordForWrite(
+  await api.upsertProfile(async (existing) => {
+    const updated = (await normalizeProfileRecordForWrite(
+      api,
       updateRecord(existing ?? {})
-    ) as AppBskyActorProfile.Record;
+    )) as AppBskyActorProfile.Record;
     updated.$type = 'app.bsky.actor.profile';
     return updated;
   });
@@ -4397,7 +4459,10 @@ export async function updateProfile(
             })
             .then(
               ({ data }) =>
-                data.blob as AppBskyActorProfile.Record['avatar']
+                toPdsCompatibleBlobRef(
+                  data.blob,
+                  preparedImage.file.size
+                ) as AppBskyActorProfile.Record['avatar']
             )
         )
       : null,
@@ -4409,7 +4474,10 @@ export async function updateProfile(
             })
             .then(
               ({ data }) =>
-                data.blob as AppBskyActorProfile.Record['banner']
+                toPdsCompatibleBlobRef(
+                  data.blob,
+                  preparedImage.file.size
+                ) as AppBskyActorProfile.Record['banner']
             )
         )
       : null
