@@ -1,9 +1,11 @@
 import Link from 'next/link';
-import { useState, useEffect, useRef, useId } from 'react';
+import { useState, useEffect, useRef, useId, useMemo } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import cn from 'clsx';
 import { toast } from 'react-hot-toast';
+import { RichText } from '@atproto/api';
 import { tweetsCollection } from '@lib/atproto/collections';
+import { addDoc, getDoc, serverTimestamp } from '@lib/atproto/store';
 import { getTweetPath, getUserPath } from '@lib/routes';
 import {
   manageReply,
@@ -22,7 +24,6 @@ import { sleep } from '@lib/utils';
 import { getImagesData } from '@lib/validation';
 import { UserAvatar } from '@components/user/user-avatar';
 import { TweetEmbed } from '@components/tweet/tweet-embed';
-import { addDoc, getDoc, serverTimestamp } from '@lib/atproto/store';
 import { InputForm, fromTop } from './input-form';
 import { ImagePreview } from './image-preview';
 import { InputOptions } from './input-options';
@@ -82,6 +83,8 @@ export const variants: Variants = {
   animate: { opacity: 1 }
 };
 
+const BLUESKY_POST_GRAPHEME_LIMIT = 300;
+
 export function Input({
   modal,
   reply,
@@ -103,7 +106,7 @@ export function Input({
   const [replySetting, setReplySetting] =
     useState<TweetReplySetting>('everyone');
 
-  const { user, isAdmin } = useAuth();
+  const { user } = useAuth();
   const { name, username, photoURL } = user as User;
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -132,60 +135,66 @@ export function Input({
 
     setLoading(true);
 
-    const isReplying = reply ?? replyModal;
+    try {
+      const isReplying = reply ?? replyModal;
 
-    const userId = user?.id as string;
-    const quotedTweet = quoteTweet ? getQuotedTweetPreview(quoteTweet) : null;
+      const userId = user?.id as string;
+      const quotedTweet = quoteTweet ? getQuotedTweetPreview(quoteTweet) : null;
 
-    const tweetData: WithFieldValue<TweetDraft> = {
-      text: inputValue.trim() || null,
-      parent: isReplying && parent ? parent : null,
-      images: await uploadImages(userId, selectedImages),
-      card: null,
-      quotedTweet,
-      userLikes: [],
-      createdBy: userId,
-      createdAt: serverTimestamp(),
-      updatedAt: null,
-      userReplies: 0,
-      userRetweets: [],
-      userQuotes: 0,
-      bookmarkCount: 0,
-      replySetting: isReplying ? undefined : replySetting,
-      quoteTarget: quoteTweet
-        ? { id: quoteTweet.id, createdBy: quoteTweet.createdBy }
-        : undefined
-    };
+      const tweetData: WithFieldValue<TweetDraft> = {
+        text: inputValue.trim() || null,
+        parent: isReplying && parent ? parent : null,
+        images: await uploadImages(userId, selectedImages),
+        card: null,
+        quotedTweet,
+        userLikes: [],
+        createdBy: userId,
+        createdAt: serverTimestamp(),
+        updatedAt: null,
+        userReplies: 0,
+        userRetweets: [],
+        userQuotes: 0,
+        bookmarkCount: 0,
+        replySetting: isReplying ? undefined : replySetting,
+        quoteTarget: quoteTweet
+          ? { id: quoteTweet.id, createdBy: quoteTweet.createdBy }
+          : undefined
+      };
 
-    await sleep(500);
+      await sleep(500);
 
-    const [tweetRef] = await Promise.all([
-      addDoc(tweetsCollection, tweetData as WithFieldValue<Omit<Tweet, 'id'>>),
-      manageTotalTweets('increment', userId),
-      tweetData.images && manageTotalPhotos('increment', userId),
-      isReplying && manageReply('increment', parent?.id as string)
-    ]);
+      const [tweetRef] = await Promise.all([
+        addDoc(
+          tweetsCollection,
+          tweetData as WithFieldValue<Omit<Tweet, 'id'>>
+        ),
+        manageTotalTweets('increment', userId),
+        tweetData.images && manageTotalPhotos('increment', userId),
+        isReplying && manageReply('increment', parent?.id as string)
+      ]);
 
-    const { id: tweetId } = await getDoc(tweetRef);
+      const { id: tweetId } = await getDoc(tweetRef);
 
-    if (!modal && !replyModal) {
-      discardTweet();
+      if (!modal && !replyModal) discardTweet();
+
+      if (closeModal) closeModal();
+
+      toast.success(
+        () => (
+          <span className='flex gap-2'>
+            Your Tweet was sent
+            <Link href={getTweetPath(tweetId, username)}>
+              <a className='custom-underline font-bold'>View</a>
+            </Link>
+          </span>
+        ),
+        { duration: 6000 }
+      );
+    } catch {
+      toast.error('Tweet could not be sent');
+    } finally {
       setLoading(false);
     }
-
-    if (closeModal) closeModal();
-
-    toast.success(
-      () => (
-        <span className='flex gap-2'>
-          Your Tweet was sent
-          <Link href={getTweetPath(tweetId, username)}>
-            <a className='custom-underline font-bold'>View</a>
-          </Link>
-        </span>
-      ),
-      { duration: 6000 }
-    );
   };
 
   const handleImageUpload = (
@@ -371,12 +380,17 @@ export function Input({
 
   const formId = useId();
 
-  const inputLimit = isAdmin ? 560 : 280;
+  const inputLimit = BLUESKY_POST_GRAPHEME_LIMIT;
   const quotedTweetPreview = quoteTweet
     ? getQuotedTweetPreview(quoteTweet)
     : null;
 
-  const inputLength = inputValue.length;
+  const inputLength = useMemo(
+    () =>
+      new RichText({ text: inputValue }, { cleanNewlines: true })
+        .graphemeLength,
+    [inputValue]
+  );
   const isValidInput = !!inputValue.trim().length;
   const isCharLimitExceeded = inputLength > inputLimit;
 

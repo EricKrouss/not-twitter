@@ -97,6 +97,11 @@ type PostRef = {
   cid: string;
 };
 
+type PostReplyRef = {
+  root: PostRef;
+  parent: PostRef;
+};
+
 type BookmarkView = {
   subject?: PostRef;
   createdAt?: string;
@@ -377,6 +382,7 @@ const userCache = new Map<string, User>();
 const userHandleCache = new Map<string, User>();
 const tweetCache = new Map<string, Tweet>();
 const postRefCache = new Map<string, PostRef>();
+const postReplyRefCache = new Map<string, PostReplyRef>();
 const followUriCache = new Map<string, string>();
 const detailedUserCache = new Set<string>();
 const stagedImages = new Map<string, UploadedImage[]>();
@@ -898,6 +904,55 @@ const DEFAULT_NOTIFICATION_PREFERENCES: SettingsNotificationPreferences = {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function getCidString(value: unknown): string | null {
+  if (typeof value === 'string') return value;
+  if (!isPlainObject(value)) return null;
+
+  const link = value.$link;
+  if (typeof link === 'string') return link;
+
+  const cid = String(value);
+  return cid && cid !== '[object Object]' ? cid : null;
+}
+
+function toPdsCompatibleBlobRef(
+  blob: unknown
+): AppBskyEmbedImages.Image['image'] {
+  const blobRecord = isPlainObject(blob) ? blob : {};
+  const mimeType =
+    typeof blobRecord.mimeType === 'string'
+      ? blobRecord.mimeType
+      : 'application/octet-stream';
+  const cid = getCidString(blobRecord.cid) ?? getCidString(blobRecord.ref);
+
+  if (!cid) throw new Error('Bluesky did not return a valid media blob.');
+
+  return { cid, mimeType } as unknown as AppBskyEmbedImages.Image['image'];
+}
+
+function getPostRefFromValue(value: unknown): PostRef | null {
+  if (!isPlainObject(value)) return null;
+
+  const { uri, cid } = value;
+  return typeof uri === 'string' && typeof cid === 'string'
+    ? { uri, cid }
+    : null;
+}
+
+function getReplyRefFromRecord(record: unknown): PostReplyRef | null {
+  if (!isPlainObject(record) || !isPlainObject(record.reply)) return null;
+
+  const root = getPostRefFromValue(record.reply.root);
+  const parent = getPostRefFromValue(record.reply.parent);
+
+  return root && parent ? { root, parent } : null;
+}
+
+function cachePostReplyRef(id: string, record: unknown): void {
+  const replyRef = getReplyRefFromRecord(record);
+  if (replyRef) postReplyRefCache.set(id, replyRef);
 }
 
 function normalizeSettingsLabelPreference(
@@ -1955,6 +2010,7 @@ function mapEmbeddedRecord(
     const author = mapProfile(record.author);
 
     postRefCache.set(id, { uri: record.uri, cid: record.cid });
+    cachePostReplyRef(id, record.value);
 
     return {
       id,
@@ -2030,6 +2086,7 @@ function mapPost(
   };
 
   postRefCache.set(id, { uri: post.uri, cid: post.cid });
+  cachePostReplyRef(id, post.record);
   tweetCache.set(id, tweet);
   mapProfile(post.author);
 
@@ -3720,7 +3777,7 @@ export async function addTweet(data: AddTweetData): Promise<Tweet> {
             });
 
             return {
-              image: upload.data.blob,
+              image: toPdsCompatibleBlobRef(upload.data.blob),
               alt: preview.alt || ''
             };
           })
@@ -3744,18 +3801,23 @@ export async function addTweet(data: AddTweetData): Promise<Tweet> {
       : mediaEmbed ?? quoteEmbed;
 
   const parentId = data.parent?.id;
-  const parentRef = parentId ? postRefCache.get(parentId) : undefined;
+  const parentRef = parentId ? await getPostRef(parentId) : undefined;
+  if (parentId && !parentRef)
+    throw new Error('Reply target was not available.');
+
+  const parentReplyRef = parentId ? postReplyRefCache.get(parentId) : undefined;
+  const replyRef = parentRef
+    ? {
+        root: parentReplyRef?.root ?? parentRef,
+        parent: parentRef
+      }
+    : undefined;
 
   const result = await api.post({
     text: richText.text,
     facets: richText.facets,
     embed,
-    reply: parentRef
-      ? {
-          root: parentRef,
-          parent: parentRef
-        }
-      : undefined
+    reply: replyRef
   });
   await createThreadgate(api, result.uri, data.replySetting);
 
@@ -3777,6 +3839,7 @@ export async function addTweet(data: AddTweetData): Promise<Tweet> {
   };
 
   postRefCache.set(tweet.id, result);
+  if (replyRef) postReplyRefCache.set(tweet.id, replyRef);
   tweetCache.set(tweet.id, tweet);
   notify();
 
