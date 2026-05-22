@@ -25,6 +25,10 @@ type UserDetailsProps = Pick<
 
 type DetailIcon = [string | null, IconName];
 
+function getExternalHref(value: string): string {
+  return /^https?:\/\//i.test(value) ? value : `https://${value}`;
+}
+
 export function UserDetails({
   id,
   bio,
@@ -71,7 +75,7 @@ export function UserDetails({
                   {index === 1 ? (
                     <a
                       className='custom-underline text-main-accent'
-                      href={`https://${detail}`}
+                      href={getExternalHref(detail)}
                       target='_blank'
                       rel='noreferrer'
                     >

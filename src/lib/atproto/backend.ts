@@ -9,6 +9,7 @@ import {
   AppBskyLabelerDefs,
   Agent,
   AtpAgent,
+  BlobRef,
   RichText,
   type AppBskyActorProfile,
   type AppBskyActorDefs,
@@ -48,6 +49,7 @@ const GENERIC_SCOPE = 'transition:generic';
 const BSKY_IMAGE_MAX_BYTES = 1_000_000;
 const BSKY_IMAGE_TARGET_BYTES = 950_000;
 const BSKY_IMAGE_MAX_DIMENSION = 2000;
+const BSKY_MEDIA_POST_VISIBILITY_RETRIES = 8;
 const THEME_KEY = 'twitter-clone:bsky-theme';
 const DEFAULT_PROFILE_PHOTO_URL = '/assets/twitter-default-egg.png';
 const DEFAULT_PROFILE_COVER_URL = '/assets/twitter-default-cover.png';
@@ -921,6 +923,52 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getCidString(value: unknown): string | null {
+  if (typeof value === 'string') return value;
+  if (!value || typeof value !== 'object') return null;
+
+  if (isPlainObject(value) && typeof value.$link === 'string')
+    return value.$link;
+
+  const cid = String(value);
+  return cid && cid !== '[object Object]' ? cid : null;
+}
+
+function getBlobCid(value: unknown): string | null {
+  if (!isPlainObject(value)) return null;
+
+  const original = value.original;
+  const originalCid = isPlainObject(original)
+    ? getCidString(original.cid) ?? getCidString(original.ref)
+    : null;
+
+  return (
+    getCidString(value.cid) ?? getCidString(value.ref) ?? originalCid ?? null
+  );
+}
+
+function toPdsCompatibleBlobRef(
+  blob: unknown
+): AppBskyEmbedImages.Image['image'] {
+  const blobRecord = isPlainObject(blob) ? blob : {};
+  const mimeType =
+    typeof blobRecord.mimeType === 'string'
+      ? blobRecord.mimeType
+      : 'application/octet-stream';
+  const cid = getBlobCid(blobRecord);
+
+  if (!cid) throw new Error('Bluesky did not return a valid media blob.');
+
+  return BlobRef.fromJsonRef({
+    cid,
+    mimeType
+  }) as AppBskyEmbedImages.Image['image'];
+}
+
 function getPostRefFromValue(value: unknown): PostRef | null {
   if (!isPlainObject(value)) return null;
 
@@ -953,6 +1001,27 @@ function getLocalProfileOverride(data: Partial<User>): Partial<User> {
   if ('location' in data) override.location = data.location ?? null;
 
   return override;
+}
+
+function applyLocalProfileUpdate(userId: string, data: Partial<User>): void {
+  const cachedUser = userCache.get(userId);
+  const targetUser = currentUser?.id === userId ? currentUser : cachedUser;
+
+  if (!targetUser) return;
+
+  if ('name' in data) targetUser.name = data.name ?? '';
+  if ('bio' in data) targetUser.bio = data.bio ? data.bio : null;
+  if ('website' in data) targetUser.website = data.website ?? null;
+  if ('location' in data) targetUser.location = data.location ?? null;
+  if ('coverPhotoURL' in data && data.coverPhotoURL === null)
+    targetUser.coverPhotoURL = DEFAULT_PROFILE_COVER_URL;
+
+  targetUser.updatedAt = Timestamp.now();
+  userCache.set(targetUser.id, targetUser);
+  userHandleCache.set(targetUser.username, targetUser);
+  detailedUserCache.add(targetUser.id);
+
+  if (currentUser?.id === userId) currentUser = targetUser;
 }
 
 function getImageAspectRatio(
@@ -2234,6 +2303,45 @@ function mapPost(
   mapProfile(post.author);
 
   return tweet;
+}
+
+function postHasVisibleMedia(post: AppBskyFeedDefs.PostView): boolean {
+  return !!mapMedia(post.embed)?.length;
+}
+
+async function waitForPublishedPost(
+  api: Agent,
+  uri: string,
+  requireMedia: boolean
+): Promise<Tweet> {
+  let lastError: unknown = null;
+
+  for (
+    let attempt = 0;
+    attempt < BSKY_MEDIA_POST_VISIBILITY_RETRIES;
+    attempt += 1
+  ) {
+    try {
+      const post = (await api.getPosts({ uris: [uri] })).data.posts[0];
+
+      if (post && (!requireMedia || postHasVisibleMedia(post)))
+        return mapPost(post);
+    } catch (error) {
+      lastError = error;
+    }
+
+    await wait(700 + attempt * 200);
+  }
+
+  if (requireMedia) {
+    throw new Error(
+      'Bluesky accepted the Tweet, but did not publish its attached image. Try a smaller image.'
+    );
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error('Bluesky did not publish the Tweet.');
 }
 
 function mapFeedItem(item: ActorFeedPost): Tweet {
@@ -3921,7 +4029,7 @@ export async function addTweet(data: AddTweetData): Promise<Tweet> {
             });
 
             return {
-              image: upload.data.blob,
+              image: toPdsCompatibleBlobRef(upload.data.blob),
               alt: preview.alt || '',
               aspectRatio: preparedImage.aspectRatio
             };
@@ -3965,15 +4073,10 @@ export async function addTweet(data: AddTweetData): Promise<Tweet> {
     reply: replyRef,
     createdAt: new Date().toISOString()
   };
-  const result = mediaEmbed
-    ? await api.app.bsky.feed.post.create(
-        { repo: api.accountDid, validate: false },
-        postRecord
-      )
-    : await api.post(postRecord);
+  const result = await api.post(postRecord);
   await createThreadgate(api, result.uri, data.replySetting);
 
-  const tweet: Tweet = {
+  const localTweet: Tweet = {
     id: postIdFromUri(result.uri),
     text: richText.text || null,
     images: images.length ? images.map(({ preview }) => preview) : null,
@@ -3989,13 +4092,26 @@ export async function addTweet(data: AddTweetData): Promise<Tweet> {
     userQuotes: data.userQuotes ?? 0,
     bookmarkCount: data.bookmarkCount ?? 0
   };
+  let visibleTweet = localTweet;
 
-  postRefCache.set(tweet.id, result);
-  if (replyRef) postReplyRefCache.set(tweet.id, replyRef);
-  tweetCache.set(tweet.id, tweet);
+  if (mediaEmbed) {
+    try {
+      visibleTweet = {
+        ...(await waitForPublishedPost(api, result.uri, true)),
+        parent: localTweet.parent
+      };
+    } catch (error) {
+      await api.deletePost(result.uri).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  postRefCache.set(visibleTweet.id, result);
+  if (replyRef) postReplyRefCache.set(visibleTweet.id, replyRef);
+  tweetCache.set(visibleTweet.id, visibleTweet);
   notify();
 
-  return tweet;
+  return visibleTweet;
 }
 
 export function stageImages(userId: string, files: FilesWithId): ImagesPreview {
@@ -4040,8 +4156,6 @@ async function upsertProfileRecord(
       ) as Record<string, unknown>),
       $type: 'app.bsky.actor.profile'
     };
-    const hasBlob = !!record.avatar || !!record.banner;
-
     try {
       await api.com.atproto.repo.putRecord(
         {
@@ -4050,7 +4164,7 @@ async function upsertProfileRecord(
           rkey,
           record,
           swapRecord: existingRecord?.data.cid ?? null,
-          validate: skipValidation || hasBlob ? false : undefined
+          validate: skipValidation ? false : undefined
         },
         { encoding: 'application/json' }
       );
@@ -4084,7 +4198,12 @@ export async function updateProfile(
             .uploadBlob(preparedImage.file, {
               encoding: preparedImage.encoding
             })
-            .then(({ data }) => data.blob)
+            .then(
+              ({ data }) =>
+                toPdsCompatibleBlobRef(
+                  data.blob
+                ) as AppBskyActorProfile.Record['avatar']
+            )
         )
       : null,
     bannerFile
@@ -4093,7 +4212,12 @@ export async function updateProfile(
             .uploadBlob(preparedImage.file, {
               encoding: preparedImage.encoding
             })
-            .then(({ data }) => data.blob)
+            .then(
+              ({ data }) =>
+                toPdsCompatibleBlobRef(
+                  data.blob
+                ) as AppBskyActorProfile.Record['banner']
+            )
         )
       : null
   ]);
@@ -4119,11 +4243,12 @@ export async function updateProfile(
 
         return nextProfile;
       },
-      !!avatarUpload || !!bannerUpload
+      false
     );
   }
 
-  await refreshCurrentUser();
+  await refreshCurrentUser().catch(() => null);
+  applyLocalProfileUpdate(userId, data);
   notify();
 }
 

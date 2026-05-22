@@ -22,7 +22,7 @@ type TextPart =
   | { type: 'mention'; value: string; username: string };
 
 const entityRegex =
-  /(https?:\/\/[^\s<>"']+|www\.[^\s<>"']+)|#([A-Za-z0-9_]{1,139})|@([A-Za-z0-9_][A-Za-z0-9_.-]{0,251})/gi;
+  /((?:https?:\/\/|www\.)[^\s<>"']+|(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,}(?:\/[^\s<>"']*)?)|#([A-Za-z0-9_]{1,139})|@([A-Za-z0-9_][A-Za-z0-9_.-]{0,251})/gi;
 
 function getUrlHref(value: string): string {
   return /^https?:\/\//i.test(value) ? value : `https://${value}`;
@@ -75,6 +75,16 @@ function getTextParts(text: string): TextPart[] {
     const url = match[1];
 
     if (url) {
+      const previousCharacter = index > 0 ? text[index - 1] : '';
+      const explicitUrl = /^(?:https?:\/\/|www\.)/i.test(url);
+
+      if (
+        !explicitUrl &&
+        previousCharacter &&
+        /[@A-Za-z0-9_.-]/.test(previousCharacter)
+      )
+        continue;
+
       const { url: trimmedUrl, trailing } = trimUrlTrailingPunctuation(url);
 
       if (index > lastIndex)
