@@ -259,7 +259,6 @@ type StrictBlobRef = BlobRef & {
   mimeType: string;
   size: number;
 };
-type BlobRefJson = NonNullable<ConstructorParameters<typeof BlobRef>[3]>;
 
 export type ProfileMediaFiles = Partial<
   Record<'photoURL' | 'coverPhotoURL', FilesWithId>
@@ -1834,12 +1833,12 @@ function getResolvedBlobRefSize(
 
 function toRepoRecordBlobRef(blob: unknown, sizeOverride?: number): BlobRef {
   const parsedBlob = parseBlobRef(blob);
-  const size = getResolvedBlobRefSize(parsedBlob, sizeOverride);
+  getResolvedBlobRefSize(parsedBlob, sizeOverride);
 
-  return new BlobRef(parsedBlob.ref, parsedBlob.mimeType, size, {
+  return {
     cid: String(parsedBlob.ref),
     mimeType: parsedBlob.mimeType
-  } as BlobRefJson);
+  } as unknown as BlobRef;
 }
 
 function isSerializedCidObject(value: unknown): boolean {
