@@ -55,8 +55,8 @@ const BSKY_CHAT_PROXY = `${BSKY_CHAT_DID}#${BSKY_CHAT_SERVICE}`;
 const BSKY_CHAT_URL = 'https://api.bsky.chat';
 const OAUTH_SCOPES = [
   'atproto',
-  `rpc:*?aud=${BSKY_APPVIEW_DID}%23${BSKY_APPVIEW_SERVICE}`,
-  `rpc:*?aud=${BSKY_CHAT_DID}%23${BSKY_CHAT_SERVICE}`,
+  `rpc?lxm=*&aud=${BSKY_APPVIEW_DID}%23${BSKY_APPVIEW_SERVICE}`,
+  `rpc?lxm=*&aud=${BSKY_CHAT_DID}%23${BSKY_CHAT_SERVICE}`,
   'repo:app.bsky.actor.profile',
   'repo:app.bsky.feed.like',
   'repo:app.bsky.feed.post',
@@ -932,24 +932,62 @@ function throwChatError(error: unknown): never {
   throw new Error(`Bluesky messages failed: ${message}`);
 }
 
+function safeDecodeScopeValue(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function parseRpcScope(
+  scope: string
+): { audiences: string[]; methods: string[] } | null {
+  if (scope !== 'rpc' && !scope.startsWith('rpc:') && !scope.startsWith('rpc?'))
+    return null;
+
+  const [resource, queryString = ''] = scope.split('?', 2);
+  const positionalMethod = resource.startsWith('rpc:')
+    ? resource.slice('rpc:'.length)
+    : null;
+  const params = new URLSearchParams(queryString);
+  const methods = params.getAll('lxm');
+  const audiences = params.getAll('aud');
+
+  if (positionalMethod) methods.unshift(positionalMethod);
+
+  return {
+    audiences: audiences.map(safeDecodeScopeValue),
+    methods: methods.map(safeDecodeScopeValue)
+  };
+}
+
 function hasRpcScopeForAudience(
   scopes: Set<string>,
   serviceDid: string,
-  serviceId: string
+  serviceId: string,
+  method?: string
 ): boolean {
   const proxy = `${serviceDid}#${serviceId}`;
-  const encodedProxy = `${serviceDid}%23${serviceId}`;
 
-  return Array.from(scopes).some(
-    (scope) =>
-      scope.startsWith('rpc:') &&
-      (scope.includes(`aud=${proxy}`) ||
-        scope.includes(`aud=${encodedProxy}`) ||
-        scope.includes('aud=*'))
-  );
+  return Array.from(scopes).some((scope) => {
+    const rpcScope = parseRpcScope(scope);
+    if (!rpcScope) return false;
+
+    const hasAudience = rpcScope.audiences.some(
+      (audience) =>
+        audience === '*' || audience === serviceDid || audience === proxy
+    );
+    const hasMethod =
+      !method ||
+      rpcScope.methods.includes('*') ||
+      rpcScope.methods.includes(method);
+
+    return hasAudience && hasMethod;
+  });
 }
 
-async function hasAppViewAccessScope(): Promise<boolean> {
+async function hasAppViewAccessScope(method?: string): Promise<boolean> {
   if (!oauthSession) return false;
 
   const tokenInfo = await oauthSession.getTokenInfo('auto');
@@ -957,12 +995,17 @@ async function hasAppViewAccessScope(): Promise<boolean> {
 
   return (
     scopes.has(GENERIC_SCOPE) ||
-    hasRpcScopeForAudience(scopes, BSKY_APPVIEW_DID, BSKY_APPVIEW_SERVICE)
+    hasRpcScopeForAudience(
+      scopes,
+      BSKY_APPVIEW_DID,
+      BSKY_APPVIEW_SERVICE,
+      method
+    )
   );
 }
 
-async function ensureAppViewAccessScope(): Promise<void> {
-  if (await hasAppViewAccessScope()) return;
+async function ensureAppViewAccessScope(method?: string): Promise<void> {
+  if (await hasAppViewAccessScope(method)) return;
 
   throw new Error(REFRESH_BSKY_LOGIN_MESSAGE);
 }
@@ -1213,7 +1256,7 @@ async function fetchAppViewTimeline(
   cursor?: string,
   limit = 30
 ): Promise<AppViewFeedResponse> {
-  await ensureAppViewAccessScope();
+  await ensureAppViewAccessScope('app.bsky.feed.getTimeline');
 
   return callAppQueryXrpc<AppViewFeedResponse>('app.bsky.feed.getTimeline', {
     cursor,
@@ -3432,7 +3475,7 @@ export async function listNotificationsPage(
   cursor?: string,
   options?: { mentionsOnly?: boolean; limit?: number }
 ): Promise<NotificationsPage> {
-  await ensureAppViewAccessScope();
+  await ensureAppViewAccessScope('app.bsky.notification.listNotifications');
 
   const response = await callAppQueryXrpc<AppViewNotificationsResponse>(
     'app.bsky.notification.listNotifications',

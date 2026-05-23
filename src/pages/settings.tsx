@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import cn from 'clsx';
 import useSWR from 'swr';
 import { toast } from 'react-hot-toast';
@@ -1059,6 +1060,14 @@ export default function Settings(): JSX.Element {
           title='Privacy and safety'
           description='Controls here are backed by Bluesky preferences, post interaction settings, or the chat declaration record.'
         />
+        <SettingsRow
+          title='Privacy policy'
+          description='Read how Not Twitter uses browser storage and Bluesky data.'
+        >
+          <Link href='/privacy'>
+            <a className={secondaryButtonClassName}>View policy</a>
+          </Link>
+        </SettingsRow>
         <SettingsRow
           title='Default replies'
           description='Choose who can reply to new posts by default.'

@@ -3,8 +3,8 @@ import path from 'node:path';
 
 const OAUTH_SCOPES = [
   'atproto',
-  'rpc:*?aud=did:web:api.bsky.app%23bsky_appview',
-  'rpc:*?aud=did:web:api.bsky.chat%23bsky_chat',
+  'rpc?lxm=*&aud=did:web:api.bsky.app%23bsky_appview',
+  'rpc?lxm=*&aud=did:web:api.bsky.chat%23bsky_chat',
   'repo:app.bsky.actor.profile',
   'repo:app.bsky.feed.like',
   'repo:app.bsky.feed.post',

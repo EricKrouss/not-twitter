@@ -38,6 +38,11 @@ const bottomNavLinks: Readonly<MobileNavLink[]> = [
     iconName: 'Cog8ToothIcon'
   },
   {
+    href: '/privacy',
+    linkName: 'Privacy Policy',
+    iconName: 'DocumentTextIcon'
+  },
+  {
     href: '/help-center',
     linkName: 'Help center',
     iconName: 'QuestionMarkCircleIcon',

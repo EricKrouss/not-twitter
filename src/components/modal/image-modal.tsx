@@ -11,6 +11,7 @@ import { formatDate, formatNumber } from '@lib/date';
 import { useAuth } from '@lib/context/auth-context';
 import { useCollection } from '@lib/hooks/useCollection';
 import { tweetsCollection } from '@lib/atproto/collections';
+import { query, where, orderBy } from '@lib/atproto/store';
 import { manageBookmark, manageLike, manageRetweet } from '@lib/atproto/utils';
 import { getTweetPath, getUserPath } from '@lib/routes';
 import { Button } from '@components/ui/button';
@@ -25,7 +26,6 @@ import { Input } from '@components/input/input';
 import { TweetActions } from '@components/tweet/tweet-actions';
 import { TweetShare } from '@components/tweet/tweet-share';
 import { TweetText } from '@components/tweet/tweet-text';
-import { query, where, orderBy } from '@lib/atproto/store';
 import type { VariantLabels, Variants } from 'framer-motion';
 import type { ImageData } from '@lib/types/file';
 import type { TweetWithUser } from '@lib/types/tweet';
@@ -191,21 +191,26 @@ function MediaConversation({ tweet }: { tweet: TweetWithUser }): JSX.Element {
     <aside
       className='flex h-[44vh] w-full shrink-0 flex-col border-t border-light-border bg-main-background
                  text-light-primary dark:border-dark-border dark:text-dark-primary lg:h-full lg:w-[350px]
+                 lg:min-w-[350px]
                  lg:border-t-0 lg:border-l'
       onClick={preventBubbling(null, true)}
     >
-      <header
-        className='sticky top-0 z-10 flex h-[53px] shrink-0 items-center border-b border-light-border
-                   bg-main-background/95 px-4 backdrop-blur-md dark:border-dark-border'
-      >
-        <h2 className='text-xl font-bold leading-6'>Tweet</h2>
-      </header>
       <div className='min-h-0 flex-1 overflow-y-auto overscroll-contain'>
         <ConversationTweet
           tweet={tweet}
           root
           onReply={(): void => setReplyFocusRequest((request) => request + 1)}
         />
+        <div className='border-b border-light-border text-[15px] dark:border-dark-border'>
+          <button
+            className='accent-tab flex items-center gap-1 px-4 py-2.5 text-light-secondary outline-none
+                       hover:text-light-primary dark:text-dark-secondary dark:hover:text-dark-primary'
+            type='button'
+          >
+            <span>Relevant</span>
+            <HeroIcon className='h-4 w-4' iconName='ChevronDownIcon' />
+          </button>
+        </div>
         <div className='border-b border-light-border px-4 dark:border-dark-border'>
           <Input
             reply
@@ -213,13 +218,6 @@ function MediaConversation({ tweet }: { tweet: TweetWithUser }): JSX.Element {
             focusSignal={replyFocusRequest}
             parent={{ id: tweet.id, username: tweet.user.username }}
           />
-        </div>
-        <div className='border-b border-light-border text-[15px] dark:border-dark-border'>
-          <Link href={getTweetPath(tweet.id, tweet.user.username)}>
-            <a className='accent-tab hover-card block px-4 py-2.5 font-medium text-main-accent outline-none'>
-              Show this thread
-            </a>
-          </Link>
         </div>
         {loading ? (
           <Loading className='my-5' />
@@ -258,6 +256,64 @@ function ConversationTweet({
   const userId = authUser?.id as string;
   const isOwner = userId === createdBy;
   const tweetLink = getTweetPath(id, username);
+
+  if (root)
+    return (
+      <article className='relative border-b border-light-border px-4 pt-3 text-[15px] dark:border-dark-border'>
+        <div className='flex min-w-0 gap-3 pr-10'>
+          <UserAvatar
+            className='mt-0.5'
+            size={40}
+            src={photoURL}
+            alt={name}
+            username={username}
+          />
+          <div className='min-w-0 flex-1 text-light-secondary dark:text-dark-secondary'>
+            <UserName
+              name={name}
+              username={username}
+              verified={verified}
+              className='text-light-primary dark:text-dark-primary'
+            />
+            <UserUsername username={username} />
+          </div>
+        </div>
+        <TweetActions
+          isOwner={isOwner}
+          ownerId={ownerId}
+          tweetId={id}
+          parentId={parent?.id}
+          parentUsername={parent?.username}
+          username={username}
+          hasImages={!!images || !!card || !!quotedTweet}
+          createdBy={createdBy}
+          viewTweet
+        />
+        {parent && (
+          <p className='mt-3 text-light-secondary dark:text-dark-secondary'>
+            Replying to{' '}
+            <Link href={getUserPath(parent.username)}>
+              <a className='custom-underline text-main-accent'>
+                @{parent.username}
+              </a>
+            </Link>
+          </p>
+        )}
+        {text && (
+          <TweetText
+            className='mt-3 min-w-0 leading-5 [overflow-wrap:anywhere]'
+            text={text}
+          />
+        )}
+        <Link href={tweetLink}>
+          <a className='custom-underline mt-4 block text-[15px] leading-5 text-light-secondary dark:text-dark-secondary'>
+            {formatDate(createdAt, 'full')} · Twitter Web App
+          </a>
+        </Link>
+        <MediaTweetStatsRow tweet={tweet} />
+        <ConversationActionBar tweet={tweet} root={root} onReply={onReply} />
+      </article>
+    );
 
   return (
     <article
@@ -344,6 +400,38 @@ function ConversationTweet({
         />
       )}
     </article>
+  );
+}
+
+function MediaTweetStatsRow({
+  tweet
+}: {
+  tweet: TweetWithUser;
+}): JSX.Element | null {
+  const stats: Readonly<[number, string][]> = [
+    [tweet.userQuotes, tweet.userQuotes === 1 ? 'Quote Tweet' : 'Quote Tweets'],
+    [
+      tweet.userRetweets.length,
+      tweet.userRetweets.length === 1 ? 'Retweet' : 'Retweets'
+    ],
+    [tweet.userLikes.length, tweet.userLikes.length === 1 ? 'Like' : 'Likes']
+  ];
+
+  const visibleStats = stats.filter(([count]) => count > 0);
+
+  if (!visibleStats.length) return null;
+
+  return (
+    <div className='mt-3 flex flex-wrap gap-x-4 gap-y-2 border-t border-light-border py-3 text-[15px] text-light-secondary dark:border-dark-border dark:text-dark-secondary'>
+      {visibleStats.map(([count, label]) => (
+        <span className='flex gap-1' key={label}>
+          <b className='font-bold text-light-primary dark:text-dark-primary'>
+            {formatNumber(count)}
+          </b>
+          <span>{label}</span>
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -529,7 +617,7 @@ function ConversationActionBar({
       className={cn(
         'flex text-light-secondary dark:text-dark-secondary',
         root
-          ? 'mt-3 justify-around border-y border-light-border px-5 py-0 dark:border-dark-border'
+          ? 'mt-3 justify-between border-t border-light-border px-1 py-1.5 dark:border-dark-border'
           : 'mt-2 max-w-md justify-between'
       )}
     >
@@ -628,8 +716,13 @@ function ConversationActionButton({
           iconName={iconName}
         />
       </i>
-      {!root && !!count && (
-        <span className='-ml-1.5 min-w-[10px] text-left text-[13px] leading-4'>
+      {!!count && (
+        <span
+          className={cn(
+            '-ml-1.5 min-w-[10px] text-left text-[13px] leading-4',
+            root && 'text-light-secondary dark:text-dark-secondary'
+          )}
+        >
           {formatNumber(count)}
         </span>
       )}
