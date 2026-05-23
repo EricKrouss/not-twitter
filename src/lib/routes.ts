@@ -17,6 +17,13 @@ export function getTweetPath(
     : `/tweet/${encodeURIComponent(tweetId)}`;
 }
 
+export function getTweetQuotesPath(
+  tweetId: string,
+  username?: string | null
+): string {
+  return `${getTweetPath(tweetId, username)}/retweets/with_comments`;
+}
+
 export function getNotificationsPath(tab: NotificationsTab = 'all'): string {
   return tab === 'mentions' ? '/notifications/mentions' : '/notifications';
 }
@@ -33,7 +40,10 @@ function normalizeRoutePath(path: string): string {
   let pathname = path.split(/[?#]/)[0] || '/';
   const basePath = getConfiguredBasePath();
 
-  if (basePath && (pathname === basePath || pathname.startsWith(`${basePath}/`)))
+  if (
+    basePath &&
+    (pathname === basePath || pathname.startsWith(`${basePath}/`))
+  )
     pathname = pathname.slice(basePath.length) || '/';
 
   return pathname.replace(/\/+$/g, '') || '/';

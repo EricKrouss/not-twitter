@@ -72,7 +72,10 @@ export function getStaticPathSegments(asPath?: string): string[] {
 
   const basePath = getConfiguredBasePath();
 
-  if (basePath && (pathname === basePath || pathname.startsWith(`${basePath}/`)))
+  if (
+    basePath &&
+    (pathname === basePath || pathname.startsWith(`${basePath}/`))
+  )
     pathname = pathname.slice(basePath.length) || '/';
 
   return pathname
@@ -95,12 +98,29 @@ export function matchStaticRoute(asPath?: string): StaticRouteMatch | null {
   if (segments.length === 2 && segments[0] === 'tweet')
     return { type: 'tweet', id: segments[1] };
 
+  if (
+    segments.length === 4 &&
+    segments[0] === 'tweet' &&
+    segments[2] === 'retweets' &&
+    segments[3] === 'with_comments'
+  )
+    return { type: 'tweet', id: segments[1] };
+
   if (segments.length >= 2 && segments[0] === 'user')
     return matchUserRoute(segments.slice(1));
 
   if (
     segments.length === 3 &&
     segments[1] === 'status' &&
+    isProfileRouteActor(segments[0])
+  )
+    return { type: 'tweet', actor: segments[0], id: segments[2] };
+
+  if (
+    segments.length === 5 &&
+    segments[1] === 'status' &&
+    segments[3] === 'retweets' &&
+    segments[4] === 'with_comments' &&
     isProfileRouteActor(segments[0])
   )
     return { type: 'tweet', actor: segments[0], id: segments[2] };

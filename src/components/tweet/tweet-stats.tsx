@@ -241,6 +241,7 @@ export function TweetStats({
       {viewTweet && (
         <ViewTweetStats
           tweetId={tweetId}
+          username={username}
           likeMove={likeMove}
           tweetMove={tweetMove}
           quoteMove={quoteMove}

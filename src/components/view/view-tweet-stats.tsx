@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/router';
 import cn from 'clsx';
 import { AnimatePresence, motion } from 'framer-motion';
 import { listTweetStatsPage } from '@lib/atproto/backend';
 import { useModal } from '@lib/hooks/useModal';
+import { getTweetQuotesPath } from '@lib/routes';
 import { Modal } from '@components/modal/modal';
 import { TweetStatsModal } from '@components/modal/tweet-stats-modal';
 import { NumberStats } from '@components/tweet/number-stats';
@@ -16,6 +18,7 @@ import type { StatsEmptyProps } from '@components/tweet/stats-empty';
 
 type viewTweetStats = {
   tweetId: string;
+  username?: string;
   likeMove: number;
   tweetMove: number;
   quoteMove: number;
@@ -211,6 +214,7 @@ function StatsModalContent({
 
 export function ViewTweetStats({
   tweetId,
+  username,
   likeMove,
   tweetMove,
   quoteMove,
@@ -223,9 +227,16 @@ export function ViewTweetStats({
 }: viewTweetStats): JSX.Element {
   const [statsType, setStatsType] = useState<StatsType | null>(null);
 
+  const { push } = useRouter();
+
   const { open, openModal, closeModal } = useModal();
 
   const handleOpen = (type: StatsType) => (): void => {
+    if (type === 'quotes') {
+      void push(getTweetQuotesPath(tweetId, username));
+      return;
+    }
+
     setStatsType(type);
     openModal();
   };
