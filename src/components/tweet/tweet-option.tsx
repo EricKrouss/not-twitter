@@ -39,6 +39,7 @@ export function TweetOption({
         className
       )}
       aria-disabled={disabled}
+      aria-label={tip}
       onClick={preventBubbling(onClick)}
     >
       <i

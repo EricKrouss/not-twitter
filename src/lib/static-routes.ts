@@ -95,6 +95,22 @@ export function matchStaticRoute(asPath?: string): StaticRouteMatch | null {
   )
     return { type: 'feed', actor: segments[1], rkey: segments[3] };
 
+  if (
+    segments.length === 4 &&
+    segments[0] === 'profile' &&
+    segments[2] === 'post'
+  )
+    return { type: 'tweet', actor: segments[1], id: segments[3] };
+
+  if (
+    segments.length === 6 &&
+    segments[0] === 'profile' &&
+    segments[2] === 'post' &&
+    segments[4] === 'retweets' &&
+    segments[5] === 'with_comments'
+  )
+    return { type: 'tweet', actor: segments[1], id: segments[3] };
+
   if (segments.length === 2 && segments[0] === 'tweet')
     return { type: 'tweet', id: segments[1] };
 

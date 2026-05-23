@@ -4949,6 +4949,20 @@ export async function getChatConvoForActor(actor: string): Promise<ChatConvo> {
   return mapChatConvo(response.data.convo);
 }
 
+export async function checkCanChatWithActor(actorDid: string): Promise<boolean> {
+  if (!sessionDid || !actorDid || actorDid === sessionDid) return false;
+  try {
+    await callChat(() =>
+      getChatAgent().chat.bsky.convo.getConvoForMembers({
+        members: [actorDid]
+      })
+    );
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
 async function refreshCurrentUser(): Promise<User | null> {
   if (!sessionDid) return null;
 

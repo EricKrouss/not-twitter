@@ -12,9 +12,32 @@ export function getTweetPath(
   tweetId: string,
   username?: string | null
 ): string {
-  return username
-    ? `${getUserPath(username)}/status/${encodeURIComponent(tweetId)}`
-    : `/tweet/${encodeURIComponent(tweetId)}`;
+  let actor = username;
+  let rkey = tweetId;
+
+  try {
+    const padded = tweetId.replace(/-/g, '+').replace(/_/g, '/');
+    const padding = '='.repeat((4 - (padded.length % 4)) % 4);
+    const decoded = typeof window !== 'undefined' && window.atob
+      ? window.atob(`${padded}${padding}`)
+      : Buffer.from(`${padded}${padding}`, 'base64').toString('utf8');
+
+    if (decoded.startsWith('at://')) {
+      const parts = decoded.split('/');
+      rkey = parts[parts.length - 1];
+      if (!actor) {
+        actor = parts[2]; // did:plc:...
+      }
+    }
+  } catch (e) {
+    // Fallback to raw inputs
+  }
+
+  if (actor) {
+    return `/profile/${encodeURIComponent(actor)}/post/${encodeURIComponent(rkey)}`;
+  }
+
+  return `/tweet/${encodeURIComponent(rkey)}`;
 }
 
 export function getTweetQuotesPath(

@@ -541,12 +541,34 @@ function MentionActionButton({
   const [updatingBookmark, setUpdatingBookmark] = useState(false);
 
   useEffect(() => {
-    setOptimisticLikes(tweet?.userLikes ?? []);
-  }, [tweet?.userLikes]);
+    setOptimisticLikes((current) => {
+      if (!viewerId) return tweet?.userLikes ?? [];
+      const wasLiked = current.includes(viewerId);
+      const userLikes = tweet?.userLikes ?? [];
+      const isLikedInProp = userLikes.includes(viewerId);
+      if (wasLiked && !isLikedInProp) {
+        return [viewerId, ...userLikes.filter((id) => id !== viewerId)];
+      } else if (!wasLiked && isLikedInProp) {
+        return userLikes.filter((id) => id !== viewerId);
+      }
+      return userLikes;
+    });
+  }, [tweet?.userLikes, viewerId]);
 
   useEffect(() => {
-    setOptimisticRetweets(tweet?.userRetweets ?? []);
-  }, [tweet?.userRetweets]);
+    setOptimisticRetweets((current) => {
+      if (!viewerId) return tweet?.userRetweets ?? [];
+      const wasRetweeted = current.includes(viewerId);
+      const userRetweets = tweet?.userRetweets ?? [];
+      const isRetweetedInProp = userRetweets.includes(viewerId);
+      if (wasRetweeted && !isRetweetedInProp) {
+        return [viewerId, ...userRetweets.filter((id) => id !== viewerId)];
+      } else if (!wasRetweeted && isRetweetedInProp) {
+        return userRetweets.filter((id) => id !== viewerId);
+      }
+      return userRetweets;
+    });
+  }, [tweet?.userRetweets, viewerId]);
 
   const bookmarked = !!(
     tweet && userBookmarks?.some(({ id }) => id === tweet.id)

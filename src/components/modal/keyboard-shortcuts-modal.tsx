@@ -48,7 +48,8 @@ const actionsSection: ShortcutSection = {
     { description: 'Share post', keys: ['s'] },
     { description: 'Bookmark', keys: ['b'] },
     { description: 'Open post details', keys: ['Enter'] },
-    { description: 'Expand photo', keys: ['o'] }
+    { description: 'Expand photo', keys: ['o'] },
+    { description: 'Go back', keys: ['Backspace'] }
   ]
 };
 

@@ -169,8 +169,10 @@
   }
 
   .selected-tweet {
-    box-shadow: inset 4px 0 0 rgb(var(--main-accent));
-    background-color: rgba(var(--main-accent), 0.03);
+    position: relative;
+    z-index: 10;
+    box-shadow: 0 0 0 2px rgb(var(--main-accent));
+    background-color: rgba(var(--main-accent), 0.02);
   }
 }
 

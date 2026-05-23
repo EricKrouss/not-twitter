@@ -271,10 +271,12 @@ function HomeTabs({
   );
 }
 
+let lastActiveTab: HomeFeedTab | null = null;
+
 export default function Home(): JSX.Element {
   const { isMobile } = useWindow();
   const { clearHomeBadge } = useLiveUpdates();
-  const [activeTab, setActiveTab] = useState<HomeFeedTab>('following');
+  const [activeTab, setActiveTabState] = useState<HomeFeedTab>(lastActiveTab ?? 'following');
   const [feed, setFeed] = useState<TweetWithUser[]>([]);
   const [newTweets, setNewTweets] = useState<TweetWithUser[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -282,8 +284,14 @@ export default function Home(): JSX.Element {
   const [timelineSettingsOpen, setTimelineSettingsOpen] = useState(false);
   const feedRef = useRef<TweetWithUser[]>([]);
   const newTweetsRef = useRef<TweetWithUser[]>([]);
-  const adoptedInitialTabRef = useRef(false);
-  const { data: subscribedFeeds } = useSWR<SubscribedHomeFeed[], Error>(
+  const adoptedInitialTabRef = useRef(!!lastActiveTab);
+
+  const setActiveTab = (tab: HomeFeedTab): void => {
+    lastActiveTab = tab;
+    setActiveTabState(tab);
+  };
+
+  const { data: subscribedFeeds, error: errorSubscribedFeeds } = useSWR<SubscribedHomeFeed[], Error>(
     'home-subscribed-feeds',
     getSubscribedHomeFeeds,
     { revalidateOnFocus: false }
@@ -294,9 +302,13 @@ export default function Home(): JSX.Element {
   );
 
   const { data, error, mutate } = useSWR<HomeFeedPage, Error>(
-    ['home-feed', activeTab],
+    (subscribedFeeds || errorSubscribedFeeds) && activeTab ? ['home-feed', activeTab] : null,
     () => getHomeFeedPage(activeTab),
-    { revalidateOnFocus: false, shouldRetryOnError: false }
+    {
+      revalidateOnFocus: false,
+      shouldRetryOnError: false,
+      revalidateIfStale: false
+    }
   );
 
   useEffect(() => {

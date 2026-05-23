@@ -61,12 +61,32 @@ export function TweetStats({
   const currentBookmarks = optimisticBookmarkCount;
 
   useEffect(() => {
-    setOptimisticLikes(userLikes);
-  }, [userLikes]);
+    setOptimisticLikes((current) => {
+      if (!userId) return userLikes;
+      const wasLiked = current.includes(userId);
+      const isLikedInProp = userLikes.includes(userId);
+      if (wasLiked && !isLikedInProp) {
+        return [userId, ...userLikes.filter((id) => id !== userId)];
+      } else if (!wasLiked && isLikedInProp) {
+        return userLikes.filter((id) => id !== userId);
+      }
+      return userLikes;
+    });
+  }, [userLikes, userId]);
 
   useEffect(() => {
-    setOptimisticRetweets(userRetweets);
-  }, [userRetweets]);
+    setOptimisticRetweets((current) => {
+      if (!userId) return userRetweets;
+      const wasRetweeted = current.includes(userId);
+      const isRetweetedInProp = userRetweets.includes(userId);
+      if (wasRetweeted && !isRetweetedInProp) {
+        return [userId, ...userRetweets.filter((id) => id !== userId)];
+      } else if (!wasRetweeted && isRetweetedInProp) {
+        return userRetweets.filter((id) => id !== userId);
+      }
+      return userRetweets;
+    });
+  }, [userRetweets, userId]);
 
   useEffect(() => {
     setOptimisticBookmarked(tweetIsBookmarked);
@@ -304,23 +324,9 @@ export function TweetStats({
           onClick={handleLike}
           disabled={updatingLike}
         />
-        <TweetOption
-          className={cn(
-            'hover:text-main-accent focus-visible:text-main-accent',
-            optimisticBookmarked && 'text-main-accent'
-          )}
-          iconClassName='group-hover:bg-main-accent/10 group-active:bg-main-accent/20
-                         group-focus-visible:bg-main-accent/10 group-focus-visible:ring-main-accent/80'
-          tip={optimisticBookmarked ? 'Remove from Bookmarks' : 'Bookmark'}
-          move={bookmarkMove}
-          stats={viewTweet ? currentBookmarks : 0}
-          iconName={
-            optimisticBookmarked
-              ? 'TwitterBookmarksFilledIcon'
-              : 'TwitterBookmarksIcon'
-          }
-          viewTweet={viewTweet}
-          iconSizeClassName={iconSizeClassName}
+        <button
+          className='sr-only'
+          aria-label={optimisticBookmarked ? 'Remove from Bookmarks' : 'Bookmark'}
           onClick={handleBookmark}
           disabled={updatingBookmark}
         />
@@ -328,6 +334,9 @@ export function TweetStats({
           tweetId={tweetId}
           username={username}
           viewTweet={viewTweet}
+          isBookmarked={optimisticBookmarked}
+          onBookmark={handleBookmark}
+          disabled={updatingBookmark}
         />
       </div>
     </>

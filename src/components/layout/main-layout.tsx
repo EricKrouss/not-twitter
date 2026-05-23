@@ -25,7 +25,7 @@ export function MainLayout({ children }: LayoutProps): JSX.Element {
   const router = useRouter();
   const { user } = useAuth();
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  const [isGKeyPressed, setIsGKeyPressed] = useState(false);
+  const isGKeyPressedRef = useRef(false);
   const gKeyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const username = user?.username;
@@ -132,8 +132,8 @@ export function MainLayout({ children }: LayoutProps): JSX.Element {
 
       if (e.metaKey || e.ctrlKey || e.altKey) return;
 
-      if (isGKeyPressed) {
-        setIsGKeyPressed(false);
+      if (isGKeyPressedRef.current) {
+        isGKeyPressedRef.current = false;
         if (gKeyTimeoutRef.current) clearTimeout(gKeyTimeoutRef.current);
 
         let targetRoute = '';
@@ -166,12 +166,23 @@ export function MainLayout({ children }: LayoutProps): JSX.Element {
 
         if (targetRoute) {
           e.preventDefault();
-          void router.push(targetRoute);
+          const sidebarLink = document.querySelector(
+            `aside a[href="${targetRoute}"], nav a[href="${targetRoute}"], a[href="${targetRoute}"]`
+          ) as HTMLElement;
+          if (sidebarLink) {
+            sidebarLink.click();
+          } else {
+            void router.push(targetRoute);
+          }
           return;
         }
       }
 
       switch (e.key) {
+        case 'Backspace':
+          e.preventDefault();
+          void router.back();
+          break;
         case '?':
           e.preventDefault();
           setShortcutsOpen(true);
@@ -213,17 +224,31 @@ export function MainLayout({ children }: LayoutProps): JSX.Element {
           e.preventDefault();
           clickButton('.tweet-article.selected-tweet button[aria-label="Reply"]');
           break;
-        case 't':
+        case 't': {
           e.preventDefault();
-          clickButton('.tweet-article.selected-tweet button[aria-label="Retweet"], .tweet-article.selected-tweet button[aria-label="Undo Retweet"]');
+          const currentSelected = document.querySelector('.tweet-article.selected-tweet');
+          if (currentSelected) {
+            const retweetBtn = currentSelected.querySelector('button[aria-label="Retweet"], button[aria-label="Undo Retweet"]') as HTMLElement;
+            if (retweetBtn) {
+              retweetBtn.click();
+              setTimeout(() => {
+                const popoverPanel = retweetBtn.closest('.relative')?.querySelector('.menu-container') as HTMLElement;
+                if (popoverPanel) {
+                  const actionBtn = popoverPanel.querySelector('button') as HTMLElement;
+                  if (actionBtn) actionBtn.click();
+                }
+              }, 50);
+            }
+          }
           break;
+        }
         case 's':
           e.preventDefault();
-          clickButton('.tweet-article.selected-tweet button[aria-label="Share tweet"]');
+          clickButton('.tweet-article.selected-tweet button[aria-label="Share"]');
           break;
         case 'b':
           e.preventDefault();
-          clickButton('.tweet-article.selected-tweet button[aria-label="Bookmark"], .tweet-article.selected-tweet button[aria-label="Remove Bookmark"]');
+          clickButton('.tweet-article.selected-tweet button[aria-label="Bookmark"], .tweet-article.selected-tweet button[aria-label="Remove from Bookmarks"]');
           break;
         case 'o':
           e.preventDefault();
@@ -232,7 +257,10 @@ export function MainLayout({ children }: LayoutProps): JSX.Element {
         case 'Enter':
           const activeTweet = document.querySelector('.tweet-article.selected-tweet');
           if (activeTweet) {
-            const link = activeTweet.querySelector('a[href^="/tweet/"]') as HTMLAnchorElement;
+            const link = (activeTweet.querySelector('a.hover-card') ??
+              activeTweet.querySelector('a[href*="/post/"]') ??
+              activeTweet.querySelector('a[href*="/status/"]') ??
+              activeTweet.querySelector('a[href^="/tweet/"]')) as HTMLAnchorElement;
             if (link) {
               e.preventDefault();
               link.click();
@@ -249,9 +277,10 @@ export function MainLayout({ children }: LayoutProps): JSX.Element {
           break;
         case 'g':
         case 'G':
-          setIsGKeyPressed(true);
+          isGKeyPressedRef.current = true;
+          if (gKeyTimeoutRef.current) clearTimeout(gKeyTimeoutRef.current);
           gKeyTimeoutRef.current = setTimeout(() => {
-            setIsGKeyPressed(false);
+            isGKeyPressedRef.current = false;
           }, 1000);
           break;
       }
@@ -262,7 +291,7 @@ export function MainLayout({ children }: LayoutProps): JSX.Element {
       window.removeEventListener('keydown', handleKeyDown);
       if (gKeyTimeoutRef.current) clearTimeout(gKeyTimeoutRef.current);
     };
-  }, [isGKeyPressed, username, router]);
+  }, [username, router]);
 
   return (
     <div className='flex w-full justify-center gap-0 lg:gap-4'>

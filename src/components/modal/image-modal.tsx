@@ -511,11 +511,33 @@ function ConversationActionBar({
   const tweetIsLiked = optimisticLikes.includes(userId);
   const tweetIsRetweeted = optimisticRetweets.includes(userId);
 
-  useEffect(() => setOptimisticLikes(tweet.userLikes), [tweet.userLikes]);
-  useEffect(
-    () => setOptimisticRetweets(tweet.userRetweets),
-    [tweet.userRetweets]
-  );
+  useEffect(() => {
+    setOptimisticLikes((current) => {
+      if (!userId) return tweet.userLikes;
+      const wasLiked = current.includes(userId);
+      const isLikedInProp = tweet.userLikes.includes(userId);
+      if (wasLiked && !isLikedInProp) {
+        return [userId, ...tweet.userLikes.filter((id) => id !== userId)];
+      } else if (!wasLiked && isLikedInProp) {
+        return tweet.userLikes.filter((id) => id !== userId);
+      }
+      return tweet.userLikes;
+    });
+  }, [tweet.userLikes, userId]);
+
+  useEffect(() => {
+    setOptimisticRetweets((current) => {
+      if (!userId) return tweet.userRetweets;
+      const wasRetweeted = current.includes(userId);
+      const isRetweetedInProp = tweet.userRetweets.includes(userId);
+      if (wasRetweeted && !isRetweetedInProp) {
+        return [userId, ...tweet.userRetweets.filter((id) => id !== userId)];
+      } else if (!wasRetweeted && isRetweetedInProp) {
+        return tweet.userRetweets.filter((id) => id !== userId);
+      }
+      return tweet.userRetweets;
+    });
+  }, [tweet.userRetweets, userId]);
   useEffect(() => {
     const bookmarked = !!userBookmarks?.some(({ id }) => id === tweet.id);
 
@@ -650,24 +672,19 @@ function ConversationActionBar({
         iconClassName='group-hover:bg-accent-pink/10 group-active:bg-accent-pink/20 group-focus-visible:bg-accent-pink/10'
         onClick={handleLike}
       />
-      <ConversationActionButton
-        tip={optimisticBookmarked ? 'Remove from Bookmarks' : 'Bookmark'}
-        iconName={
-          optimisticBookmarked
-            ? 'TwitterBookmarksFilledIcon'
-            : 'TwitterBookmarksIcon'
-        }
-        count={optimisticBookmarkCount}
-        active={optimisticBookmarked}
-        root={root}
-        className='hover:text-main-accent focus-visible:text-main-accent'
-        iconClassName='group-hover:bg-main-accent/10 group-active:bg-main-accent/20 group-focus-visible:bg-main-accent/10'
+      <button
+        className='sr-only'
+        aria-label={optimisticBookmarked ? 'Remove from Bookmarks' : 'Bookmark'}
         onClick={!updatingBookmark ? handleBookmark : undefined}
+        disabled={updatingBookmark}
       />
       <TweetShare
         tweetId={tweet.id}
         username={tweet.user.username}
         viewTweet={root}
+        isBookmarked={optimisticBookmarked}
+        onBookmark={handleBookmark}
+        disabled={updatingBookmark}
       />
     </div>
   );

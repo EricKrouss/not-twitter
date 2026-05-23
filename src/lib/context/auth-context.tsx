@@ -4,7 +4,8 @@ import {
   useContext,
   createContext,
   useMemo,
-  useCallback
+  useCallback,
+  useRef
 } from 'react';
 import {
   getSavedBlueskyAccounts,
@@ -68,6 +69,11 @@ export function AuthContextProvider({
   const [accounts, setAccounts] = useState<BlueskyAccount[]>([]);
   const [error, setError] = useState<Error | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const userRef = useRef<User | null>(null);
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
 
   const syncAccounts = useCallback((): void => {
     setAccounts(getSavedBlueskyAccounts(auth));
@@ -152,7 +158,9 @@ export function AuthContextProvider({
     };
 
     const handleUserAuth = (authUser: AuthUser | null): void => {
-      setLoading(true);
+      if (!userRef.current || userRef.current.id !== authUser?.uid) {
+        setLoading(true);
+      }
       syncAccounts();
 
       if (authUser) {
