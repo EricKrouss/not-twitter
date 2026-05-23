@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useRouter } from 'next/router';
 import { AnimatePresence } from 'framer-motion';
 import useSWR from 'swr';
-import { getTweetThread } from '@lib/atproto/backend';
+import { getTweetThread, subscribeBackend } from '@lib/atproto/backend';
 import { isPlural } from '@lib/utils';
 import { getTweetRouteId } from '@lib/static-routes';
 import { PublicTweetLayout } from '@components/layout/common-layout';
@@ -29,7 +29,11 @@ export default function TweetId(): JSX.Element {
     getTweetRouteId(asPath);
   const tweetPathId = tweetId ?? 'null';
 
-  const { data: threadData, error } = useSWR<TweetThreadPage | null, Error>(
+  const {
+    data: threadData,
+    error,
+    mutate
+  } = useSWR<TweetThreadPage | null, Error>(
     tweetId ? ['tweet-thread', tweetPathId] : null,
     () => getTweetThread(tweetPathId),
     { revalidateOnFocus: false }
@@ -60,6 +64,14 @@ export default function TweetId(): JSX.Element {
     if (!tweetLoading && hasParentTweets)
       viewTweetRef.current?.scrollIntoView();
   }, [hasParentTweets, tweetData?.id, tweetLoading]);
+
+  useEffect(() => {
+    if (!tweetId) return undefined;
+
+    return subscribeBackend(() => {
+      void mutate();
+    });
+  }, [mutate, tweetId]);
 
   return (
     <MainContainer className='!pb-[1280px]'>

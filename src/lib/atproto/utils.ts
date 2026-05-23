@@ -4,10 +4,15 @@ import {
   deletePost,
   followUser,
   likePost,
+  muteUser,
+  reportPost,
+  reportUser,
   repostPost,
   setBookmark,
+  setPinnedPost,
   stageImages,
   unblockUser,
+  unmuteUser,
   unfollowUser,
   updateProfile,
   type ProfileMediaFiles
@@ -58,15 +63,13 @@ export function updateUsername(
 }
 
 export function managePinnedTweet(
-  _type?: 'pin' | 'unpin',
+  type?: 'pin' | 'unpin',
   _userId?: string,
-  _tweetId?: string
+  tweetId?: string
 ): Promise<void> {
-  void _type;
   void _userId;
-  void _tweetId;
-  // Bluesky pinned-post preferences are outside the old Store model.
-  return Promise.resolve();
+  if (!type) return Promise.resolve();
+  return setPinnedPost(type === 'pin' ? tweetId ?? null : null);
 }
 
 export async function manageFollow(
@@ -87,6 +90,24 @@ export async function manageBlock(
   void _userId;
   if (type === 'block') await blockUser(targetUserId);
   else await unblockUser(targetUserId);
+}
+
+export async function manageMute(
+  type: 'mute' | 'unmute',
+  _userId: string,
+  targetUserId: string
+): Promise<void> {
+  void _userId;
+  if (type === 'mute') await muteUser(targetUserId);
+  else await unmuteUser(targetUserId);
+}
+
+export function reportTweet(tweetId: string): Promise<void> {
+  return reportPost(tweetId);
+}
+
+export function reportAccount(targetUserId: string): Promise<void> {
+  return reportUser(targetUserId);
 }
 
 export async function removeTweet(tweetId: string): Promise<void> {

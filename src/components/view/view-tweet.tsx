@@ -120,6 +120,10 @@ export function ViewTweet(tweet: ViewTweetProps): JSX.Element {
                 username={username}
                 hasImages={!!images || !!displayCard || !!quotedTweet}
                 createdBy={createdBy}
+                blocking={tweetUserData.blocking}
+                blockingByListName={tweetUserData.blockingByListName}
+                muting={tweetUserData.muting}
+                mutingByListName={tweetUserData.mutingByListName}
               />
             </div>
           </div>

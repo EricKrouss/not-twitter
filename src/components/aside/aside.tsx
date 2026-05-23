@@ -9,10 +9,10 @@ type AsideProps = {
 };
 
 export function Aside({ children }: AsideProps): JSX.Element | null {
-  const { width } = useWindow();
+  const { width, height } = useWindow();
   const asideRef = useRef<HTMLElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  const [isScrollable, setIsScrollable] = useState(true);
+  const [isScrollable, setIsScrollable] = useState(false);
 
   useEffect(() => {
     const aside = asideRef.current;
@@ -21,11 +21,11 @@ export function Aside({ children }: AsideProps): JSX.Element | null {
     if (!aside || !content) return;
 
     const updateScrollable = (): void => {
-      const { paddingTop, paddingBottom } = getComputedStyle(aside);
+      const { paddingTop } = getComputedStyle(aside);
       const availableHeight =
-        aside.clientHeight - parseFloat(paddingTop) - parseFloat(paddingBottom);
+        aside.clientHeight - parseFloat(paddingTop);
 
-      setIsScrollable(content.scrollHeight > availableHeight + 1);
+      setIsScrollable(content.scrollHeight > availableHeight + 2);
     };
 
     updateScrollable();
@@ -42,7 +42,7 @@ export function Aside({ children }: AsideProps): JSX.Element | null {
       window.removeEventListener('resize', updateScrollable);
       resizeObserver.disconnect();
     };
-  }, [width]);
+  }, [width, height]);
 
   if (width < 1024) return null;
 

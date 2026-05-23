@@ -303,6 +303,7 @@ export function MobileSidebarModal({
               <MobileSidebarLink
                 href={userLink}
                 iconName='TwitterProfileIcon'
+                activeIconName='TwitterProfileFilledIcon'
                 linkName='Profile'
               />
             </nav>

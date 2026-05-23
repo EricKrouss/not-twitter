@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import cn from 'clsx';
+import { normalizeProfileSearchActor } from '@lib/atproto/identity';
 import { getUserPath } from '@lib/routes';
 import { HeroIcon } from '@components/ui/hero-icon';
 import { Button } from '@components/ui/button';
@@ -18,15 +19,6 @@ function getRouteParam(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] ?? '' : value ?? '';
 }
 
-function getProfileHandle(value: string): string | null {
-  const username = value.trim().replace(/^@+/, '').toLowerCase();
-
-  if (!username) return null;
-  if (/\s/.test(username)) return null;
-
-  return username.includes('.') ? username : `${username}.bsky.social`;
-}
-
 export function SearchBar({
   className,
   labelClassName,
@@ -42,7 +34,12 @@ export function SearchBar({
   const inputRef = useRef<HTMLInputElement>(null);
   const blurTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const trimmedInput = inputValue.trim();
-  const profileHandle = getProfileHandle(trimmedInput);
+  const profileActor = normalizeProfileSearchActor(trimmedInput);
+  const profileActorLabel = profileActor
+    ? profileActor.startsWith('did:')
+      ? profileActor
+      : `@${profileActor}`
+    : '';
 
   useEffect(() => {
     setInputValue(getRouteParam(query.q));
@@ -64,9 +61,9 @@ export function SearchBar({
   };
 
   const handleProfileClick = (): void => {
-    if (!profileHandle) return;
+    if (!profileActor) return;
 
-    void push(getUserPath(profileHandle));
+    void push(getUserPath(profileActor));
   };
 
   const clearInputValue = (focus?: boolean) => (): void => {
@@ -143,7 +140,7 @@ export function SearchBar({
         >
           {trimmedInput ? (
             <>
-              {profileHandle && (
+              {profileActor && (
                 <button
                   className='accent-tab hover-card flex w-full items-center gap-3 px-4 py-3 text-left'
                   type='button'
@@ -154,7 +151,7 @@ export function SearchBar({
                     iconName='UserCircleIcon'
                   />
                   <span className='min-w-0 truncate'>
-                    Go to @{profileHandle}
+                    Go to {profileActorLabel}
                   </span>
                 </button>
               )}

@@ -70,9 +70,9 @@ export function Sidebar(): JSX.Element {
             ))}
             <SidebarLink
               href={getUserPath(username)}
-              username={username}
               linkName='Profile'
               iconName='TwitterProfileIcon'
+              activeIconName='TwitterProfileFilledIcon'
             />
             {!isMobile && <MoreSettings />}
           </nav>

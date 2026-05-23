@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import cn from 'clsx';
 import { AnimatePresence, motion } from 'framer-motion';
-import { listTweetStatsPage } from '@lib/atproto/backend';
+import { listTweetStatsPage, subscribeBackend } from '@lib/atproto/backend';
 import { useModal } from '@lib/hooks/useModal';
 import { getTweetQuotesPath } from '@lib/routes';
 import { Modal } from '@components/modal/modal';
@@ -101,9 +101,9 @@ function StatsModalContent({
 
     let active = true;
 
-    setPage({ ...initialStatsPageState, loading: true });
+    const fetchStats = async (showLoading: boolean): Promise<void> => {
+      if (showLoading) setPage({ ...initialStatsPageState, loading: true });
 
-    const fetchStats = async (): Promise<void> => {
       try {
         const nextPage = await listTweetStatsPage(
           tweetId,
@@ -122,14 +122,26 @@ function StatsModalContent({
         });
       } catch {
         if (!active) return;
-        setPage({ ...initialStatsPageState, loading: false, error: true });
+        if (showLoading)
+          setPage({ ...initialStatsPageState, loading: false, error: true });
+        else
+          setPage((currentPage) => ({
+            ...currentPage,
+            loading: false,
+            loadingMore: false,
+            error: true
+          }));
       }
     };
 
-    void fetchStats();
+    void fetchStats(true);
+    const unsubscribe = subscribeBackend(() => {
+      void fetchStats(false);
+    });
 
     return () => {
       active = false;
+      unsubscribe();
     };
   }, [statsType, tweetId]);
 

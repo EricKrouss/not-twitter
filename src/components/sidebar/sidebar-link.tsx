@@ -3,16 +3,15 @@ import Link from 'next/link';
 import cn from 'clsx';
 import { preventBubbling } from '@lib/utils';
 import { CustomIcon } from '@components/ui/custom-icon';
+import { isNavLinkActive } from './nav-links';
 import type { NavLink } from './nav-links';
 
-type SidebarLinkProps = NavLink & {
-  username?: string;
-};
+type SidebarLinkProps = NavLink;
 
 export function SidebarLink({
   href,
-  username,
   iconName,
+  activeIconName,
   linkName,
   disabled,
   canBeHidden,
@@ -20,13 +19,8 @@ export function SidebarLink({
   badgeDot
 }: SidebarLinkProps): JSX.Element {
   const { asPath } = useRouter();
-  const isActive = username
-    ? asPath.includes(username)
-    : asPath === href || asPath.startsWith(`${href}?`);
-  const renderedIconName =
-    isActive && iconName === 'TwitterMessagesIcon'
-      ? 'TwitterMessagesFilledIcon'
-      : iconName;
+  const isActive = isNavLinkActive(asPath, href);
+  const renderedIconName = isActive ? activeIconName ?? iconName : iconName;
   const showBadgeCount = !!badgeCount;
   const showBadgeDot = !showBadgeCount && !!badgeDot;
   const badgeLabel = badgeCount
@@ -52,19 +46,20 @@ export function SidebarLink({
       >
         <div
           className={cn(
-            `custom-button flex items-center justify-center gap-4 self-start p-2 text-xl transition 
-             duration-200 group-hover:bg-light-primary/10 group-focus-visible:ring-2 
-             group-focus-visible:ring-[#878a8c] dark:group-hover:bg-dark-primary/10 
+            `custom-button flex min-h-[52px] items-center justify-center gap-4 self-start p-2 text-xl leading-7 transition
+             duration-200 group-hover:bg-light-primary/10 group-focus-visible:ring-2
+             group-focus-visible:ring-[#878a8c] dark:group-hover:bg-dark-primary/10
              dark:group-focus-visible:ring-white xs:p-3 xl:pr-5`,
             isActive && 'font-bold text-main-accent'
           )}
         >
-          <span className='relative flex'>
-            <CustomIcon className='h-7 w-7' iconName={renderedIconName} />
+          <span className='relative flex h-7 w-7 shrink-0 items-center justify-center leading-none'>
+            <CustomIcon
+              className='block h-7 w-7 shrink-0'
+              iconName={renderedIconName}
+            />
             {showBadgeCount && (
-              <span className={compactCountBadgeClassName}>
-                {badgeLabel}
-              </span>
+              <span className={compactCountBadgeClassName}>{badgeLabel}</span>
             )}
             {showBadgeDot && (
               <span
@@ -73,7 +68,9 @@ export function SidebarLink({
               />
             )}
           </span>
-          <p className='hidden xl:block'>{linkName}</p>
+          <p className='hidden h-7 items-center leading-7 xl:flex'>
+            {linkName}
+          </p>
         </div>
       </a>
     </Link>

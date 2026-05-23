@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import cn from 'clsx';
 import { AnimatePresence, motion } from 'framer-motion';
-import { listTweetStatsPage } from '@lib/atproto/backend';
+import { listTweetStatsPage, subscribeBackend } from '@lib/atproto/backend';
 import { StatsEmpty } from '@components/tweet/stats-empty';
 import { Tweet as TweetCard } from '@components/tweet/tweet';
 import { Error as ErrorMessage } from '@components/ui/error';
@@ -51,9 +51,9 @@ export function QuoteTweetsFeed({
   useEffect(() => {
     let active = true;
 
-    setPage({ ...initialQuoteTweetsPage, loading: true });
+    const fetchQuotes = async (showLoading: boolean): Promise<void> => {
+      if (showLoading) setPage({ ...initialQuoteTweetsPage, loading: true });
 
-    const fetchQuotes = async (): Promise<void> => {
       try {
         const nextPage = await listTweetStatsPage(
           tweetId,
@@ -73,14 +73,26 @@ export function QuoteTweetsFeed({
         });
       } catch {
         if (!active) return;
-        setPage({ ...initialQuoteTweetsPage, loading: false, error: true });
+        if (showLoading)
+          setPage({ ...initialQuoteTweetsPage, loading: false, error: true });
+        else
+          setPage((currentPage) => ({
+            ...currentPage,
+            loading: false,
+            loadingMore: false,
+            error: true
+          }));
       }
     };
 
-    void fetchQuotes();
+    void fetchQuotes(true);
+    const unsubscribe = subscribeBackend(() => {
+      void fetchQuotes(false);
+    });
 
     return () => {
       active = false;
+      unsubscribe();
     };
   }, [tweetId]);
 

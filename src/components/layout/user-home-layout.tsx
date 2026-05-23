@@ -94,6 +94,8 @@ export function UserHomeLayout({ children }: LayoutProps): JSX.Element {
                       username={userData.username}
                       blocking={userData.blocking}
                       blockingByListName={userData.blockingByListName}
+                      muting={userData.muting}
+                      mutingByListName={userData.mutingByListName}
                     />
                     {signedIn && !profileIsBlocked && (
                       <Button

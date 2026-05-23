@@ -5,7 +5,7 @@ import { toast } from 'react-hot-toast';
 import { preventBubbling } from '@lib/utils';
 import { siteURL } from '@lib/env';
 import { getUserPath } from '@lib/routes';
-import { manageBlock } from '@lib/atproto/utils';
+import { manageBlock, manageMute, reportAccount } from '@lib/atproto/utils';
 import { useAuth } from '@lib/context/auth-context';
 import { useModal } from '@lib/hooks/useModal';
 import { Modal } from '@components/modal/modal';
@@ -20,18 +20,37 @@ type UserShareProps = {
   username: string;
   blocking?: boolean;
   blockingByListName?: string | null;
+  muting?: boolean;
+  mutingByListName?: string | null;
 };
 
 export function UserShare({
   targetId,
   username,
   blocking,
-  blockingByListName
+  blockingByListName,
+  muting,
+  mutingByListName
 }: UserShareProps): JSX.Element {
   const { user } = useAuth();
-  const { open, openModal, closeModal } = useModal();
-  const canBlock = !!user && !!targetId && user.id !== targetId;
+  const {
+    open: blockOpen,
+    openModal: blockOpenModal,
+    closeModal: blockCloseModal
+  } = useModal();
+  const {
+    open: muteOpen,
+    openModal: muteOpenModal,
+    closeModal: muteCloseModal
+  } = useModal();
+  const {
+    open: reportOpen,
+    openModal: reportOpenModal,
+    closeModal: reportCloseModal
+  } = useModal();
+  const canModerate = !!user && !!targetId && user.id !== targetId;
   const blockIsListOnly = !!blocking && !!blockingByListName;
+  const muteIsListOnly = !!muting && !!mutingByListName;
 
   const handleCopy = (closeMenu: () => void) => async (): Promise<void> => {
     closeMenu();
@@ -40,28 +59,55 @@ export function UserShare({
   };
   const handleOpenBlock = (closeMenu: () => void) => (): void => {
     closeMenu();
-    openModal();
+    blockOpenModal();
+  };
+  const handleOpenMute = (closeMenu: () => void) => (): void => {
+    closeMenu();
+    muteOpenModal();
+  };
+  const handleOpenReport = (closeMenu: () => void) => (): void => {
+    closeMenu();
+    reportOpenModal();
   };
   const handleBlock = async (): Promise<void> => {
     if (!user || !targetId) return;
     await manageBlock('block', user.id, targetId);
-    closeModal();
+    blockCloseModal();
     toast.success(`@${username} has been blocked`);
   };
   const handleUnblock = async (): Promise<void> => {
     if (!user || !targetId) return;
     await manageBlock('unblock', user.id, targetId);
-    closeModal();
+    blockCloseModal();
     toast.success(`@${username} has been unblocked`);
   };
+  const handleMute = async (): Promise<void> => {
+    if (!user || !targetId) return;
+    await manageMute('mute', user.id, targetId);
+    muteCloseModal();
+    toast.success(`@${username} has been muted`);
+  };
+  const handleUnmute = async (): Promise<void> => {
+    if (!user || !targetId) return;
+    await manageMute('unmute', user.id, targetId);
+    muteCloseModal();
+    toast.success(`@${username} has been unmuted`);
+  };
+  const handleReport = async (): Promise<void> => {
+    if (!targetId) return;
+    await reportAccount(targetId);
+    reportCloseModal();
+    toast.success('Report submitted');
+  };
   const actionIsUnblock = !!blocking && !blockIsListOnly;
+  const actionIsUnmute = !!muting && !muteIsListOnly;
 
   return (
     <>
       <Modal
         modalClassName='flex flex-col gap-6 max-w-xs bg-main-background w-full p-8 rounded-2xl'
-        open={open}
-        closeModal={closeModal}
+        open={blockOpen}
+        closeModal={blockCloseModal}
       >
         <ActionModal
           title={
@@ -79,7 +125,43 @@ export function UserShare({
               : 'bg-accent-red hover:bg-accent-red/90 active:bg-accent-red/80'
           }
           action={actionIsUnblock ? handleUnblock : handleBlock}
-          closeModal={closeModal}
+          closeModal={blockCloseModal}
+        />
+      </Modal>
+      <Modal
+        modalClassName='flex flex-col gap-6 max-w-xs bg-main-background w-full p-8 rounded-2xl'
+        open={muteOpen}
+        closeModal={muteCloseModal}
+      >
+        <ActionModal
+          title={actionIsUnmute ? `Unmute @${username}?` : `Mute @${username}?`}
+          description={
+            actionIsUnmute
+              ? 'Their Tweets will be allowed back into your timelines and conversations.'
+              : 'Their Tweets will be removed from your timelines and conversations. They will not know you muted them.'
+          }
+          mainBtnLabel={actionIsUnmute ? 'Unmute' : 'Mute'}
+          mainBtnClassName={
+            actionIsUnmute
+              ? undefined
+              : 'bg-accent-red hover:bg-accent-red/90 active:bg-accent-red/80'
+          }
+          action={actionIsUnmute ? handleUnmute : handleMute}
+          closeModal={muteCloseModal}
+        />
+      </Modal>
+      <Modal
+        modalClassName='flex flex-col gap-6 max-w-xs bg-main-background w-full p-8 rounded-2xl'
+        open={reportOpen}
+        closeModal={reportCloseModal}
+      >
+        <ActionModal
+          title={`Report @${username}?`}
+          description='We’ll send this account to Bluesky moderation for review.'
+          mainBtnLabel='Report'
+          mainBtnClassName='bg-accent-red hover:bg-accent-red/90 active:bg-accent-red/80'
+          action={handleReport}
+          closeModal={reportCloseModal}
         />
       </Modal>
       <Popover className='relative'>
@@ -109,7 +191,7 @@ export function UserShare({
                   <Popover.Button
                     className={cn(
                       'flex w-full gap-3 rounded-md p-4 hover:bg-main-sidebar-background',
-                      canBlock && 'rounded-b-none'
+                      canModerate && 'rounded-b-none'
                     )}
                     as={Button}
                     onClick={preventBubbling(handleCopy(close))}
@@ -117,10 +199,36 @@ export function UserShare({
                     <HeroIcon iconName='LinkIcon' />
                     Copy link to Profile
                   </Popover.Button>
-                  {canBlock && (
+                  {canModerate && (
                     <Popover.Button
                       className={cn(
-                        `flex w-full gap-3 rounded-md rounded-t-none p-4
+                        `flex w-full gap-3 rounded-md rounded-t-none rounded-b-none p-4
+                         hover:bg-main-sidebar-background`,
+                        !actionIsUnmute && !muteIsListOnly && 'text-accent-red',
+                        muteIsListOnly && 'cursor-not-allowed opacity-70'
+                      )}
+                      as={Button}
+                      disabled={muteIsListOnly}
+                      onClick={preventBubbling(handleOpenMute(close))}
+                    >
+                      <HeroIcon
+                        iconName={
+                          actionIsUnmute
+                            ? 'SpeakerWaveIcon'
+                            : 'SpeakerXMarkIcon'
+                        }
+                      />
+                      {muteIsListOnly
+                        ? `Muted by ${mutingByListName}`
+                        : actionIsUnmute
+                        ? `Unmute @${username}`
+                        : `Mute @${username}`}
+                    </Popover.Button>
+                  )}
+                  {canModerate && (
+                    <Popover.Button
+                      className={cn(
+                        `flex w-full gap-3 rounded-md rounded-t-none rounded-b-none p-4
                          hover:bg-main-sidebar-background`,
                         !actionIsUnblock && 'text-accent-red',
                         blockIsListOnly && 'cursor-not-allowed opacity-70'
@@ -135,6 +243,17 @@ export function UserShare({
                         : actionIsUnblock
                         ? `Unblock @${username}`
                         : `Block @${username}`}
+                    </Popover.Button>
+                  )}
+                  {canModerate && (
+                    <Popover.Button
+                      className='flex w-full gap-3 rounded-md rounded-t-none p-4 text-accent-red
+                                 hover:bg-main-sidebar-background'
+                      as={Button}
+                      onClick={preventBubbling(handleOpenReport(close))}
+                    >
+                      <HeroIcon iconName='FlagIcon' />
+                      Report @{username}
                     </Popover.Button>
                   )}
                 </Popover.Panel>

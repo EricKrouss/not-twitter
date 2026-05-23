@@ -296,7 +296,7 @@ export default function Home(): JSX.Element {
   const { data, error } = useSWR<HomeFeedPage, Error>(
     ['home-feed', activeTab],
     () => getHomeFeedPage(activeTab),
-    { revalidateOnFocus: false }
+    { revalidateOnFocus: false, shouldRetryOnError: false }
   );
 
   useEffect(() => {
@@ -414,6 +414,8 @@ export default function Home(): JSX.Element {
 
       setCursor(nextPage.cursor);
       setFeed((currentFeed) => mergeTweets(currentFeed, nextPage.tweets));
+    } catch {
+      // Keep the current timeline if a generator page fails while paginating.
     } finally {
       setLoadingMore(false);
     }

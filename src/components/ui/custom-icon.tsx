@@ -19,14 +19,19 @@ const Icons = {
   TwitterIcon,
   TwitterVerifiedIcon,
   TwitterHomeIcon,
+  TwitterHomeFilledIcon,
   TwitterExploreIcon,
+  TwitterExploreFilledIcon,
   TwitterNotificationsIcon,
+  TwitterNotificationsFilledIcon,
   TwitterMessagesIcon,
   TwitterMessagesFilledIcon,
   TwitterBookmarksIcon,
   TwitterBookmarksFilledIcon,
   TwitterListsIcon,
+  TwitterListsFilledIcon,
   TwitterProfileIcon,
+  TwitterProfileFilledIcon,
   TwitterMoreIcon,
   TwitterReplyIcon,
   TwitterRetweetIcon,
@@ -112,8 +117,15 @@ function TwitterVerifiedIcon({ className }: IconProps): JSX.Element {
 function TwitterHomeIcon({ className }: IconProps): JSX.Element {
   return (
     <TwitterSvgIcon className={className}>
-      <path d='M22.46 7.57L12.357 2.115c-.223-.12-.49-.12-.713 0L1.543 7.57c-.364.197-.5.652-.303 1.017.135.25.394.393.66.393.12 0 .243-.03.356-.09l.815-.44L4.7 19.963c.214 1.215 1.308 2.062 2.658 2.062h9.282c1.352 0 2.445-.848 2.663-2.087l1.626-11.49.818.442c.364.193.82.06 1.017-.304.196-.363.06-.818-.304-1.016zm-4.638 12.133c-.107.606-.703.822-1.18.822H7.36c-.48 0-1.075-.216-1.178-.798L4.48 7.69 12 3.628l7.522 4.06-1.7 12.015z' />
-      <path d='M8.22 12.184c0 2.084 1.695 3.78 3.78 3.78s3.78-1.696 3.78-3.78-1.695-3.78-3.78-3.78-3.78 1.696-3.78 3.78zm6.06 0c0 1.258-1.022 2.28-2.28 2.28s-2.28-1.022-2.28-2.28 1.022-2.28 2.28-2.28 2.28 1.022 2.28 2.28z' />
+      <path d='M12 9c-2.209 0-4 1.791-4 4s1.791 4 4 4 4-1.791 4-4-1.791-4-4-4Zm0 6c-1.105 0-2-.895-2-2s.895-2 2-2 2 .895 2 2-.895 2-2 2Zm0-13.304L.622 8.807l1.06 1.696L3 9.679V19.5C3 20.881 4.119 22 5.5 22h13c1.381 0 2.5-1.119 2.5-2.5V9.679l1.318.824 1.06-1.696L12 1.696ZM19 19.5c0 .276-.224.5-.5.5h-13c-.276 0-.5-.224-.5-.5V8.429l7-4.375 7 4.375V19.5Z' />
+    </TwitterSvgIcon>
+  );
+}
+
+function TwitterHomeFilledIcon({ className }: IconProps): JSX.Element {
+  return (
+    <TwitterSvgIcon className={className}>
+      <path d='M12 1.696.622 8.807l1.06 1.696L3 9.679V19.5C3 20.881 4.119 22 5.5 22h13c1.381 0 2.5-1.119 2.5-2.5V9.679l1.318.824 1.06-1.696L12 1.696ZM12 16.5c-1.933 0-3.5-1.567-3.5-3.5s1.567-3.5 3.5-3.5 3.5 1.567 3.5 3.5-1.567 3.5-3.5 3.5Z' />
     </TwitterSvgIcon>
   );
 }
@@ -121,7 +133,15 @@ function TwitterHomeIcon({ className }: IconProps): JSX.Element {
 function TwitterExploreIcon({ className }: IconProps): JSX.Element {
   return (
     <TwitterSvgIcon className={className}>
-      <path d='M10.64 1.75h2.23l-.67 4h4.33l.67-4h2.23l-.67 4h3.49v2h-3.82l-.75 4.5h3.82v2h-4.15l-.67 4h-2.23l.67-4h-4.33l-.67 4H7.9l.67-4H4.75v-2H8.9l.75-4.5H5.75v-2h4.22l.67-4zm1.23 6l-.75 4.5h4.33l.75-4.5h-4.33z' />
+      <path d='M10.64 1.75h2.23l-.5 5h4.99l.5-5h2.23l-.5 5h3.66v2.5h-3.91l-.55 5.5h3.46v2.5h-3.71l-.5 5h-2.23l.5-5h-4.99l-.5 5H8.59l.5-5H4.75v-2.5h4.59l.55-5.5H5.75v-2.5h4.39l.5-5Zm.93 13h4.99l.55-5.5h-4.99l-.55 5.5Z' />
+    </TwitterSvgIcon>
+  );
+}
+
+function TwitterExploreFilledIcon({ className }: IconProps): JSX.Element {
+  return (
+    <TwitterSvgIcon className={className}>
+      <path d='m10.64 3.157-.36 3.593h4.99l.38-3.892 2.99.299-.36 3.593h2.97v2.5h-3.22l-.55 5.5h2.77v2.5h-3.02l-.39 3.892-2.98-.299.36-3.593H9.23l-.39 3.892-2.98-.299.36-3.593H2.75v-2.5h3.72l.55-5.5H3.75v-2.5h3.52l.38-3.892 2.99.299Zm3.83 11.593.55-5.5h-4.99l-.55 5.5h4.99Z' />
     </TwitterSvgIcon>
   );
 }
@@ -129,7 +149,15 @@ function TwitterExploreIcon({ className }: IconProps): JSX.Element {
 function TwitterNotificationsIcon({ className }: IconProps): JSX.Element {
   return (
     <TwitterSvgIcon className={className}>
-      <path d='M19.993 9.042C19.48 5.017 16.054 2 11.996 2S4.512 5.017 4 9.042L3.043 16.5H1v2h21.993v-2H20.95l-.957-7.458zM5.058 16.5l.925-7.2C6.37 6.268 8.943 4 11.996 4s5.626 2.268 6.013 5.3l.925 7.2H5.058zM15 20.5H9v-2h6v2z' />
+      <path d='M19.993 9.042C19.48 5.017 16.054 2 11.996 2s-7.49 3.021-7.999 7.051L2.866 18H7.1c.463 2.282 2.481 4 4.9 4s4.437-1.718 4.9-4h4.236l-1.143-8.958ZM12 20c-1.306 0-2.417-.835-2.829-2h5.658c-.412 1.165-1.523 2-2.829 2Zm-6.866-4 .847-6.698C6.364 6.272 8.941 4 11.996 4s5.627 2.268 6.013 5.295L18.864 16H5.134Z' />
+    </TwitterSvgIcon>
+  );
+}
+
+function TwitterNotificationsFilledIcon({ className }: IconProps): JSX.Element {
+  return (
+    <TwitterSvgIcon className={className}>
+      <path d='M11.996 2c-4.062 0-7.49 3.021-7.999 7.051L2.866 18H7.1c.463 2.282 2.481 4 4.9 4s4.437-1.718 4.9-4h4.236l-1.143-8.958C19.48 5.017 16.054 2 11.996 2ZM9.171 18h5.658c-.412 1.165-1.523 2-2.829 2s-2.417-.835-2.829-2Z' />
     </TwitterSvgIcon>
   );
 }
@@ -169,7 +197,15 @@ function TwitterBookmarksFilledIcon({ className }: IconProps): JSX.Element {
 function TwitterListsIcon({ className }: IconProps): JSX.Element {
   return (
     <TwitterSvgIcon className={className}>
-      <path d='M5.5 21c-1.381 0-2.5-1.119-2.5-2.5v-13C3 4.119 4.119 3 5.5 3h13C19.881 3 21 4.119 21 5.5v13c0 1.381-1.119 2.5-2.5 2.5h-13zM5 5.5v13c0 .276.224.5.5.5h13c.276 0 .5-.224.5-.5v-13c0-.276-.224-.5-.5-.5h-13c-.276 0-.5.224-.5.5zM8 8h8v2H8V8zm0 4h8v2H8v-2zm0 4h5v2H8v-2z' />
+      <path d='M3 4.5C3 3.12 4.12 2 5.5 2h13C19.88 2 21 3.12 21 4.5v15c0 1.38-1.12 2.5-2.5 2.5h-13C4.12 22 3 20.88 3 19.5v-15ZM5.5 4c-.28 0-.5.22-.5.5v15c0 .28.22.5.5.5h13c.28 0 .5-.22.5-.5v-15c0-.28-.22-.5-.5-.5h-13ZM16 10H8V8h8v2Zm-8 2h8v2H8v-2Z' />
+    </TwitterSvgIcon>
+  );
+}
+
+function TwitterListsFilledIcon({ className }: IconProps): JSX.Element {
+  return (
+    <TwitterSvgIcon className={className}>
+      <path d='M18.5 2h-13C4.12 2 3 3.12 3 4.5v15C3 20.88 4.12 22 5.5 22h13c1.38 0 2.5-1.12 2.5-2.5v-15C21 3.12 19.88 2 18.5 2ZM16 14H8v-2h8v2Zm0-4H8V8h8v2Z' />
     </TwitterSvgIcon>
   );
 }
@@ -177,7 +213,15 @@ function TwitterListsIcon({ className }: IconProps): JSX.Element {
 function TwitterProfileIcon({ className }: IconProps): JSX.Element {
   return (
     <TwitterSvgIcon className={className}>
-      <path d='M5.651 19h12.698c-.337-1.8-1.023-3.21-2.054-4.24C15.158 13.624 13.64 13 12 13s-3.158.623-4.295 1.76C6.674 15.79 5.988 17.2 5.651 19zm.486-5.65C7.627 11.86 9.648 11 12 11s4.373.86 5.863 2.35c1.489 1.49 2.323 3.68 2.632 6.15.11.882-.615 1.5-1.495 1.5H5c-.88 0-1.606-.618-1.496-1.5.31-2.47 1.143-4.66 2.633-6.15zM12 4c-1.105 0-2 .895-2 2s.895 2 2 2 2-.895 2-2-.895-2-2-2zM8 6c0-2.209 1.791-4 4-4s4 1.791 4 4-1.791 4-4 4-4-1.791-4-4z' />
+      <path d='M5.651 19h12.698c-.337-1.8-1.023-3.21-1.945-4.19C15.318 13.65 13.838 13 12 13s-3.317.65-4.404 1.81c-.922.98-1.608 2.39-1.945 4.19Zm.486-5.56C7.627 11.85 9.648 11 12 11s4.373.85 5.863 2.44c1.477 1.58 2.366 3.8 2.632 6.46l.11 1.1H3.395l.11-1.1c.266-2.66 1.155-4.88 2.632-6.46ZM12 4c-1.105 0-2 .9-2 2s.895 2 2 2 2-.9 2-2-.895-2-2-2ZM8 6c0-2.21 1.791-4 4-4s4 1.79 4 4-1.791 4-4 4-4-1.79-4-4Z' />
+    </TwitterSvgIcon>
+  );
+}
+
+function TwitterProfileFilledIcon({ className }: IconProps): JSX.Element {
+  return (
+    <TwitterSvgIcon className={className}>
+      <path d='M17.863 13.44c1.477 1.58 2.366 3.8 2.632 6.46l.11 1.1H3.395l.11-1.1c.266-2.66 1.155-4.88 2.632-6.46C7.627 11.85 9.648 11 12 11s4.373.85 5.863 2.44ZM12 2C9.791 2 8 3.79 8 6s1.791 4 4 4 4-1.79 4-4-1.791-4-4-4Z' />
     </TwitterSvgIcon>
   );
 }

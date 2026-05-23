@@ -16,6 +16,8 @@ export type User = {
   followers: string[];
   followingCount: number;
   followersCount: number;
+  muting: boolean;
+  mutingByListName: string | null;
   blocking: boolean;
   blockedBy: boolean;
   blockingUri: string | null;
@@ -43,6 +45,8 @@ export const userConverter: DataConverter<User> = {
     const data = snapshot.data(options) as Partial<User>;
     return {
       ...data,
+      muting: data.muting ?? false,
+      mutingByListName: data.mutingByListName ?? null,
       blocking: data.blocking ?? false,
       blockedBy: data.blockedBy ?? false,
       blockingUri: data.blockingUri ?? null,

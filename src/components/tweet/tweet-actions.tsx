@@ -12,11 +12,13 @@ import { getTweetPath } from '@lib/routes';
 import {
   removeTweet,
   manageBlock,
+  manageMute,
   manageReply,
   manageFollow,
   managePinnedTweet,
   manageTotalTweets,
-  manageTotalPhotos
+  manageTotalPhotos,
+  reportTweet
 } from '@lib/atproto/utils';
 import { delayScroll, preventBubbling, sleep } from '@lib/utils';
 import { Modal } from '@components/modal/modal';
@@ -50,6 +52,8 @@ type TweetActionsProps = Pick<Tweet, 'createdBy'> & {
   hasImages: boolean;
   blocking?: boolean;
   blockingByListName?: string | null;
+  muting?: boolean;
+  mutingByListName?: string | null;
   viewTweet?: boolean;
 };
 
@@ -80,6 +84,8 @@ export function TweetActions({
   hasImages,
   blocking,
   blockingByListName,
+  muting,
+  mutingByListName,
   viewTweet,
   createdBy
 }: TweetActionsProps): JSX.Element {
@@ -101,6 +107,16 @@ export function TweetActions({
     open: blockOpen,
     openModal: blockOpenModal,
     closeModal: blockCloseModal
+  } = useModal();
+  const {
+    open: muteOpen,
+    openModal: muteOpenModal,
+    closeModal: muteCloseModal
+  } = useModal();
+  const {
+    open: reportOpen,
+    openModal: reportOpenModal,
+    closeModal: reportCloseModal
   } = useModal();
 
   const { id: userId, following = [], pinnedTweet } = user ?? {};
@@ -167,6 +183,29 @@ export function TweetActions({
     await manageBlock(blocking ? 'unblock' : 'block', userId, createdBy);
     toast.success(`You ${blocking ? 'unblocked' : 'blocked'} @${username}`);
     blockCloseModal();
+  };
+
+  const handleMuteOpen = (closeMenu: () => void) => (): void => {
+    closeMenu();
+    muteOpenModal();
+  };
+
+  const handleMute = async (): Promise<void> => {
+    if (!userId) return;
+    await manageMute(muting ? 'unmute' : 'mute', userId, createdBy);
+    toast.success(`You ${muting ? 'unmuted' : 'muted'} @${username}`);
+    muteCloseModal();
+  };
+
+  const handleReportOpen = (closeMenu: () => void) => (): void => {
+    closeMenu();
+    reportOpenModal();
+  };
+
+  const handleReportTweet = async (): Promise<void> => {
+    await reportTweet(tweetId);
+    toast.success('Report submitted');
+    reportCloseModal();
   };
 
   const handleLoggedOutAction = (closeMenu: () => void) => (): void => {
@@ -238,6 +277,42 @@ export function TweetActions({
           }
           action={handleBlock}
           closeModal={blockCloseModal}
+        />
+      </Modal>
+      <Modal
+        modalClassName='max-w-xs bg-main-background w-full p-8 rounded-2xl'
+        open={muteOpen}
+        closeModal={muteCloseModal}
+      >
+        <ActionModal
+          title={`${muting ? 'Unmute' : 'Mute'} @${username}?`}
+          description={
+            muting
+              ? 'Their Tweets will be allowed back into your timelines and conversations.'
+              : 'Their Tweets will be removed from your timelines and conversations. They will not know you muted them.'
+          }
+          mainBtnLabel={muting ? 'Unmute' : 'Mute'}
+          mainBtnClassName={
+            muting
+              ? undefined
+              : 'bg-accent-red hover:bg-accent-red/90 active:bg-accent-red/80'
+          }
+          action={handleMute}
+          closeModal={muteCloseModal}
+        />
+      </Modal>
+      <Modal
+        modalClassName='max-w-xs bg-main-background w-full p-8 rounded-2xl'
+        open={reportOpen}
+        closeModal={reportCloseModal}
+      >
+        <ActionModal
+          title='Report Tweet?'
+          description='We’ll send this Tweet to Bluesky moderation for review.'
+          mainBtnLabel='Report'
+          mainBtnClassName='bg-accent-red hover:bg-accent-red/90 active:bg-accent-red/80'
+          action={handleReportTweet}
+          closeModal={reportCloseModal}
         />
       </Modal>
       <Popover>
@@ -343,6 +418,41 @@ export function TweetActions({
                     >
                       <HeroIcon iconName='NoSymbolIcon' />
                       {blocking ? `Unblock @${username}` : `Block @${username}`}
+                    </Popover.Button>
+                  )}
+                  {signedIn && !isOwner && (
+                    <Popover.Button
+                      className={cn(
+                        `accent-tab flex w-full gap-3 rounded-md rounded-t-none p-4
+                         hover:bg-main-sidebar-background`,
+                        !muting && !mutingByListName && 'text-accent-red',
+                        mutingByListName && 'cursor-not-allowed opacity-70'
+                      )}
+                      as={Button}
+                      disabled={!!mutingByListName}
+                      onClick={preventBubbling(handleMuteOpen(close))}
+                    >
+                      <HeroIcon
+                        iconName={
+                          muting ? 'SpeakerWaveIcon' : 'SpeakerXMarkIcon'
+                        }
+                      />
+                      {mutingByListName
+                        ? `Muted by ${mutingByListName}`
+                        : muting
+                        ? `Unmute @${username}`
+                        : `Mute @${username}`}
+                    </Popover.Button>
+                  )}
+                  {signedIn && !isOwner && (
+                    <Popover.Button
+                      className='accent-tab flex w-full gap-3 rounded-md rounded-t-none p-4 text-accent-red
+                                 hover:bg-main-sidebar-background'
+                      as={Button}
+                      onClick={preventBubbling(handleReportOpen(close))}
+                    >
+                      <HeroIcon iconName='FlagIcon' />
+                      Report Tweet
                     </Popover.Button>
                   )}
                 </Popover.Panel>

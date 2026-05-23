@@ -24,6 +24,7 @@ import {
   type BskyThreadViewPreference,
   type ChatBskyActorDeclaration,
   type ChatBskyConvoDefs,
+  type ComAtprotoModerationDefs,
   type ModerationOpts
 } from '@atproto/api';
 import {
@@ -35,6 +36,12 @@ import { buildAtprotoLoopbackClientMetadata } from '@atproto/oauth-types';
 import { ensureValidDid, isValidHandle } from '@atproto/syntax';
 import { getYouTubeVideoInfo } from '@lib/youtube';
 
+import {
+  isAtprotoIdentityDid,
+  normalizeAtprotoIdentifier,
+  normalizeAtprotoLoginIdentifier,
+  type AtprotoIdentityDid
+} from './identity';
 import { Timestamp } from './timestamp';
 import type { BlobRef as LexiconBlobRef } from '@atproto/lexicon';
 import type { JsonValue } from '@atproto/common-web';
@@ -69,6 +76,7 @@ const BSKY_CHAT_DID = 'did:web:api.bsky.chat';
 const BSKY_CHAT_SERVICE = 'bsky_chat';
 const BSKY_CHAT_PROXY = `${BSKY_CHAT_DID}#${BSKY_CHAT_SERVICE}`;
 const BSKY_CHAT_URL = 'https://api.bsky.chat';
+const BSKY_MODERATION_DID = 'did:plc:ar7c4by46qjdydhdevvrndac';
 const CHAT_SCOPE = 'transition:chat.bsky';
 const GENERIC_SCOPE = 'transition:generic';
 const OAUTH_SCOPES = [
@@ -172,8 +180,6 @@ type CredentialSessionState = {
   serviceUrl: string;
 };
 
-type AtprotoIdentityDid = `did:plc:${string}` | `did:web:${string}`;
-
 type ResolvedAtprotoHandle = AtprotoIdentityDid | null;
 
 type AtprotoHandleResolveOptions = {
@@ -224,6 +230,14 @@ export type BackendCollection = {
   path: string;
   ownerId?: string;
 };
+
+export type ModerationReportReason =
+  | 'spam'
+  | 'violation'
+  | 'misleading'
+  | 'sexual'
+  | 'rude'
+  | 'other';
 
 type PostRef = {
   uri: string;
@@ -587,6 +601,7 @@ const userCache = new Map<string, User>();
 const userHandleCache = new Map<string, User>();
 const tweetCache = new Map<string, Tweet>();
 const locallyCreatedTweets = new Map<string, Tweet>();
+const localQuoteTargetIds = new Map<string, string>();
 const locallyDeletedTweetIds = new Set<string>();
 const postRefCache = new Map<string, PostRef>();
 const postReplyRefCache = new Map<string, PostReplyRef>();
@@ -680,10 +695,6 @@ function usesHttpAtprotoService(): boolean {
       return false;
     }
   });
-}
-
-function isAtprotoIdentityDid(did: string): did is AtprotoIdentityDid {
-  return did.startsWith('did:plc:') || did.startsWith('did:web:');
 }
 
 async function resolveAtprotoHandleWithService(
@@ -970,6 +981,7 @@ function clearActiveAuthState(): void {
   followUriCache.clear();
   blockUriCache.clear();
   locallyCreatedTweets.clear();
+  localQuoteTargetIds.clear();
   locallyDeletedTweetIds.clear();
   serviceAuthTokenCache.clear();
 
@@ -3137,6 +3149,12 @@ function mapProfile(profile: ActorProfileView): User {
   const blockedBy = hasViewerState
     ? !!detailedProfile.viewer?.blockedBy
     : existing?.blockedBy ?? false;
+  const muting = hasViewerState
+    ? !!detailedProfile.viewer?.muted || !!detailedProfile.viewer?.mutedByList
+    : existing?.muting ?? false;
+  const mutingByListName = hasViewerState
+    ? detailedProfile.viewer?.mutedByList?.name ?? null
+    : existing?.mutingByListName ?? null;
   const isCurrentUser = currentUser?.id === did;
   const following = isCurrentUser
     ? Array.from(currentFollowing)
@@ -3167,6 +3185,8 @@ function mapProfile(profile: ActorProfileView): User {
   );
   const pinnedTweet = detailedProfile.pinnedPost
     ? postIdFromUri(detailedProfile.pinnedPost.uri)
+    : isDetailed
+    ? null
     : existing?.pinnedTweet ?? null;
 
   if (detailedProfile.pinnedPost) {
@@ -3194,6 +3214,8 @@ function mapProfile(profile: ActorProfileView): User {
       detailedProfile.followersCount ??
       existing?.followersCount ??
       followers.length,
+    muting,
+    mutingByListName,
     blocking,
     blockedBy,
     blockingUri,
@@ -3865,6 +3887,16 @@ function mergeLocalCreatedTweetsWithUsers(
     .filter((tweet): tweet is TweetWithUser => !!tweet);
 
   return [...sortByCreatedAt(localTweets), ...visibleTweets];
+}
+
+function mergeLocalCreatedQuotes(
+  tweets: TweetWithUser[],
+  targetTweetId: string
+): TweetWithUser[] {
+  return mergeLocalCreatedTweetsWithUsers(
+    tweets,
+    (tweet) => localQuoteTargetIds.get(tweet.id) === targetTweetId
+  );
 }
 
 function isFollowedAuthor(tweet: Tweet): boolean {
@@ -4976,6 +5008,7 @@ async function activateOAuthSession(
     clearModerationSettingsCache();
     if (previousState.sessionDid !== did) {
       locallyCreatedTweets.clear();
+      localQuoteTargetIds.clear();
       locallyDeletedTweetIds.clear();
     }
     agent = new Agent(nextSession);
@@ -5027,6 +5060,7 @@ async function activateCredentialAgent(
     clearModerationSettingsCache();
     if (previousState.sessionDid !== nextAgent.session.did) {
       locallyCreatedTweets.clear();
+      localQuoteTargetIds.clear();
       locallyDeletedTweetIds.clear();
     }
 
@@ -5106,12 +5140,13 @@ export async function signIn(identifier: string): Promise<AuthUser> {
 
   const trimmedIdentifier = identifier.trim();
   if (!trimmedIdentifier) throw new Error('Enter your Bluesky handle or DID.');
+  const loginIdentifier = normalizeAtprotoLoginIdentifier(trimmedIdentifier);
 
   writeCredentialSession();
   credentialAgent = null;
 
   const client = await getOAuthClient();
-  const nextSession = await client.signIn(trimmedIdentifier);
+  const nextSession = await client.signIn(loginIdentifier);
   const user = await activateOAuthSession(nextSession);
 
   if (!user) throw new Error('Bluesky did not return a profile.');
@@ -5270,20 +5305,7 @@ function sortByCreatedAt<T extends { createdAt: Timestamp }>(data: T[]): T[] {
 }
 
 function normalizeAtIdentifier(actor: string): string | null {
-  const trimmedActor = actor.trim();
-  if (!trimmedActor || trimmedActor === 'null') return null;
-
-  if (trimmedActor.startsWith('did:')) {
-    try {
-      ensureValidDid(trimmedActor);
-      return trimmedActor;
-    } catch {
-      return null;
-    }
-  }
-
-  const normalizedHandle = trimmedActor.toLowerCase();
-  return isValidHandle(normalizedHandle) ? normalizedHandle : null;
+  return normalizeAtprotoIdentifier(actor);
 }
 
 export async function getUser(actor: string): Promise<User | null> {
@@ -5378,6 +5400,26 @@ async function getPostRef(id: string): Promise<PostRef | null> {
   return postRefCache.get(tweet.id) ?? null;
 }
 
+function getModerationReportReasonType(
+  reason: ModerationReportReason
+): ComAtprotoModerationDefs.ReasonType {
+  switch (reason) {
+    case 'spam':
+      return 'com.atproto.moderation.defs#reasonSpam';
+    case 'violation':
+      return 'com.atproto.moderation.defs#reasonViolation';
+    case 'misleading':
+      return 'com.atproto.moderation.defs#reasonMisleading';
+    case 'sexual':
+      return 'com.atproto.moderation.defs#reasonSexual';
+    case 'rude':
+      return 'com.atproto.moderation.defs#reasonRude';
+    case 'other':
+    default:
+      return 'com.atproto.moderation.defs#reasonOther';
+  }
+}
+
 export async function listTweetStatsPage(
   tweetId: string,
   type: TweetStatsType,
@@ -5440,12 +5482,14 @@ export async function listTweetStatsPage(
   );
   const usersByDid = new Map(users.map((user) => [user.id, user]));
 
+  const tweets = quotePosts.map(({ post, tweet }) => ({
+    ...tweet,
+    user: usersByDid.get(tweet.createdBy) ?? mapProfile(post.author)
+  }));
+
   return {
     users: [],
-    tweets: quotePosts.map(({ post, tweet }) => ({
-      ...tweet,
-      user: usersByDid.get(tweet.createdBy) ?? mapProfile(post.author)
-    })),
+    tweets: cursor ? tweets : mergeLocalCreatedQuotes(tweets, tweetId),
     cursor: response.data.cursor ?? null
   };
 }
@@ -5706,9 +5750,13 @@ async function getQuoteRef(
 
   const cachedRef = postRefCache.get(quoteTarget.id);
   if (cachedRef) return cachedRef;
-  if (!quoteTarget.createdBy) return undefined;
 
-  const uri = `at://${quoteTarget.createdBy}/app.bsky.feed.post/${quoteTarget.id}`;
+  let uri = uriFromPostId(quoteTarget.id);
+  if (!uri.startsWith('at://')) {
+    if (!quoteTarget.createdBy) return undefined;
+    uri = `at://${quoteTarget.createdBy}/app.bsky.feed.post/${quoteTarget.id}`;
+  }
+
   const post = (await getAppViewAgent().getPosts({ uris: [uri] })).data
     .posts[0];
   if (!post) return undefined;
@@ -6166,9 +6214,19 @@ export async function addTweet(data: AddTweetData): Promise<Tweet> {
 
   postRefCache.set(visibleTweet.id, result);
   if (replyRef) postReplyRefCache.set(visibleTweet.id, replyRef);
+  if (data.quoteTarget?.id)
+    localQuoteTargetIds.set(visibleTweet.id, data.quoteTarget.id);
   tweetCache.set(visibleTweet.id, visibleTweet);
   locallyDeletedTweetIds.delete(visibleTweet.id);
   locallyCreatedTweets.set(visibleTweet.id, visibleTweet);
+  if (parentId) {
+    const parentTweet = tweetCache.get(parentId);
+    if (parentTweet) parentTweet.userReplies += 1;
+  }
+  if (data.quoteTarget?.id) {
+    const quotedTweet = tweetCache.get(data.quoteTarget.id);
+    if (quotedTweet) quotedTweet.userQuotes += 1;
+  }
   notify();
 
   return visibleTweet;
@@ -6381,6 +6439,38 @@ export async function updateProfile(
   notify();
 }
 
+export async function setPinnedPost(tweetId: string | null): Promise<void> {
+  if (!sessionDid) throw new Error('Sign in with Bluesky first.');
+
+  const api = getAgent();
+  const pinnedPost = tweetId ? await getPostRef(tweetId) : null;
+
+  if (tweetId && !pinnedPost)
+    throw new Error('Tweet reference was not available to pin.');
+
+  await upsertProfileRecord(api, (existing) => {
+    const nextProfile = { ...existing };
+
+    if (pinnedPost) nextProfile.pinnedPost = pinnedPost;
+    else delete nextProfile.pinnedPost;
+
+    return nextProfile;
+  });
+
+  const nextPinnedTweet = pinnedPost ? tweetId : null;
+
+  if (currentUser) {
+    currentUser.pinnedTweet = nextPinnedTweet;
+    updateSavedAccount(currentUser);
+  }
+
+  const cachedCurrentUser = userCache.get(sessionDid);
+  if (cachedCurrentUser) cachedCurrentUser.pinnedTweet = nextPinnedTweet;
+
+  invalidateUserProfileCache(sessionDid);
+  notify();
+}
+
 export async function followUser(targetDid: string): Promise<void> {
   const targetUser = userCache.get(targetDid);
   if (targetUser?.blocking || targetUser?.blockedBy) return;
@@ -6494,6 +6584,85 @@ export async function unblockUser(targetDid: string): Promise<void> {
   notify();
 }
 
+export async function muteUser(targetDid: string): Promise<void> {
+  if (!sessionDid) throw new Error('Sign in with Bluesky first.');
+  if (targetDid === sessionDid) return;
+
+  const targetUser = userCache.get(targetDid);
+  if (targetUser?.muting && !targetUser.mutingByListName) return;
+
+  await getAgent().mute(targetDid);
+  deleteCachedTweetsByAuthor(targetDid);
+  clearModerationSettingsCache();
+
+  if (targetUser) {
+    targetUser.muting = true;
+    targetUser.mutingByListName = null;
+  }
+
+  notify();
+}
+
+export async function unmuteUser(targetDid: string): Promise<void> {
+  if (!sessionDid) throw new Error('Sign in with Bluesky first.');
+  if (targetDid === sessionDid) return;
+
+  const targetUser = userCache.get(targetDid);
+  if (targetUser?.mutingByListName) return;
+
+  await getAgent().unmute(targetDid);
+  clearModerationSettingsCache();
+
+  if (targetUser) {
+    targetUser.muting = false;
+    targetUser.mutingByListName = null;
+  }
+
+  notify();
+}
+
+export async function reportUser(
+  targetDid: string,
+  reasonType: ModerationReportReason = 'other',
+  reason = 'Reported from Not Twitter.'
+): Promise<void> {
+  if (!sessionDid) throw new Error('Sign in with Bluesky first.');
+  if (targetDid === sessionDid) return;
+
+  await getAgent()
+    .withProxy('atproto_labeler', BSKY_MODERATION_DID)
+    .createModerationReport({
+      reasonType: getModerationReportReasonType(reasonType),
+      reason,
+      subject: {
+        $type: 'com.atproto.admin.defs#repoRef' as const,
+        did: targetDid
+      }
+    });
+}
+
+export async function reportPost(
+  tweetId: string,
+  reasonType: ModerationReportReason = 'other',
+  reason = 'Reported from Not Twitter.'
+): Promise<void> {
+  if (!sessionDid) throw new Error('Sign in with Bluesky first.');
+
+  const ref = await getPostRef(tweetId);
+  if (!ref) throw new Error('Tweet reference was not available to report.');
+
+  await getAgent()
+    .withProxy('atproto_labeler', BSKY_MODERATION_DID)
+    .createModerationReport({
+      reasonType: getModerationReportReasonType(reasonType),
+      reason,
+      subject: {
+        $type: 'com.atproto.repo.strongRef' as const,
+        ...ref
+      }
+    });
+}
+
 export async function unfollowUser(targetDid: string): Promise<void> {
   const targetUser = userCache.get(targetDid);
   const wasFollowing =
@@ -6584,6 +6753,7 @@ export async function deletePost(tweetId: string): Promise<void> {
   await getAgent().deletePost(ref.uri);
   tweetCache.delete(tweetId);
   locallyCreatedTweets.delete(tweetId);
+  localQuoteTargetIds.delete(tweetId);
   locallyDeletedTweetIds.add(tweetId);
   notify();
 }
