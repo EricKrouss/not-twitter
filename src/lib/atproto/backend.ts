@@ -175,6 +175,25 @@ type PreparedImageUpload = {
 };
 
 type ActorFeedPost = AppBskyFeedDefs.FeedViewPost;
+type AppViewFeedResponse = {
+  cursor?: string;
+  feed: AppBskyFeedDefs.FeedViewPost[];
+};
+type AppViewFeedGeneratorResponse = {
+  view: AppBskyFeedDefs.GeneratorView;
+};
+type AppViewFeedGeneratorsResponse = {
+  feeds: AppBskyFeedDefs.GeneratorView[];
+};
+type AppViewPostsResponse = {
+  posts: AppBskyFeedDefs.PostView[];
+};
+type AppViewNotificationsResponse = {
+  cursor?: string;
+  notifications: AppBskyNotificationListNotifications.Notification[];
+  priority?: boolean;
+  seenAt?: string;
+};
 type ActorProfileView =
   | AppBskyActorDefs.ProfileViewBasic
   | AppBskyActorDefs.ProfileView
@@ -873,6 +892,21 @@ async function readXrpcError(response: Response): Promise<string> {
     .catch(() => fallbackMessage);
 }
 
+function appendXrpcQueryParam(
+  query: URLSearchParams,
+  key: string,
+  value: unknown
+): void {
+  if (value === undefined || value === null) return;
+
+  if (Array.isArray(value)) {
+    value.forEach((item) => appendXrpcQueryParam(query, key, item));
+    return;
+  }
+
+  query.append(key, String(value));
+}
+
 async function callAppXrpc<T>(
   method: string,
   data: Record<string, unknown>
@@ -909,7 +943,7 @@ async function callAppQueryXrpc<T>(
   const query = new URLSearchParams();
 
   Object.entries(params).forEach(([key, value]) => {
-    if (value !== undefined && value !== null) query.set(key, String(value));
+    appendXrpcQueryParam(query, key, value);
   });
 
   const queryString = query.toString();
@@ -929,6 +963,40 @@ async function callAppQueryXrpc<T>(
   }
 
   return (await response.json()) as T;
+}
+
+function clampAppViewLimit(limit: number): number {
+  return Math.min(Math.max(limit, 1), 100);
+}
+
+async function fetchAppViewFeed(
+  feed: string,
+  cursor?: string,
+  limit = 30
+): Promise<AppViewFeedResponse> {
+  return callAppQueryXrpc<AppViewFeedResponse>('app.bsky.feed.getFeed', {
+    feed,
+    cursor,
+    limit: clampAppViewLimit(limit)
+  });
+}
+
+async function fetchAppViewTimeline(
+  cursor?: string,
+  limit = 30
+): Promise<AppViewFeedResponse> {
+  return callAppQueryXrpc<AppViewFeedResponse>('app.bsky.feed.getTimeline', {
+    cursor,
+    limit: clampAppViewLimit(limit)
+  });
+}
+
+async function fetchAppViewPosts(
+  uris: string[]
+): Promise<AppViewPostsResponse> {
+  return callAppQueryXrpc<AppViewPostsResponse>('app.bsky.feed.getPosts', {
+    uris
+  });
 }
 
 const SETTINGS_CONTENT_LABELS: SettingsContentLabel[] = [
@@ -2615,8 +2683,7 @@ async function waitForPublishedPost(
     attempt += 1
   ) {
     try {
-      const post = (await getAppViewAgent().getPosts({ uris: [uri] })).data
-        .posts[0];
+      const post = (await fetchAppViewPosts([uri])).posts[0];
 
       if (post && (!requireMedia || postHasVisibleMedia(post)))
         return mapPost(post);
@@ -2861,27 +2928,28 @@ export async function getFeedGeneratorPage(
   cursor?: string,
   limit = 25
 ): Promise<FeedGeneratorPage> {
-  const api = getAppViewAgent();
-  const profileResponse = await api.getProfile({ actor });
-  const feedUri = `at://${profileResponse.data.did}/app.bsky.feed.generator/${rkey}`;
+  const profile = await callAppQueryXrpc<AppBskyActorDefs.ProfileViewDetailed>(
+    'app.bsky.actor.getProfile',
+    { actor }
+  );
+  const feedUri = `at://${profile.did}/app.bsky.feed.generator/${rkey}`;
 
   const [metadataResponse, feedResponse] = await Promise.all([
-    api.app.bsky.feed.getFeedGenerator({ feed: feedUri }),
-    api.app.bsky.feed.getFeed({
-      feed: feedUri,
-      cursor,
-      limit: Math.min(Math.max(limit, 1), 100)
-    })
+    callAppQueryXrpc<AppViewFeedGeneratorResponse>(
+      'app.bsky.feed.getFeedGenerator',
+      { feed: feedUri }
+    ),
+    fetchAppViewFeed(feedUri, cursor, limit)
   ]);
 
   return {
     uri: feedUri,
-    displayName: metadataResponse.data.view.displayName,
-    description: metadataResponse.data.view.description ?? null,
-    avatar: metadataResponse.data.view.avatar ?? null,
-    likeCount: metadataResponse.data.view.likeCount ?? 0,
-    cursor: feedResponse.data.cursor ?? null,
-    feed: await mapFeedItemsWithUsers(feedResponse.data.feed)
+    displayName: metadataResponse.view.displayName,
+    description: metadataResponse.view.description ?? null,
+    avatar: metadataResponse.view.avatar ?? null,
+    likeCount: metadataResponse.view.likeCount ?? 0,
+    cursor: feedResponse.cursor ?? null,
+    feed: await mapFeedItemsWithUsers(feedResponse.feed)
   };
 }
 
@@ -2940,16 +3008,18 @@ function isDefaultDiscoverFeed(feed: SubscribedHomeFeed): boolean {
 async function getFeedGeneratorsByUri(
   feedUris: string[]
 ): Promise<Map<string, AppBskyFeedDefs.GeneratorView>> {
-  const api = getAppViewAgent();
   const generators = new Map<string, AppBskyFeedDefs.GeneratorView>();
 
   for (let index = 0; index < feedUris.length; index += 25) {
     const feeds = feedUris.slice(index, index + 25);
 
     try {
-      const response = await api.app.bsky.feed.getFeedGenerators({ feeds });
+      const response = await callAppQueryXrpc<AppViewFeedGeneratorsResponse>(
+        'app.bsky.feed.getFeedGenerators',
+        { feeds }
+      );
 
-      for (const generator of response.data.feeds)
+      for (const generator of response.feeds)
         generators.set(generator.uri, generator);
     } catch {
       // Saved feeds can include stale or unavailable generators; keep the rest.
@@ -2979,15 +3049,11 @@ export async function getSubscribedHomeFeedPage(
   cursor?: string,
   limit = 30
 ): Promise<HomeFeedPage> {
-  const response = await getAppViewAgent().app.bsky.feed.getFeed({
-    feed: feedUri,
-    cursor,
-    limit: Math.min(Math.max(limit, 1), 100)
-  });
+  const response = await fetchAppViewFeed(feedUri, cursor, limit);
 
   return {
-    tweets: await mapFeedItemsWithUsers(response.data.feed),
-    cursor: response.data.cursor ?? null
+    tweets: await mapFeedItemsWithUsers(response.feed),
+    cursor: response.cursor ?? null
   };
 }
 
@@ -2995,14 +3061,11 @@ export async function getFollowingHomeFeedPage(
   cursor?: string,
   limit = 30
 ): Promise<HomeFeedPage> {
-  const response = await getAppViewAgent().getTimeline({
-    cursor,
-    limit: Math.min(Math.max(limit, 1), 100)
-  });
+  const response = await fetchAppViewTimeline(cursor, limit);
 
   return {
-    tweets: await mapFeedItemsWithUsers(response.data.feed),
-    cursor: response.data.cursor ?? null
+    tweets: await mapFeedItemsWithUsers(response.feed),
+    cursor: response.cursor ?? null
   };
 }
 
@@ -3054,11 +3117,9 @@ async function getNotificationTweetByUri(
 
   for (let index = 0; index < uris.length; index += 25) {
     try {
-      const response = await getAppViewAgent().getPosts({
-        uris: uris.slice(index, index + 25)
-      });
+      const response = await fetchAppViewPosts(uris.slice(index, index + 25));
 
-      response.data.posts.forEach((post) => {
+      response.posts.forEach((post) => {
         tweetByUri.set(post.uri, mapPost(post));
       });
     } catch {
@@ -3106,21 +3167,24 @@ export async function listNotificationsPage(
   cursor?: string,
   options?: { mentionsOnly?: boolean; limit?: number }
 ): Promise<NotificationsPage> {
-  const response = await getAppViewAgent().listNotifications({
-    cursor,
-    limit: Math.min(Math.max(options?.limit ?? 30, 1), 100),
-    reasons: options?.mentionsOnly ? ['mention', 'reply', 'quote'] : undefined
-  });
-  const tweetByUri = await getNotificationTweetByUri(
-    response.data.notifications
+  const response = await callAppQueryXrpc<AppViewNotificationsResponse>(
+    'app.bsky.notification.listNotifications',
+    {
+      cursor,
+      limit: clampAppViewLimit(options?.limit ?? 30),
+      reasons: options?.mentionsOnly
+        ? ['mention', 'reply', 'quote']
+        : undefined
+    }
   );
+  const tweetByUri = await getNotificationTweetByUri(response.notifications);
 
   return {
-    notifications: response.data.notifications.map((notification) =>
+    notifications: response.notifications.map((notification) =>
       mapNotification(notification, tweetByUri)
     ),
-    cursor: response.data.cursor ?? null,
-    seenAt: response.data.seenAt ?? null
+    cursor: response.cursor ?? null,
+    seenAt: response.seenAt ?? null
   };
 }
 
