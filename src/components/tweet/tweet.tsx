@@ -132,6 +132,8 @@ export function Tweet(tweet: TweetProps): JSX.Element {
   return (
     <motion.article
       {...(!modal ? variants : {})}
+      className='tweet-article'
+      data-tweet-id={tweetId}
       animate={{
         ...variants.animate,
         ...(parentTweet && { transition: { duration: 0.2 } })

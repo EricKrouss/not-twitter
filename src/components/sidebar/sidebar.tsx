@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@lib/context/auth-context';
 import { useLiveUpdates } from '@lib/context/live-updates-context';
@@ -19,6 +20,16 @@ export function Sidebar(): JSX.Element {
   const { homeBadgeCount, messageCount, notificationCount } = useLiveUpdates();
 
   const { open, openModal, closeModal } = useModal();
+
+  useEffect(() => {
+    const handleOpenTweetModal = (): void => {
+      openModal();
+    };
+    window.addEventListener('open-tweet-modal', handleOpenTweetModal);
+    return () => {
+      window.removeEventListener('open-tweet-modal', handleOpenTweetModal);
+    };
+  }, [openModal]);
 
   const username = user?.username as string;
 

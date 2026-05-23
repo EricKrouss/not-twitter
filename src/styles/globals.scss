@@ -167,4 +167,10 @@
   .feed-tabs-scroll::-webkit-scrollbar {
     display: none;
   }
+
+  .selected-tweet {
+    box-shadow: inset 4px 0 0 rgb(var(--main-accent));
+    background-color: rgba(var(--main-accent), 0.03);
+  }
 }
+

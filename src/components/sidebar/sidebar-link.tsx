@@ -34,6 +34,16 @@ export function SidebarLink({
     badgeLabel.length === 1 ? 'w-4' : 'min-w-[18px] px-1'
   );
 
+  const handleClick = (e: React.MouseEvent<HTMLAnchorElement>): void => {
+    if (disabled) {
+      preventBubbling()(e);
+      return;
+    }
+    if (href === '/home' && asPath === '/home') {
+      window.dispatchEvent(new CustomEvent('refresh-home-feed'));
+    }
+  };
+
   return (
     <Link href={href}>
       <a
@@ -42,7 +52,7 @@ export function SidebarLink({
           canBeHidden ? 'hidden xs:flex' : 'flex',
           disabled && 'cursor-not-allowed'
         )}
-        onClick={disabled ? preventBubbling() : undefined}
+        onClick={handleClick}
       >
         <div
           className={cn(
