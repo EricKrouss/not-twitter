@@ -43,6 +43,16 @@ export function MainLayout({ children }: LayoutProps): JSX.Element {
     };
   }, [router]);
 
+  useEffect(() => {
+    const routesToPrefetch = ['/home', '/explore', '/notifications', '/messages', '/bookmarks', '/settings', '/lists'];
+    routesToPrefetch.forEach((route) => {
+      void router.prefetch(route);
+    });
+    if (username) {
+      void router.prefetch(getUserPath(username));
+    }
+  }, [router, username]);
+
   const clickButton = (selector: string): void => {
     const btn = document.querySelector(selector) as HTMLElement;
     if (btn) btn.click();
@@ -166,11 +176,8 @@ export function MainLayout({ children }: LayoutProps): JSX.Element {
 
         if (targetRoute) {
           e.preventDefault();
-          const sidebarLink = document.querySelector(
-            `aside a[href="${targetRoute}"], nav a[href="${targetRoute}"], a[href="${targetRoute}"]`
-          ) as HTMLElement;
-          if (sidebarLink) {
-            sidebarLink.click();
+          if (targetRoute === '/home' && router.asPath === '/home') {
+            window.dispatchEvent(new CustomEvent('refresh-home-feed'));
           } else {
             void router.push(targetRoute);
           }
