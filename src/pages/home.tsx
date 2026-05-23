@@ -1,9 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import cn from 'clsx';
 import useSWR from 'swr';
 import {
-  getDiscoverHomeFeedPage,
   getFollowingHomeFeedPage,
   getSubscribedHomeFeedPage,
   getSubscribedHomeFeeds
@@ -23,27 +22,18 @@ import { HeroIcon } from '@components/ui/hero-icon';
 import { Loading } from '@components/ui/loading';
 import { Error } from '@components/ui/error';
 import { ToolTip } from '@components/ui/tooltip';
-import type {
-  MouseEvent,
-  PointerEvent,
-  ReactElement,
-  ReactNode
-} from 'react';
-import type {
-  HomeFeedPage,
-  SubscribedHomeFeed
-} from '@lib/atproto/backend';
+import type { MouseEvent, PointerEvent, ReactElement, ReactNode } from 'react';
+import type { HomeFeedPage, SubscribedHomeFeed } from '@lib/atproto/backend';
 import type { TweetWithUser } from '@lib/types/tweet';
 
-type HomeFeedTab = 'discover' | 'following' | `feed:${string}`;
+type HomeFeedTab = 'following' | `feed:${string}`;
 
 type HomeFeedTabData = {
   label: string;
   value: HomeFeedTab;
 };
 
-const baseHomeFeedTabs: Readonly<HomeFeedTabData[]> = [
-  { label: 'For you', value: 'discover' },
+const fallbackHomeFeedTabs: Readonly<HomeFeedTabData[]> = [
   { label: 'Following', value: 'following' }
 ];
 const HOME_FEED_REFRESH_INTERVAL_MS = 15000;
@@ -53,7 +43,6 @@ async function getHomeFeedPage(
   tab: HomeFeedTab,
   cursor?: string
 ): Promise<HomeFeedPage> {
-  if (tab === 'discover') return getDiscoverHomeFeedPage(cursor);
   if (tab === 'following') return getFollowingHomeFeedPage(cursor);
 
   return getSubscribedHomeFeedPage(tab.slice(FEED_TAB_PREFIX.length), cursor);
@@ -101,11 +90,11 @@ function getNewTweetsBeforeCurrentTop(
 function HomeTabs({
   activeTab,
   setActiveTab,
-  subscribedFeeds
+  homeFeedTabs
 }: {
   activeTab: HomeFeedTab;
   setActiveTab: (tab: HomeFeedTab) => void;
-  subscribedFeeds: SubscribedHomeFeed[];
+  homeFeedTabs: HomeFeedTabData[];
 }): JSX.Element {
   const scrollRef = useRef<HTMLElement | null>(null);
   const suppressNextClickRef = useRef(false);
@@ -117,14 +106,6 @@ function HomeTabs({
     scrollLeft: 0,
     startX: 0
   });
-  const homeFeedTabs = [
-    ...baseHomeFeedTabs,
-    ...subscribedFeeds.map<HomeFeedTabData>((feed) => ({
-      label: feed.displayName,
-      value: `${FEED_TAB_PREFIX}${feed.uri}` as HomeFeedTab
-    }))
-  ];
-
   const handlePointerDown = (event: PointerEvent<HTMLElement>): void => {
     if (event.button !== 0 || !scrollRef.current) return;
 
@@ -236,7 +217,7 @@ function HomeTabs({
 export default function Home(): JSX.Element {
   const { isMobile } = useWindow();
   const { clearHomeBadge } = useLiveUpdates();
-  const [activeTab, setActiveTab] = useState<HomeFeedTab>('discover');
+  const [activeTab, setActiveTab] = useState<HomeFeedTab>('following');
   const [feed, setFeed] = useState<TweetWithUser[]>([]);
   const [newTweets, setNewTweets] = useState<TweetWithUser[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -244,10 +225,24 @@ export default function Home(): JSX.Element {
   const [timelineSettingsOpen, setTimelineSettingsOpen] = useState(false);
   const feedRef = useRef<TweetWithUser[]>([]);
   const newTweetsRef = useRef<TweetWithUser[]>([]);
+  const adoptedSavedFeedsRef = useRef(false);
   const { data: subscribedFeeds = [] } = useSWR<SubscribedHomeFeed[], Error>(
     'home-subscribed-feeds',
     getSubscribedHomeFeeds,
     { revalidateOnFocus: false }
+  );
+  const homeFeedTabs = useMemo(
+    () =>
+      subscribedFeeds.length
+        ? subscribedFeeds.map<HomeFeedTabData>((feed) => ({
+            label: feed.displayName,
+            value:
+              feed.type === 'timeline'
+                ? 'following'
+                : (`${FEED_TAB_PREFIX}${feed.uri}` as HomeFeedTab)
+          }))
+        : [...fallbackHomeFeedTabs],
+    [subscribedFeeds]
   );
 
   const { data, error } = useSWR<HomeFeedPage, Error>(
@@ -255,6 +250,17 @@ export default function Home(): JSX.Element {
     () => getHomeFeedPage(activeTab),
     { revalidateOnFocus: false }
   );
+
+  useEffect(() => {
+    if (subscribedFeeds.length && !adoptedSavedFeedsRef.current) {
+      adoptedSavedFeedsRef.current = true;
+      setActiveTab(homeFeedTabs[0]?.value ?? 'following');
+      return;
+    }
+
+    if (!homeFeedTabs.some(({ value }) => value === activeTab))
+      setActiveTab(homeFeedTabs[0]?.value ?? 'following');
+  }, [activeTab, homeFeedTabs, subscribedFeeds.length]);
 
   useEffect(() => {
     setFeed([]);
@@ -446,8 +452,8 @@ export default function Home(): JSX.Element {
         </div>
         <HomeTabs
           activeTab={activeTab}
+          homeFeedTabs={homeFeedTabs}
           setActiveTab={setActiveTab}
-          subscribedFeeds={subscribedFeeds}
         />
         <AnimatePresence>
           {newTweets.length > 0 && (
@@ -476,7 +482,7 @@ export default function Home(): JSX.Element {
         {loading ? (
           <Loading className='mt-5' />
         ) : error ? (
-          <Error message='Something went wrong' />
+          <Error message={error.message || 'Something went wrong'} />
         ) : !feed.length ? (
           <p className='border-b border-light-border px-4 py-8 text-center text-light-secondary dark:border-dark-border dark:text-dark-secondary'>
             No posts found in this timeline.

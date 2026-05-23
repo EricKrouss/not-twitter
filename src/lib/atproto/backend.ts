@@ -47,6 +47,7 @@ const CREDENTIAL_SESSION_KEY = 'twitter-clone:bsky-credential-session';
 const BSKY_APPVIEW_DID = 'did:web:api.bsky.app';
 const BSKY_APPVIEW_SERVICE = 'bsky_appview';
 const BSKY_APPVIEW_PROXY = `${BSKY_APPVIEW_DID}#${BSKY_APPVIEW_SERVICE}`;
+const PUBLIC_BSKY_APPVIEW_URL = 'https://public.api.bsky.app';
 const BSKY_CHAT_DID = 'did:web:api.bsky.chat';
 const BSKY_CHAT_SERVICE = 'bsky_chat';
 const BSKY_CHAT_PROXY = `${BSKY_CHAT_DID}#${BSKY_CHAT_SERVICE}`;
@@ -77,6 +78,8 @@ const BSKY_PROFILE_IMAGE_MIME_TYPE = 'image/jpeg';
 const BSKY_PROFILE_IMAGE_ACCEPTED_TYPES = /^image\/(?:jpe?g|png)$/i;
 const BSKY_MEDIA_POST_VISIBILITY_RETRIES = 8;
 const BSKY_THREAD_REPLY_DEPTH = 25;
+const REFRESH_BSKY_LOGIN_MESSAGE =
+  'Refresh your Bluesky login to load notifications. Sign out and sign back in once so Bluesky grants Not Twitter AppView access.';
 const THEME_KEY = 'twitter-clone:bsky-theme';
 const DEFAULT_PROFILE_PHOTO_URL = '/assets/twitter-default-egg.png';
 const DEFAULT_PROFILE_COVER_URL = '/assets/twitter-default-cover.png';
@@ -216,6 +219,7 @@ export type HomeFeedPage = {
 
 export type SubscribedHomeFeed = {
   id: string;
+  type: 'feed' | 'timeline';
   uri: string;
   displayName: string;
   description: string | null;
@@ -733,6 +737,41 @@ function throwChatError(error: unknown): never {
   throw new Error(`Bluesky messages failed: ${message}`);
 }
 
+function hasRpcScopeForAudience(
+  scopes: Set<string>,
+  serviceDid: string,
+  serviceId: string
+): boolean {
+  const proxy = `${serviceDid}#${serviceId}`;
+  const encodedProxy = `${serviceDid}%23${serviceId}`;
+
+  return Array.from(scopes).some(
+    (scope) =>
+      scope.startsWith('rpc:') &&
+      (scope.includes(`aud=${proxy}`) ||
+        scope.includes(`aud=${encodedProxy}`) ||
+        scope.includes('aud=*'))
+  );
+}
+
+async function hasAppViewAccessScope(): Promise<boolean> {
+  if (!oauthSession) return false;
+
+  const tokenInfo = await oauthSession.getTokenInfo('auto');
+  const scopes = new Set(tokenInfo.scope.split(/\s+/).filter(Boolean));
+
+  return (
+    scopes.has(GENERIC_SCOPE) ||
+    hasRpcScopeForAudience(scopes, BSKY_APPVIEW_DID, BSKY_APPVIEW_SERVICE)
+  );
+}
+
+async function ensureAppViewAccessScope(): Promise<void> {
+  if (await hasAppViewAccessScope()) return;
+
+  throw new Error(REFRESH_BSKY_LOGIN_MESSAGE);
+}
+
 export function isChatAccessError(error: unknown): boolean {
   return (
     error instanceof ChatAccessError ||
@@ -745,12 +784,10 @@ async function hasChatAccessScope(): Promise<boolean> {
 
   const tokenInfo = await oauthSession.getTokenInfo('auto');
   const scopes = new Set(tokenInfo.scope.split(/\s+/).filter(Boolean));
-  const hasChatRpcScope = Array.from(scopes).some(
-    (scope) =>
-      scope.startsWith('rpc:') &&
-      (scope.includes(`aud=${BSKY_CHAT_PROXY}`) ||
-        scope.includes(`aud=${BSKY_CHAT_DID}%23${BSKY_CHAT_SERVICE}`) ||
-        scope.includes('aud=*'))
+  const hasChatRpcScope = hasRpcScopeForAudience(
+    scopes,
+    BSKY_CHAT_DID,
+    BSKY_CHAT_SERVICE
   );
 
   return (
@@ -965,6 +1002,46 @@ async function callAppQueryXrpc<T>(
   return (await response.json()) as T;
 }
 
+async function callPublicAppQueryXrpc<T>(
+  method: string,
+  params: Record<string, unknown>
+): Promise<T> {
+  const query = new URLSearchParams();
+
+  Object.entries(params).forEach(([key, value]) => {
+    appendXrpcQueryParam(query, key, value);
+  });
+
+  const queryString = query.toString();
+  const response = await fetch(
+    `${PUBLIC_BSKY_APPVIEW_URL}/xrpc/${method}${
+      queryString ? `?${queryString}` : ''
+    }`
+  );
+
+  if (!response.ok) {
+    const fallbackMessage = response.statusText || `HTTP ${response.status}`;
+    throw new Error((await readXrpcError(response)) || fallbackMessage);
+  }
+
+  return (await response.json()) as T;
+}
+
+async function callPublicFallbackAppQueryXrpc<T>(
+  method: string,
+  params: Record<string, unknown>
+): Promise<T> {
+  try {
+    return await callAppQueryXrpc<T>(method, params);
+  } catch (error) {
+    try {
+      return await callPublicAppQueryXrpc<T>(method, params);
+    } catch {
+      throw error;
+    }
+  }
+}
+
 function clampAppViewLimit(limit: number): number {
   return Math.min(Math.max(limit, 1), 100);
 }
@@ -974,17 +1051,22 @@ async function fetchAppViewFeed(
   cursor?: string,
   limit = 30
 ): Promise<AppViewFeedResponse> {
-  return callAppQueryXrpc<AppViewFeedResponse>('app.bsky.feed.getFeed', {
-    feed,
-    cursor,
-    limit: clampAppViewLimit(limit)
-  });
+  return callPublicFallbackAppQueryXrpc<AppViewFeedResponse>(
+    'app.bsky.feed.getFeed',
+    {
+      feed,
+      cursor,
+      limit: clampAppViewLimit(limit)
+    }
+  );
 }
 
 async function fetchAppViewTimeline(
   cursor?: string,
   limit = 30
 ): Promise<AppViewFeedResponse> {
+  await ensureAppViewAccessScope();
+
   return callAppQueryXrpc<AppViewFeedResponse>('app.bsky.feed.getTimeline', {
     cursor,
     limit: clampAppViewLimit(limit)
@@ -994,9 +1076,12 @@ async function fetchAppViewTimeline(
 async function fetchAppViewPosts(
   uris: string[]
 ): Promise<AppViewPostsResponse> {
-  return callAppQueryXrpc<AppViewPostsResponse>('app.bsky.feed.getPosts', {
-    uris
-  });
+  return callPublicFallbackAppQueryXrpc<AppViewPostsResponse>(
+    'app.bsky.feed.getPosts',
+    {
+      uris
+    }
+  );
 }
 
 const SETTINGS_CONTENT_LABELS: SettingsContentLabel[] = [
@@ -2928,14 +3013,15 @@ export async function getFeedGeneratorPage(
   cursor?: string,
   limit = 25
 ): Promise<FeedGeneratorPage> {
-  const profile = await callAppQueryXrpc<AppBskyActorDefs.ProfileViewDetailed>(
-    'app.bsky.actor.getProfile',
-    { actor }
-  );
+  const profile =
+    await callPublicFallbackAppQueryXrpc<AppBskyActorDefs.ProfileViewDetailed>(
+      'app.bsky.actor.getProfile',
+      { actor }
+    );
   const feedUri = `at://${profile.did}/app.bsky.feed.generator/${rkey}`;
 
   const [metadataResponse, feedResponse] = await Promise.all([
-    callAppQueryXrpc<AppViewFeedGeneratorResponse>(
+    callPublicFallbackAppQueryXrpc<AppViewFeedGeneratorResponse>(
       'app.bsky.feed.getFeedGenerator',
       { feed: feedUri }
     ),
@@ -2978,15 +3064,31 @@ function getFeedGeneratorFallbackName(uri: string): string {
   const rkey = getRkeyFromAtUri(uri);
   if (!rkey) return 'Feed';
 
-  return rkey.replace(/[-_]+/g, ' ');
+  return rkey
+    .replace(/[-_]+/g, ' ')
+    .replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
 function mapSubscribedHomeFeed(
   savedFeed: AppBskyActorDefs.SavedFeed,
   generator?: AppBskyFeedDefs.GeneratorView
 ): SubscribedHomeFeed {
+  if (savedFeed.type === 'timeline')
+    return {
+      id: savedFeed.id,
+      type: 'timeline',
+      uri: savedFeed.value,
+      displayName: 'Following',
+      description: null,
+      avatar: null,
+      creatorName: 'Bluesky',
+      creatorUsername: 'bsky.app',
+      pinned: savedFeed.pinned
+    };
+
   return {
     id: savedFeed.id,
+    type: 'feed',
     uri: savedFeed.value,
     displayName:
       generator?.displayName ?? getFeedGeneratorFallbackName(savedFeed.value),
@@ -2998,13 +3100,6 @@ function mapSubscribedHomeFeed(
   };
 }
 
-function isDefaultDiscoverFeed(feed: SubscribedHomeFeed): boolean {
-  return (
-    feed.creatorUsername === 'bsky.app' &&
-    getRkeyFromAtUri(feed.uri) === 'whats-hot'
-  );
-}
-
 async function getFeedGeneratorsByUri(
   feedUris: string[]
 ): Promise<Map<string, AppBskyFeedDefs.GeneratorView>> {
@@ -3014,10 +3109,11 @@ async function getFeedGeneratorsByUri(
     const feeds = feedUris.slice(index, index + 25);
 
     try {
-      const response = await callAppQueryXrpc<AppViewFeedGeneratorsResponse>(
-        'app.bsky.feed.getFeedGenerators',
-        { feeds }
-      );
+      const response =
+        await callPublicFallbackAppQueryXrpc<AppViewFeedGeneratorsResponse>(
+          'app.bsky.feed.getFeedGenerators',
+          { feeds }
+        );
 
       for (const generator of response.feeds)
         generators.set(generator.uri, generator);
@@ -3032,16 +3128,23 @@ async function getFeedGeneratorsByUri(
 export async function getSubscribedHomeFeeds(): Promise<SubscribedHomeFeed[]> {
   const prefs = await getAppViewAgent().getPreferences();
   const savedFeeds = prefs.savedFeeds.filter(
-    (feed) => feed.type === 'feed' && isFeedGeneratorUri(feed.value)
+    (feed) =>
+      feed.pinned &&
+      (feed.type === 'timeline' ||
+        (feed.type === 'feed' && isFeedGeneratorUri(feed.value)))
   );
-  const feedUris = Array.from(new Set(savedFeeds.map(({ value }) => value)));
+  const feedUris = Array.from(
+    new Set(
+      savedFeeds
+        .filter((feed) => feed.type === 'feed')
+        .map(({ value }) => value)
+    )
+  );
   const generators = await getFeedGeneratorsByUri(feedUris);
 
-  return savedFeeds
-    .map((savedFeed) =>
-      mapSubscribedHomeFeed(savedFeed, generators.get(savedFeed.value))
-    )
-    .filter((feed) => !isDefaultDiscoverFeed(feed));
+  return savedFeeds.map((savedFeed) =>
+    mapSubscribedHomeFeed(savedFeed, generators.get(savedFeed.value))
+  );
 }
 
 export async function getSubscribedHomeFeedPage(
@@ -3130,6 +3233,20 @@ async function getNotificationTweetByUri(
   return tweetByUri;
 }
 
+function isNotificationView(
+  notification: unknown
+): notification is AppBskyNotificationListNotifications.Notification {
+  return (
+    !!notification &&
+    typeof notification === 'object' &&
+    typeof (notification as { uri?: unknown }).uri === 'string' &&
+    typeof (notification as { cid?: unknown }).cid === 'string' &&
+    typeof (notification as { reason?: unknown }).reason === 'string' &&
+    typeof (notification as { indexedAt?: unknown }).indexedAt === 'string' &&
+    !!(notification as { author?: unknown }).author
+  );
+}
+
 function mapNotification(
   notification: AppBskyNotificationListNotifications.Notification,
   tweetByUri?: Map<string, Tweet>
@@ -3167,22 +3284,29 @@ export async function listNotificationsPage(
   cursor?: string,
   options?: { mentionsOnly?: boolean; limit?: number }
 ): Promise<NotificationsPage> {
+  await ensureAppViewAccessScope();
+
   const response = await callAppQueryXrpc<AppViewNotificationsResponse>(
     'app.bsky.notification.listNotifications',
     {
       cursor,
       limit: clampAppViewLimit(options?.limit ?? 30),
-      reasons: options?.mentionsOnly
-        ? ['mention', 'reply', 'quote']
-        : undefined
+      reasons: options?.mentionsOnly ? ['mention', 'reply', 'quote'] : undefined
     }
   );
-  const tweetByUri = await getNotificationTweetByUri(response.notifications);
+  const responseNotifications = Array.isArray(response.notifications)
+    ? response.notifications.filter(isNotificationView)
+    : [];
+  const tweetByUri = await getNotificationTweetByUri(responseNotifications);
 
   return {
-    notifications: response.notifications.map((notification) =>
-      mapNotification(notification, tweetByUri)
-    ),
+    notifications: responseNotifications.flatMap((notification) => {
+      try {
+        return [mapNotification(notification, tweetByUri)];
+      } catch {
+        return [];
+      }
+    }),
     cursor: response.cursor ?? null,
     seenAt: response.seenAt ?? null
   };

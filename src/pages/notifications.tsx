@@ -978,7 +978,7 @@ export default function Notifications(): JSX.Element {
         {loading ? (
           <Loading className='mt-5' />
         ) : error ? (
-          <ErrorMessage message='Something went wrong' />
+          <ErrorMessage message={error.message || 'Something went wrong'} />
         ) : !notificationGroups.length ? (
           <NotificationEmptyState activeTab={activeTab} />
         ) : (
