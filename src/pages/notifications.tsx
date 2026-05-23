@@ -749,6 +749,8 @@ function TweetNotificationRow({
   const targetHref = getTargetHref(latestNotification, viewerUsername);
   const quotedTweet =
     reason === 'quote' ? group.tweet?.quotedTweet ?? null : null;
+  const hideQuotedTweetMedia =
+    !!group.tweet?.images?.length || !!group.tweet?.card;
   const {
     open: replyOpen,
     openModal: openReplyModal,
@@ -830,7 +832,11 @@ function TweetNotificationRow({
             )}
             {quotedTweet && (
               <div className='mt-3 max-w-xl'>
-                <TweetEmbed card={null} quotedTweet={quotedTweet} />
+                <TweetEmbed
+                  card={null}
+                  quotedTweet={quotedTweet}
+                  hideQuotedTweetMedia={hideQuotedTweetMedia}
+                />
               </div>
             )}
             <div className='mt-3 flex max-w-md justify-between pr-8'>

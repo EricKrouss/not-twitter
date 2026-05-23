@@ -55,6 +55,7 @@ export function ViewTweet(tweet: ViewTweetProps): JSX.Element {
 
   const tweetLink = getTweetPath(tweetId, username);
   const displayCard = card ?? createYouTubeCardFromText(text);
+  const hideQuotedTweetMedia = !!images?.length || !!displayCard;
 
   const userId = user?.id ?? '';
 
@@ -144,7 +145,12 @@ export function ViewTweet(tweet: ViewTweetProps): JSX.Element {
             previewCount={images.length}
           />
         )}
-        <TweetEmbed card={displayCard} quotedTweet={quotedTweet} viewTweet />
+        <TweetEmbed
+          card={displayCard}
+          quotedTweet={quotedTweet}
+          viewTweet
+          hideQuotedTweetMedia={hideQuotedTweetMedia}
+        />
         <div
           className='inner:hover-animation inner:border-b inner:border-light-border
                      dark:inner:border-dark-border'

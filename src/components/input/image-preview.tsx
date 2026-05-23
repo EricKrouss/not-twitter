@@ -44,6 +44,14 @@ const postImageBorderRadius: Readonly<PostImageBorderRadius> = {
   4: ['rounded-tl-2xl', 'rounded-tr-2xl', 'rounded-bl-2xl', 'rounded-br-2xl']
 };
 
+const DEFAULT_TWEET_MEDIA_RATIO = 16 / 9;
+const MIN_SINGLE_TWEET_MEDIA_RATIO = 4 / 5;
+const MAX_SINGLE_TWEET_MEDIA_RATIO = 16 / 9;
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
 function isGifMedia({ src, type }: ImageData): boolean {
   return type === 'gif' || !!type?.includes('gif') || /\.gif($|\?)/i.test(src);
 }
@@ -66,6 +74,40 @@ function getSingleGifStyle(
     aspectRatio?.height && aspectRatio.height > 0 ? aspectRatio.height : 9;
 
   return { aspectRatio: `${width} / ${height}` };
+}
+
+function getMediaRatio(media: ImageData | undefined): number {
+  if (!media) return DEFAULT_TWEET_MEDIA_RATIO;
+
+  const width = media.aspectRatio?.width;
+  const height = media.aspectRatio?.height;
+
+  if (!width || !height || width <= 0 || height <= 0)
+    return DEFAULT_TWEET_MEDIA_RATIO;
+
+  return width / height;
+}
+
+function getTweetMediaStyle({
+  isTweet,
+  previewCount,
+  media
+}: {
+  isTweet: boolean | undefined;
+  previewCount: number;
+  media: ImageData | undefined;
+}): CSSProperties | undefined {
+  if (previewCount !== 1) return undefined;
+
+  if (!isTweet) return getSingleGifStyle(media);
+
+  const clampedRatio = clampNumber(
+    getMediaRatio(media),
+    MIN_SINGLE_TWEET_MEDIA_RATIO,
+    MAX_SINGLE_TWEET_MEDIA_RATIO
+  );
+
+  return { aspectRatio: `${clampedRatio} / 1` };
 }
 
 function TwitterGifIcon({ playing }: { playing: boolean }): JSX.Element {
@@ -136,7 +178,7 @@ function TwitterGifMedia({
       {videoSource ? (
         <video
           ref={videoRef}
-          className='h-full w-full object-cover'
+          className='h-full w-full object-cover object-center'
           src={media.src}
           poster={media.poster ?? undefined}
           autoPlay
@@ -146,7 +188,7 @@ function TwitterGifMedia({
         />
       ) : (
         <img
-          className='h-full w-full object-cover'
+          className='h-full w-full object-cover object-center'
           src={playing ? media.src : media.poster ?? media.src}
           alt={media.alt}
           key={`${media.src}-${animationKey}-${playing ? 'playing' : 'paused'}`}
@@ -203,12 +245,14 @@ export function ImagePreview({
   };
 
   const handleNextIndex = (type: 'prev' | 'next') => () => {
+    const mediaCount =
+      imagesPreview.length > 0 ? imagesPreview.length : previewCount;
     const nextIndex =
       type === 'prev'
         ? selectedIndex === 0
-          ? previewCount - 1
+          ? mediaCount - 1
           : selectedIndex - 1
-        : selectedIndex === previewCount - 1
+        : selectedIndex === mediaCount - 1
         ? 0
         : selectedIndex + 1;
 
@@ -217,9 +261,18 @@ export function ImagePreview({
   };
 
   const isTweet = tweet ?? viewTweet;
-  const singleGifStyle =
-    previewCount === 1 ? getSingleGifStyle(imagesPreview[0]) : undefined;
-  const singleGif = !!singleGifStyle;
+  const mediaCount =
+    imagesPreview.length > 0 ? imagesPreview.length : previewCount;
+  const visibleMedia = imagesPreview.slice(0, 4);
+  const visiblePreviewCount = Math.min(mediaCount, 4);
+  const firstMedia = imagesPreview[0];
+  const singleMedia = visiblePreviewCount === 1;
+  const tweetMediaStyle = getTweetMediaStyle({
+    isTweet,
+    previewCount: visiblePreviewCount,
+    media: firstMedia
+  });
+  const singleGif = singleMedia && !!firstMedia && isGifMedia(firstMedia);
   const draftSingleGif = singleGif && !isTweet;
   const currentImage = selectedImage ?? imagesPreview[selectedIndex];
 
@@ -227,17 +280,23 @@ export function ImagePreview({
     <div
       className={cn(
         'grid rounded-2xl',
-        draftSingleGif
-          ? 'mt-2 grid-cols-1 grid-rows-1 overflow-hidden border border-light-border dark:border-dark-border'
-          : 'grid-cols-2 grid-rows-2',
-        singleGif
-          ? 'max-h-[510px] min-h-[188px] w-full'
-          : viewTweet
-          ? 'h-[51vw] xs:h-[42vw] md:h-[305px]'
-          : 'h-[42vw] xs:h-[37vw] md:h-[271px]',
-        isTweet ? 'mt-2 gap-0.5' : draftSingleGif ? 'gap-0' : 'gap-3'
+        singleMedia ? 'grid-cols-1 grid-rows-1' : 'grid-cols-2 grid-rows-2',
+        isTweet
+          ? `dark:bg-dark-hover mt-2 w-full overflow-hidden border border-light-border
+             bg-light-line-reply dark:border-dark-border`
+          : draftSingleGif
+          ? 'mt-2 w-full overflow-hidden border border-light-border dark:border-dark-border'
+          : 'h-[42vw] gap-3 xs:h-[37vw] md:h-[271px]',
+        isTweet && singleMedia && 'max-h-[510px] min-h-[188px]',
+        isTweet &&
+          !singleMedia &&
+          (viewTweet
+            ? 'aspect-[16/9] max-h-[420px] min-h-[190px]'
+            : 'aspect-[16/9] max-h-[285px] min-h-[180px]'),
+        !isTweet && draftSingleGif && 'max-h-[510px] min-h-[188px] gap-0',
+        isTweet && 'gap-0.5'
       )}
-      style={singleGifStyle}
+      style={tweetMediaStyle}
     >
       <Modal
         modalClassName={cn(
@@ -254,7 +313,7 @@ export function ImagePreview({
         <ImageModal
           tweet={isTweet}
           imageData={currentImage as ImageData}
-          previewCount={previewCount}
+          previewCount={mediaCount}
           tweetData={tweetData}
           selectedIndex={selectedIndex}
           handleNextIndex={handleNextIndex}
@@ -262,13 +321,14 @@ export function ImagePreview({
         />
       </Modal>
       <AnimatePresence>
-        {imagesPreview.map((media, index) => {
+        {visibleMedia.map((media, index) => {
           const { id, src, alt, poster, viewCount } = media;
           const isGif = isGifMedia(media);
           const isVideo = isVideoMedia(media) && !isGif;
           const imageRadius = isTweet
-            ? postImageBorderRadius[previewCount][index]
+            ? postImageBorderRadius[visiblePreviewCount][index]
             : 'rounded-2xl';
+          const shouldCropImage = Boolean(isTweet) || visiblePreviewCount > 1;
 
           return (
             <motion.button
@@ -277,9 +337,10 @@ export function ImagePreview({
                 'accent-tab group relative overflow-hidden transition-shadow',
                 imageRadius,
                 {
-                  'col-span-2 row-span-2': previewCount === 1,
+                  'col-span-1 row-span-1': visiblePreviewCount === 1,
                   'row-span-2':
-                    previewCount === 2 || (index === 0 && previewCount === 3)
+                    visiblePreviewCount === 2 ||
+                    (index === 0 && visiblePreviewCount === 3)
                 }
               )}
               {...variants}
@@ -304,18 +365,24 @@ export function ImagePreview({
                   </Button>
                   <TwitterVideoPlayer
                     className={imageRadius}
+                    videoClassName='object-center'
                     src={src}
                     poster={poster ?? undefined}
                     muted={!isTweet}
-                    compact={!isTweet || previewCount > 1}
+                    compact={!isTweet || visiblePreviewCount > 1}
                     viewCount={viewCount}
                   />
                 </>
               ) : (
                 <NextImage
                   className='relative h-full w-full cursor-pointer transition-colors duration-200'
-                  imgClassName={cn(imageRadius)}
-                  previewCount={previewCount}
+                  imgClassName={cn(
+                    imageRadius,
+                    shouldCropImage && 'object-cover object-center'
+                  )}
+                  previewCount={
+                    shouldCropImage ? undefined : visiblePreviewCount
+                  }
                   layout='fill'
                   src={src}
                   alt={alt}

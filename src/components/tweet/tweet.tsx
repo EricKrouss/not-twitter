@@ -101,6 +101,7 @@ export function Tweet(tweet: TweetProps): JSX.Element {
 
   const tweetLink = getTweetPath(tweetId, username);
   const displayCard = card ?? createYouTubeCardFromText(text);
+  const hideQuotedTweetMedia = !!images?.length || !!displayCard;
 
   const userId = user?.id ?? '';
 
@@ -242,7 +243,11 @@ export function Tweet(tweet: TweetProps): JSX.Element {
                     previewCount={images.length}
                   />
                 )}
-                <TweetEmbed card={displayCard} quotedTweet={quotedTweet} />
+                <TweetEmbed
+                  card={displayCard}
+                  quotedTweet={quotedTweet}
+                  hideQuotedTweetMedia={hideQuotedTweetMedia}
+                />
                 {!modal && (
                   <TweetStats
                     userId={userId}

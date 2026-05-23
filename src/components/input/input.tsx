@@ -554,7 +554,13 @@ export function Input({
             )}
             {quotedTweetPreview && (
               <div className='min-w-0 max-w-full overflow-hidden'>
-                <TweetEmbed card={null} quotedTweet={quotedTweetPreview} />
+                <TweetEmbed
+                  card={null}
+                  quotedTweet={quotedTweetPreview}
+                  hideQuotedTweetMedia={
+                    isUploadingImages || !!activeExternalCard
+                  }
+                />
               </div>
             )}
           </InputForm>

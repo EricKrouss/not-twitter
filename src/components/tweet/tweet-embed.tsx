@@ -16,6 +16,7 @@ type TweetEmbedProps = {
   card: TweetCard | null;
   quotedTweet: EmbeddedTweet | null;
   viewTweet?: boolean;
+  hideQuotedTweetMedia?: boolean;
 };
 
 type LinkCardProps = {
@@ -267,18 +268,21 @@ function TweetUnavailableCard({
 
 function QuotedTweetCard({
   quotedTweet,
-  viewTweet
+  viewTweet,
+  hideMedia
 }: {
   quotedTweet: EmbeddedTweet;
   viewTweet?: boolean;
+  hideMedia?: boolean;
 }): JSX.Element {
   const router = useRouter();
 
   if (quotedTweet.unavailable)
     return <TweetUnavailableCard quotedTweet={quotedTweet} />;
 
-  const quotedTweetCard =
-    quotedTweet.card ?? createYouTubeCardFromText(quotedTweet.text);
+  const quotedTweetCard = hideMedia
+    ? null
+    : quotedTweet.card ?? createYouTubeCardFromText(quotedTweet.text);
   const tweetHref = quotedTweet.id
     ? getTweetPath(quotedTweet.id, quotedTweet.authorUsername)
     : null;
@@ -338,7 +342,7 @@ function QuotedTweetCard({
             text={quotedTweet.text}
           />
         )}
-        {quotedTweet.images && (
+        {!hideMedia && quotedTweet.images && (
           <ImagePreview
             tweet
             imagesPreview={quotedTweet.images}
@@ -354,7 +358,8 @@ function QuotedTweetCard({
 export function TweetEmbed({
   card,
   quotedTweet,
-  viewTweet
+  viewTweet,
+  hideQuotedTweetMedia
 }: TweetEmbedProps): JSX.Element | null {
   if (!card && !quotedTweet) return null;
 
@@ -362,7 +367,11 @@ export function TweetEmbed({
     <>
       {card && <TweetLinkCard card={card} />}
       {quotedTweet && (
-        <QuotedTweetCard quotedTweet={quotedTweet} viewTweet={viewTweet} />
+        <QuotedTweetCard
+          quotedTweet={quotedTweet}
+          viewTweet={viewTweet}
+          hideMedia={hideQuotedTweetMedia}
+        />
       )}
     </>
   );
