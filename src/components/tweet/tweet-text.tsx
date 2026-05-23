@@ -13,6 +13,7 @@ type TweetTextProps = {
   className?: string;
   linkClassName?: string;
   tag?: 'p' | 'span' | 'div';
+  disableLinks?: boolean;
 };
 
 type TextPart =
@@ -144,7 +145,8 @@ export function TweetText({
   text,
   className,
   linkClassName,
-  tag
+  tag,
+  disableLinks
 }: TweetTextProps): JSX.Element {
   const stopEntityClick = (event: MouseEvent<HTMLAnchorElement>): void => {
     event.stopPropagation();
@@ -156,7 +158,9 @@ export function TweetText({
   return (
     <Tag className={cn('whitespace-pre-line break-words', className)}>
       {getTextParts(text).map((part, index) =>
-        part.type === 'url' ? (
+        disableLinks ? (
+          <span key={`${part.value}-${index}`}>{part.value}</span>
+        ) : part.type === 'url' ? (
           <a
             className={entityClassName}
             href={part.href}

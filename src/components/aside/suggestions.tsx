@@ -14,7 +14,6 @@ import { useDocument } from '@lib/hooks/useDocument';
 import { usersCollection } from '@lib/atproto/collections';
 import { UserCard } from '@components/user/user-card';
 import { Loading } from '@components/ui/loading';
-import { Error } from '@components/ui/error';
 import { variants } from './aside-trends';
 
 export function Suggestions(): JSX.Element {
@@ -35,11 +34,14 @@ export function Suggestions(): JSX.Element {
     { allowNull: true }
   );
 
+  if (!adminLoading && !suggestionsLoading && !adminData && !suggestionsData)
+    return <></>;
+
   return (
     <section className='hover-animation rounded-2xl bg-main-sidebar-background'>
       {adminLoading || suggestionsLoading ? (
         <Loading className='flex h-52 items-center justify-center p-4' />
-      ) : suggestionsData ? (
+      ) : (
         <motion.div className='inner:px-4 inner:py-3' {...variants}>
           <h2 className='text-xl font-bold'>Who to follow</h2>
           {adminData && <UserCard {...adminData} />}
@@ -55,8 +57,6 @@ export function Suggestions(): JSX.Element {
             </a>
           </Link>
         </motion.div>
-      ) : (
-        <Error />
       )}
     </section>
   );

@@ -157,11 +157,13 @@
     background: #cfd9de;
   }
 
+  .scrollbar-hidden,
   .feed-tabs-scroll {
     scrollbar-width: none;
     -ms-overflow-style: none;
   }
 
+  .scrollbar-hidden::-webkit-scrollbar,
   .feed-tabs-scroll::-webkit-scrollbar {
     display: none;
   }

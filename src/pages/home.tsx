@@ -33,9 +33,6 @@ type HomeFeedTabData = {
   value: HomeFeedTab;
 };
 
-const fallbackHomeFeedTabs: Readonly<HomeFeedTabData[]> = [
-  { label: 'Following', value: 'following' }
-];
 const HOME_FEED_REFRESH_INTERVAL_MS = 15000;
 const FEED_TAB_PREFIX = 'feed:';
 
@@ -46,6 +43,47 @@ async function getHomeFeedPage(
   if (tab === 'following') return getFollowingHomeFeedPage(cursor);
 
   return getSubscribedHomeFeedPage(tab.slice(FEED_TAB_PREFIX.length), cursor);
+}
+
+function normalizeFeedLabel(label: string): string {
+  return label.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function isDiscoverFeed({ displayName }: SubscribedHomeFeed): boolean {
+  return normalizeFeedLabel(displayName) === 'discover';
+}
+
+function isDuplicateForYouFeed({ displayName }: SubscribedHomeFeed): boolean {
+  const normalizedLabel = normalizeFeedLabel(displayName);
+
+  return normalizedLabel === 'for you' || normalizedLabel === 'for-you';
+}
+
+function getSubscribedFeedTab(
+  feed: SubscribedHomeFeed,
+  label = feed.displayName
+): HomeFeedTabData {
+  return {
+    label,
+    value: `${FEED_TAB_PREFIX}${feed.uri}` as HomeFeedTab
+  };
+}
+
+function getHomeFeedTabs(
+  subscribedFeeds: SubscribedHomeFeed[]
+): HomeFeedTabData[] {
+  const discoverFeed = subscribedFeeds.find(isDiscoverFeed);
+  const savedFeedTabs = subscribedFeeds
+    .filter((feed) => feed.type === 'feed')
+    .filter((feed) => feed !== discoverFeed)
+    .filter((feed) => !isDuplicateForYouFeed(feed))
+    .map((feed) => getSubscribedFeedTab(feed));
+
+  return [
+    ...(discoverFeed ? [getSubscribedFeedTab(discoverFeed, 'For you')] : []),
+    { label: 'Following', value: 'following' },
+    ...savedFeedTabs
+  ];
 }
 
 function mergeTweets(
@@ -189,20 +227,37 @@ function HomeTabs({
           return (
             <button
               className={cn(
-                `accent-tab hover-card relative flex h-[53px] min-w-[128px] flex-1
-                 items-center justify-center px-4 text-[15px] font-bold outline-none`,
+                `accent-tab hover-card group/tab relative flex h-[53px] items-center justify-center
+                 text-[15px] font-bold outline-none transition-[max-width,padding] duration-150`,
                 active
-                  ? 'text-light-primary dark:text-dark-primary'
-                  : 'text-light-secondary dark:text-dark-secondary'
+                  ? `min-w-[128px] flex-none px-5 text-light-primary
+                     dark:text-dark-primary`
+                  : `min-w-[128px] max-w-[170px] flex-1 px-4
+                     hover:max-w-none hover:flex-none hover:px-5
+                     focus-visible:max-w-none focus-visible:flex-none focus-visible:px-5
+                     text-light-secondary dark:text-dark-secondary`
               )}
               type='button'
               role='tab'
               aria-selected={active}
+              aria-label={label}
               data-feed-tab={value}
+              title={label}
               onClick={selectTab}
               key={value}
             >
-              <span className='max-w-full truncate'>{label}</span>
+              <span
+                className={cn(
+                  active
+                    ? 'whitespace-nowrap'
+                    : `max-w-full truncate group-hover/tab:max-w-none
+                       group-hover/tab:overflow-visible group-hover/tab:text-clip
+                       group-focus-visible/tab:max-w-none group-focus-visible/tab:overflow-visible
+                       group-focus-visible/tab:text-clip`
+                )}
+              >
+                {label}
+              </span>
               {active && (
                 <i className='absolute bottom-0 h-1 w-14 rounded-full bg-main-accent' />
               )}
@@ -225,23 +280,14 @@ export default function Home(): JSX.Element {
   const [timelineSettingsOpen, setTimelineSettingsOpen] = useState(false);
   const feedRef = useRef<TweetWithUser[]>([]);
   const newTweetsRef = useRef<TweetWithUser[]>([]);
-  const adoptedSavedFeedsRef = useRef(false);
-  const { data: subscribedFeeds = [] } = useSWR<SubscribedHomeFeed[], Error>(
+  const adoptedInitialTabRef = useRef(false);
+  const { data: subscribedFeeds } = useSWR<SubscribedHomeFeed[], Error>(
     'home-subscribed-feeds',
     getSubscribedHomeFeeds,
     { revalidateOnFocus: false }
   );
   const homeFeedTabs = useMemo(
-    () =>
-      subscribedFeeds.length
-        ? subscribedFeeds.map<HomeFeedTabData>((feed) => ({
-            label: feed.displayName,
-            value:
-              feed.type === 'timeline'
-                ? 'following'
-                : (`${FEED_TAB_PREFIX}${feed.uri}` as HomeFeedTab)
-          }))
-        : [...fallbackHomeFeedTabs],
+    () => getHomeFeedTabs(subscribedFeeds ?? []),
     [subscribedFeeds]
   );
 
@@ -252,15 +298,15 @@ export default function Home(): JSX.Element {
   );
 
   useEffect(() => {
-    if (subscribedFeeds.length && !adoptedSavedFeedsRef.current) {
-      adoptedSavedFeedsRef.current = true;
+    if (!adoptedInitialTabRef.current && subscribedFeeds) {
+      adoptedInitialTabRef.current = true;
       setActiveTab(homeFeedTabs[0]?.value ?? 'following');
       return;
     }
 
     if (!homeFeedTabs.some(({ value }) => value === activeTab))
       setActiveTab(homeFeedTabs[0]?.value ?? 'following');
-  }, [activeTab, homeFeedTabs, subscribedFeeds.length]);
+  }, [activeTab, homeFeedTabs, subscribedFeeds]);
 
   useEffect(() => {
     setFeed([]);

@@ -28,6 +28,27 @@ const MEDIA_EXTENSIONS = [
 
 type MediaExtensions = typeof MEDIA_EXTENSIONS[number];
 
+const BLUESKY_POST_IMAGE_EXTENSIONS = [
+  'jpg',
+  'jpeg',
+  'jfif',
+  'pjpeg',
+  'pjp',
+  'png',
+  'webp'
+] as const;
+
+type BlueskyPostImageExtensions =
+  typeof BLUESKY_POST_IMAGE_EXTENSIONS[number];
+
+const BLUESKY_POST_VIDEO_EXTENSIONS = ['mp4'] as const;
+
+type BlueskyPostVideoExtensions =
+  typeof BLUESKY_POST_VIDEO_EXTENSIONS[number];
+
+const BLUESKY_POST_IMAGE_MAX_BYTES = 20 * Math.pow(1024, 2);
+const BLUESKY_POST_VIDEO_MAX_BYTES = 100_000_000;
+
 function isValidImageExtension(
   extension: string
 ): extension is ImageExtensions {
@@ -44,12 +65,38 @@ function isValidMediaExtension(
   );
 }
 
+function isValidBlueskyPostImageExtension(
+  extension: string
+): extension is BlueskyPostImageExtensions {
+  return BLUESKY_POST_IMAGE_EXTENSIONS.includes(
+    extension.split('.').pop()?.toLowerCase() as BlueskyPostImageExtensions
+  );
+}
+
+function isValidBlueskyPostVideoExtension(
+  extension: string
+): extension is BlueskyPostVideoExtensions {
+  return BLUESKY_POST_VIDEO_EXTENSIONS.includes(
+    extension.split('.').pop()?.toLowerCase() as BlueskyPostVideoExtensions
+  );
+}
+
 export function isValidImage(name: string, bytes: number): boolean {
   return isValidImageExtension(name) && bytes < 20 * Math.pow(1024, 2);
 }
 
 export function isValidMedia(name: string, size: number): boolean {
   return isValidMediaExtension(name) && size < 50 * Math.pow(1024, 2);
+}
+
+function isValidBlueskyPostMedia(name: string, size: number): boolean {
+  if (isValidBlueskyPostImageExtension(name))
+    return size <= BLUESKY_POST_IMAGE_MAX_BYTES;
+
+  if (isValidBlueskyPostVideoExtension(name))
+    return size <= BLUESKY_POST_VIDEO_MAX_BYTES;
+
+  return false;
 }
 
 export function isValidUsername(
@@ -91,12 +138,22 @@ export function getImagesData(
     !(currentFiles === 4 || files.length > 4 - currentFiles)
       ? Array.from(files).filter(({ name, size }) =>
           allowUploadingVideos
-            ? isValidMedia(name, size)
+            ? isValidBlueskyPostMedia(name, size)
             : isValidImage(name, size)
         )
       : null;
 
   if (!rawImages || !rawImages.length) return null;
+
+  const postMediaVideos = allowUploadingVideos
+    ? rawImages.filter(({ name }) => isValidBlueskyPostVideoExtension(name))
+    : [];
+
+  if (
+    postMediaVideos.length > 1 ||
+    (postMediaVideos.length === 1 && rawImages.length > 1)
+  )
+    return null;
 
   const imagesId = rawImages.map(({ name }) => {
     const randomId = getRandomId();

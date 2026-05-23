@@ -288,7 +288,7 @@ export function ImagePreview({
                   ? preventBubbling()
                   : preventBubbling(handleSelectedImage(index))
               }
-              key={id}
+              key={`${id ?? src}-${index}`}
             >
               {isGif ? (
                 <TwitterGifMedia media={media} className={imageRadius} />

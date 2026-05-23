@@ -36,15 +36,11 @@ import type {
   EmbeddedTweet,
   Tweet,
   TweetAudience,
+  TweetCard,
   TweetReplySetting,
   TweetWithUser
 } from '@lib/types/tweet';
-import type {
-  FileWithId,
-  FilesWithId,
-  ImagesPreview,
-  ImageData
-} from '@lib/types/file';
+import type { FilesWithId, ImagesPreview } from '@lib/types/file';
 
 type InputProps = {
   modal?: boolean;
@@ -89,6 +85,61 @@ function getErrorMessage(error: unknown): string | null {
   return error instanceof Error && error.message ? error.message : null;
 }
 
+function isVideoFile(file: File): boolean {
+  return file.type.startsWith('video/') || /\.mp4$/i.test(file.name);
+}
+
+function isRemoteMediaUrl(src: string): boolean {
+  return /^https?:\/\//i.test(src);
+}
+
+function revokePreviewUrl(src: string): void {
+  if (!isRemoteMediaUrl(src)) URL.revokeObjectURL(src);
+}
+
+function revokeImagePreviews(previews: ImagesPreview): void {
+  previews.forEach(({ src }) => revokePreviewUrl(src));
+}
+
+function getTenorGifUri({
+  src,
+  aspectRatio
+}: Pick<GifSelection, 'src' | 'aspectRatio'>): string {
+  try {
+    const url = new URL(src);
+
+    if (aspectRatio?.width && aspectRatio?.height) {
+      url.searchParams.set('ww', String(aspectRatio.width));
+      url.searchParams.set('hh', String(aspectRatio.height));
+    }
+
+    return url.toString();
+  } catch {
+    return src;
+  }
+}
+
+function getCardDomain(url: string): string | null {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '') || null;
+  } catch {
+    return null;
+  }
+}
+
+function createTenorGifCard(gif: GifSelection): TweetCard {
+  const url = getTenorGifUri(gif);
+
+  return {
+    type: 'external',
+    url,
+    title: gif.title || 'GIF',
+    description: `ALT: ${gif.title || 'GIF'}`,
+    image: gif.preview || null,
+    domain: getCardDomain(url)
+  };
+}
+
 export function Input({
   modal,
   reply,
@@ -103,6 +154,9 @@ export function Input({
 }: InputProps): JSX.Element {
   const [selectedImages, setSelectedImages] = useState<FilesWithId>([]);
   const [imagesPreview, setImagesPreview] = useState<ImagesPreview>([]);
+  const [selectedGifCard, setSelectedGifCard] = useState<TweetCard | null>(
+    null
+  );
   const [inputValue, setInputValue] = useState('');
   const [loading, setLoading] = useState(false);
   const [visited, setVisited] = useState(false);
@@ -144,12 +198,15 @@ export function Input({
 
       const userId = user?.id as string;
       const quotedTweet = quoteTweet ? getQuotedTweetPreview(quoteTweet) : null;
+      const uploadedImages = selectedGifCard
+        ? imagesPreview
+        : await uploadImages(userId, selectedImages);
 
       const tweetData: WithFieldValue<TweetDraft> = {
         text: inputValue.trim() || null,
         parent: isReplying && parent ? parent : null,
-        images: await uploadImages(userId, selectedImages),
-        card: null,
+        images: uploadedImages,
+        card: selectedGifCard,
         quotedTweet,
         userLikes: [],
         createdBy: userId,
@@ -218,16 +275,36 @@ export function Input({
 
     const files = isClipboardEvent ? e.clipboardData.files : e.target.files;
 
+    if (selectedGifCard) {
+      toast.error('Remove the GIF before adding photos or video.');
+      return;
+    }
+
     const imagesData = getImagesData(files, {
-      currentFiles: previewCount
+      currentFiles: previewCount,
+      allowUploadingVideos: true
     });
 
     if (!imagesData) {
-      toast.error('Please choose a GIF or photo up to 4');
+      toast.error(
+        'Please choose up to 4 JPG, PNG, or WebP images, or one MP4 video.'
+      );
       return;
     }
 
     const { imagesPreviewData, selectedImagesData } = imagesData;
+    const hasCurrentVideo = selectedImages.some(isVideoFile);
+    const hasNewVideo = selectedImagesData.some(isVideoFile);
+
+    if (
+      (hasCurrentVideo && selectedImagesData.length) ||
+      (hasNewVideo &&
+        (selectedImages.length > 0 || selectedImagesData.length > 1))
+    ) {
+      revokeImagePreviews(imagesPreviewData);
+      toast.error('Bluesky allows either one video or up to 4 images.');
+      return;
+    }
 
     setImagesPreview([...imagesPreview, ...imagesPreviewData]);
     setSelectedImages([...selectedImages, ...selectedImagesData]);
@@ -236,21 +313,21 @@ export function Input({
   };
 
   const removeImage = (targetId: string) => (): void => {
+    const removedPreview = imagesPreview.find(({ id }) => id === targetId);
+
     setSelectedImages(selectedImages.filter(({ id }) => id !== targetId));
     setImagesPreview(imagesPreview.filter(({ id }) => id !== targetId));
+    if (removedPreview?.type === 'gif') setSelectedGifCard(null);
 
-    const { src } = imagesPreview.find(
-      ({ id }) => id === targetId
-    ) as ImageData;
-
-    URL.revokeObjectURL(src);
+    if (removedPreview) revokePreviewUrl(removedPreview.src);
   };
 
   const cleanImage = (): void => {
-    imagesPreview.forEach(({ src }) => URL.revokeObjectURL(src));
+    revokeImagePreviews(imagesPreview);
 
     setSelectedImages([]);
     setImagesPreview([]);
+    setSelectedGifCard(null);
   };
 
   const discardTweet = (): void => {
@@ -327,56 +404,34 @@ export function Input({
     });
   };
 
-  const handleGifSelect = async ({
+  const handleGifSelect = ({
     id,
     title,
     src,
     preview,
     aspectRatio
-  }: GifSelection): Promise<void> => {
-    if (previewCount >= 4) {
-      toast.error('Please choose a GIF or photo up to 4');
+  }: GifSelection): void => {
+    if (previewCount || selectedImages.length) {
+      toast.error('GIFs cannot be mixed with photos or videos on Bluesky.');
       return;
     }
 
-    try {
-      const response = await fetch(src);
+    const gifPreview = {
+      id: `tenor-${id}`,
+      src,
+      alt: title,
+      type: 'gif',
+      poster: preview,
+      aspectRatio
+    };
 
-      if (!response.ok) throw new Error('Unable to fetch GIF');
+    setSelectedGifCard(
+      createTenorGifCard({ id, title, src, preview, aspectRatio })
+    );
+    setImagesPreview([gifPreview]);
+    setSelectedImages([]);
 
-      const blob = await response.blob();
-      const fileType = blob.type || 'image/gif';
-      const extension = fileType.includes('png')
-        ? 'png'
-        : fileType.includes('mp4')
-        ? 'mp4'
-        : 'gif';
-      const gifFile = Object.assign(
-        new File([blob], `${id}.${extension}`, { type: fileType }),
-        { id: crypto.randomUUID() }
-      ) as FileWithId;
-      const gifPreview = {
-        id: gifFile.id,
-        src,
-        alt: title,
-        type: 'gif',
-        poster: preview,
-        aspectRatio
-      };
-
-      setSelectedImages((currentImages) =>
-        currentImages.length >= 4 ? currentImages : [...currentImages, gifFile]
-      );
-      setImagesPreview((currentPreview) =>
-        currentPreview.length >= 4
-          ? currentPreview
-          : [...currentPreview, gifPreview]
-      );
-
-      inputRef.current?.focus();
-    } catch {
-      toast.error('Unable to add that GIF. Try another.');
-    }
+    inputRef.current?.focus();
   };
 
   const handleSubmit = (e: FormEvent<HTMLFormElement>): void => {

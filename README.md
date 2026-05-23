@@ -53,6 +53,16 @@ npm run dev
 
 Open the printed local URL and sign in with a Bluesky handle or DID.
 
+Self-hosted or alternate PDS deployments can be included in auth handle
+resolution with a comma-separated list:
+
+```bash
+NEXT_PUBLIC_ATPROTO_PDS_URLS=https://bsky.social,https://pds.example.com npm run dev
+```
+
+The first URL is used as the default credential-session PDS, and `bsky.social`
+stays available as a fallback when it is not listed.
+
 For local OAuth development, use:
 
 ```text

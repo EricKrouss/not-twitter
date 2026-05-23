@@ -474,7 +474,11 @@ function ActivityNotificationRow({
         {text && (
           <Link href={targetHref}>
             <a className='custom-underline mt-3 block text-light-secondary dark:text-dark-secondary'>
-              <TweetText className='text-[15px] leading-5' text={text} />
+              <TweetText
+                className='text-[15px] leading-5'
+                text={text}
+                disableLinks
+              />
             </a>
           </Link>
         )}

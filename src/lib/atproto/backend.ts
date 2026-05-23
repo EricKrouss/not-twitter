@@ -17,6 +17,7 @@ import {
   type AppBskyFeedPost,
   type AppBskyFeedThreadgate,
   type AppBskyNotificationListNotifications,
+  type AppBskyVideoDefs,
   type AtpSessionData,
   type BskyFeedViewPreference,
   type BskyThreadViewPreference,
@@ -45,39 +46,43 @@ const OAUTH_SUB_KEY = 'twitter-clone:bsky-oauth-sub';
 const OAUTH_ACCOUNTS_KEY = 'twitter-clone:bsky-oauth-accounts';
 const CREDENTIAL_SESSION_KEY = 'twitter-clone:bsky-credential-session';
 const BSKY_APPVIEW_DID = 'did:web:api.bsky.app';
+const DEFAULT_ATPROTO_PDS_URL = 'https://bsky.social';
 const BSKY_APPVIEW_SERVICE = 'bsky_appview';
 const BSKY_APPVIEW_PROXY = `${BSKY_APPVIEW_DID}#${BSKY_APPVIEW_SERVICE}`;
 const BSKY_APPVIEW_URL = 'https://api.bsky.app';
 const PUBLIC_BSKY_APPVIEW_URL = 'https://public.api.bsky.app';
+const BSKY_VIDEO_DID = 'did:web:video.bsky.app';
+const BSKY_VIDEO_SERVICE = 'bsky_video';
+const BSKY_VIDEO_PROXY = `${BSKY_VIDEO_DID}#${BSKY_VIDEO_SERVICE}`;
+const BSKY_VIDEO_URL = 'https://video.bsky.app';
+const BSKY_VIDEO_UPLOAD_AUTH_METHOD = 'com.atproto.repo.uploadBlob';
 const BSKY_CHAT_DID = 'did:web:api.bsky.chat';
 const BSKY_CHAT_SERVICE = 'bsky_chat';
 const BSKY_CHAT_PROXY = `${BSKY_CHAT_DID}#${BSKY_CHAT_SERVICE}`;
 const BSKY_CHAT_URL = 'https://api.bsky.chat';
+const CHAT_SCOPE = 'transition:chat.bsky';
+const GENERIC_SCOPE = 'transition:generic';
 const OAUTH_SCOPES = [
   'atproto',
-  `rpc?lxm=*&aud=${BSKY_APPVIEW_DID}%23${BSKY_APPVIEW_SERVICE}`,
-  `rpc?lxm=*&aud=${BSKY_CHAT_DID}%23${BSKY_CHAT_SERVICE}`,
-  'repo:app.bsky.actor.profile',
-  'repo:app.bsky.feed.like',
-  'repo:app.bsky.feed.post',
-  'repo:app.bsky.feed.postgate',
-  'repo:app.bsky.feed.repost',
-  'repo:app.bsky.feed.threadgate',
-  'repo:app.bsky.graph.block',
-  'repo:app.bsky.graph.follow',
-  'repo:chat.bsky.actor.declaration',
-  'blob:image/*',
+  GENERIC_SCOPE,
+  CHAT_SCOPE,
   'account:email?action=manage',
   'identity:handle'
 ];
 const OAUTH_SCOPE = OAUTH_SCOPES.join(' ');
-const CHAT_SCOPE = 'transition:chat.bsky';
-const GENERIC_SCOPE = 'transition:generic';
-const BSKY_IMAGE_MAX_BYTES = 1_000_000;
-const BSKY_IMAGE_TARGET_BYTES = 950_000;
+const BSKY_POST_IMAGE_MAX_BYTES = 2_000_000;
+const BSKY_POST_IMAGE_TARGET_BYTES = 1_900_000;
+const BSKY_EXTERNAL_THUMB_MAX_BYTES = 1_000_000;
+const BSKY_EXTERNAL_THUMB_TARGET_BYTES = 950_000;
+const BSKY_PROFILE_IMAGE_MAX_BYTES = 1_000_000;
+const BSKY_PROFILE_IMAGE_TARGET_BYTES = 950_000;
 const BSKY_IMAGE_MAX_DIMENSION = 2000;
+const BSKY_VIDEO_MAX_BYTES = 100_000_000;
+const BSKY_VIDEO_MAX_DURATION_SECONDS = 180;
+const BSKY_VIDEO_JOB_RETRIES = 90;
 const BSKY_PROFILE_IMAGE_MIME_TYPE = 'image/jpeg';
 const BSKY_PROFILE_IMAGE_ACCEPTED_TYPES = /^image\/(?:jpe?g|png)$/i;
+const BSKY_POST_IMAGE_ACCEPTED_TYPES = /^image\/(?:jpe?g|png|webp)$/i;
 const BSKY_MEDIA_POST_VISIBILITY_RETRIES = 8;
 const BSKY_THREAD_REPLY_DEPTH = 25;
 const SERVICE_AUTH_TOKEN_TTL_SECONDS = 55;
@@ -96,6 +101,7 @@ type BskyServiceConfig = {
   proxy: string;
   url: string;
   chat: boolean;
+  direct?: boolean;
 };
 
 const BSKY_APPVIEW_CONFIG: BskyServiceConfig = {
@@ -114,10 +120,18 @@ const BSKY_CHAT_CONFIG: BskyServiceConfig = {
   chat: true
 };
 
+const BSKY_VIDEO_CONFIG: BskyServiceConfig = {
+  did: BSKY_VIDEO_DID,
+  service: BSKY_VIDEO_SERVICE,
+  proxy: BSKY_VIDEO_PROXY,
+  url: BSKY_VIDEO_URL,
+  chat: false,
+  direct: true
+};
+
 const PUBLIC_BSKY_APPVIEW_METHODS = new Set([
   'app.bsky.actor.getProfile',
   'app.bsky.actor.getProfiles',
-  'app.bsky.actor.getSuggestions',
   'app.bsky.actor.searchActors',
   'app.bsky.actor.searchActorsTypeahead',
   'app.bsky.feed.getActorLikes',
@@ -142,6 +156,27 @@ type AuthUser = {
   uid: string;
   displayName: string | null;
   photoURL: string | null;
+};
+
+type CredentialSessionState = {
+  session: AtpSessionData;
+  serviceUrl: string;
+};
+
+type AtprotoIdentityDid = `did:plc:${string}` | `did:web:${string}`;
+
+type ResolvedAtprotoHandle = AtprotoIdentityDid | null;
+
+type AtprotoHandleResolveOptions = {
+  noCache?: boolean;
+  signal?: AbortSignal;
+};
+
+type AtprotoHandleResolver = {
+  resolve(
+    handle: string,
+    options?: AtprotoHandleResolveOptions
+  ): Promise<ResolvedAtprotoHandle>;
 };
 
 export type SavedBlueskyAccount = {
@@ -229,6 +264,10 @@ type PreparedImageUpload = {
   encoding: string;
   aspectRatio: AppBskyEmbedImages.Image['aspectRatio'];
 };
+
+type LocalProfileMediaUrls = Partial<
+  Pick<User, 'photoURL' | 'coverPhotoURL'>
+>;
 
 type ActorFeedPost = AppBskyFeedDefs.FeedViewPost;
 type AppViewFeedResponse = {
@@ -530,6 +569,7 @@ let oauthClientPromise: Promise<BrowserOAuthClient> | null = null;
 let oauthSession: OAuthSession | null = null;
 let oauthInitPromise: Promise<AuthUser | null> | null = null;
 let sessionDid: string | null = null;
+let activePdsDidPromise: Promise<string> | null = null;
 let currentUser: User | null = null;
 let currentFollowing = new Set<string>();
 let malformedMediaRepairPromise: Promise<void> | null = null;
@@ -538,33 +578,229 @@ function hasStorage(): boolean {
   return typeof window !== 'undefined' && !!window.localStorage;
 }
 
-function readCredentialSession(): AtpSessionData | null {
+function splitAtprotoServiceList(value: string | undefined): string[] {
+  return value?.split(/[\s,]+/).filter(Boolean) ?? [];
+}
+
+function normalizeAtprotoServiceUrl(value: string | undefined): string | null {
+  const trimmedValue = value?.trim();
+  if (!trimmedValue) return null;
+
+  const urlValue = /^https?:\/\//i.test(trimmedValue)
+    ? trimmedValue
+    : `https://${trimmedValue}`;
+
+  try {
+    const url = new URL(urlValue);
+
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+
+    url.protocol = url.protocol.toLowerCase();
+    url.hostname = url.hostname.toLowerCase();
+    url.search = '';
+    url.hash = '';
+
+    return url.toString().replace(/\/+$/g, '');
+  } catch {
+    return null;
+  }
+}
+
+function getConfiguredAtprotoServiceUrls(): string[] {
+  const configuredUrls = [
+    ...splitAtprotoServiceList(process.env.NEXT_PUBLIC_ATPROTO_PDS_URLS),
+    ...splitAtprotoServiceList(
+      process.env.NEXT_PUBLIC_ATPROTO_HANDLE_RESOLVER_URLS
+    ),
+    process.env.NEXT_PUBLIC_ATPROTO_PDS_URL,
+    process.env.NEXT_PUBLIC_ATPROTO_HANDLE_RESOLVER_URL,
+    DEFAULT_ATPROTO_PDS_URL
+  ];
+  const seenUrls = new Set<string>();
+
+  return configuredUrls.reduce<string[]>((urls, value) => {
+    const normalizedUrl = normalizeAtprotoServiceUrl(value);
+
+    if (!normalizedUrl || seenUrls.has(normalizedUrl)) return urls;
+
+    seenUrls.add(normalizedUrl);
+    urls.push(normalizedUrl);
+    return urls;
+  }, []);
+}
+
+function getPrimaryAtprotoServiceUrl(): string {
+  return getConfiguredAtprotoServiceUrls()[0] ?? DEFAULT_ATPROTO_PDS_URL;
+}
+
+function usesHttpAtprotoService(): boolean {
+  return getConfiguredAtprotoServiceUrls().some((serviceUrl) => {
+    try {
+      return new URL(serviceUrl).protocol === 'http:';
+    } catch {
+      return false;
+    }
+  });
+}
+
+function isAtprotoIdentityDid(did: string): did is AtprotoIdentityDid {
+  return did.startsWith('did:plc:') || did.startsWith('did:web:');
+}
+
+async function resolveAtprotoHandleWithService(
+  serviceUrl: string,
+  handle: string,
+  options?: AtprotoHandleResolveOptions
+): Promise<ResolvedAtprotoHandle> {
+  const url = new URL('/xrpc/com.atproto.identity.resolveHandle', serviceUrl);
+  url.searchParams.set('handle', handle);
+
+  const response = await fetch(url, {
+    cache: options?.noCache ? 'no-cache' : undefined,
+    redirect: 'error',
+    signal: options?.signal
+  });
+  const body = (await response.json().catch(() => null)) as {
+    did?: unknown;
+    error?: unknown;
+    message?: unknown;
+  } | null;
+
+  if (
+    response.status === 400 &&
+    body?.error === 'InvalidRequest' &&
+    body?.message === 'Unable to resolve handle'
+  ) {
+    return null;
+  }
+
+  if (response.status === 404) return null;
+
+  if (!response.ok) {
+    throw new Error(
+      typeof body?.message === 'string'
+        ? body.message
+        : `Unable to resolve handle through ${serviceUrl}.`
+    );
+  }
+
+  if (typeof body?.did !== 'string') {
+    throw new Error(`Invalid handle resolver response from ${serviceUrl}.`);
+  }
+
+  const did = body.did;
+  ensureValidDid(did);
+
+  if (!isAtprotoIdentityDid(did)) {
+    throw new Error(`Unsupported AT Protocol DID returned by ${serviceUrl}.`);
+  }
+
+  return did;
+}
+
+function createMultiPdsHandleResolver(): AtprotoHandleResolver {
+  const serviceUrls = getConfiguredAtprotoServiceUrls();
+
+  return {
+    async resolve(
+      handle: string,
+      options?: AtprotoHandleResolveOptions
+    ): Promise<ResolvedAtprotoHandle> {
+      let lastError: unknown = null;
+      let failedResolvers = 0;
+
+      for (const serviceUrl of serviceUrls) {
+        try {
+          const did = await resolveAtprotoHandleWithService(
+            serviceUrl,
+            handle,
+            options
+          );
+          if (did) return did;
+        } catch (error) {
+          lastError = error;
+          failedResolvers += 1;
+        }
+      }
+
+      if (failedResolvers === serviceUrls.length && lastError) {
+        throw lastError instanceof Error
+          ? lastError
+          : new Error('Unable to resolve AT Protocol handle.');
+      }
+
+      return null;
+    }
+  };
+}
+
+function normalizeCredentialSession(value: unknown): AtpSessionData | null {
+  if (!value || typeof value !== 'object') return null;
+
+  const parsedSession = value as Partial<AtpSessionData>;
+
+  return parsedSession.did &&
+    parsedSession.handle &&
+    parsedSession.accessJwt &&
+    parsedSession.refreshJwt
+    ? (parsedSession as AtpSessionData)
+    : null;
+}
+
+function readCredentialSession(): CredentialSessionState | null {
   if (!hasStorage()) return null;
 
   try {
     const storedSession = window.localStorage.getItem(CREDENTIAL_SESSION_KEY);
     if (!storedSession) return null;
 
-    const parsedSession = JSON.parse(storedSession) as Partial<AtpSessionData>;
+    const parsedSession = JSON.parse(storedSession) as unknown;
+    const parsedRecord =
+      parsedSession && typeof parsedSession === 'object'
+        ? (parsedSession as {
+            service?: unknown;
+            serviceUrl?: unknown;
+            session?: unknown;
+          })
+        : null;
+    const session = normalizeCredentialSession(
+      parsedRecord?.session ?? parsedSession
+    );
+    const storedServiceUrl =
+      typeof parsedRecord?.serviceUrl === 'string'
+        ? parsedRecord.serviceUrl
+        : typeof parsedRecord?.service === 'string'
+        ? parsedRecord.service
+        : undefined;
 
-    return parsedSession.did &&
-      parsedSession.handle &&
-      parsedSession.accessJwt &&
-      parsedSession.refreshJwt
-      ? (parsedSession as AtpSessionData)
-      : null;
+    if (!session) return null;
+
+    return {
+      session,
+      serviceUrl:
+        normalizeAtprotoServiceUrl(storedServiceUrl) ??
+        getPrimaryAtprotoServiceUrl()
+    };
   } catch {
     return null;
   }
 }
 
-function writeCredentialSession(session?: AtpSessionData): void {
+function writeCredentialSession(
+  session?: AtpSessionData,
+  serviceUrl = getPrimaryAtprotoServiceUrl()
+): void {
   if (!hasStorage()) return;
 
   if (session) {
     window.localStorage.setItem(
       CREDENTIAL_SESSION_KEY,
-      JSON.stringify(session)
+      JSON.stringify({
+        serviceUrl:
+          normalizeAtprotoServiceUrl(serviceUrl) ??
+          getPrimaryAtprotoServiceUrl(),
+        session
+      })
     );
     return;
   }
@@ -652,6 +888,12 @@ function saveAccount(user: User): void {
   writeSavedAccounts(nextAccounts);
 }
 
+function updateSavedAccount(user: User): void {
+  if (!readSavedAccounts().some((account) => account.id === user.id)) return;
+
+  saveAccount(user);
+}
+
 function removeSavedAccount(
   id: string | null | undefined
 ): SavedBlueskyAccount[] {
@@ -670,6 +912,7 @@ function clearActiveAuthState(): void {
   oauthSession = null;
   oauthInitPromise = null;
   sessionDid = null;
+  activePdsDidPromise = null;
   currentUser = null;
   currentFollowing = new Set();
   malformedMediaRepairPromise = null;
@@ -679,11 +922,34 @@ function clearActiveAuthState(): void {
   writeCredentialSession();
 }
 
-function createCredentialAgent(): AtpAgent {
-  return new AtpAgent({
-    service: 'https://bsky.social',
-    persistSession: (_event, session) => writeCredentialSession(session)
+function getCredentialAgentServiceUrl(
+  activeAgent: AtpAgent | null,
+  fallbackServiceUrl: string
+): string {
+  const serviceUrl = activeAgent
+    ? String(activeAgent.pdsUrl ?? activeAgent.serviceUrl)
+    : fallbackServiceUrl;
+
+  return normalizeAtprotoServiceUrl(serviceUrl) ?? fallbackServiceUrl;
+}
+
+function createCredentialAgent(
+  serviceUrl = getPrimaryAtprotoServiceUrl()
+): AtpAgent {
+  const normalizedServiceUrl =
+    normalizeAtprotoServiceUrl(serviceUrl) ?? getPrimaryAtprotoServiceUrl();
+  let nextAgent: AtpAgent | null = null;
+
+  nextAgent = new AtpAgent({
+    service: normalizedServiceUrl,
+    persistSession: (_event, session) =>
+      writeCredentialSession(
+        session,
+        getCredentialAgentServiceUrl(nextAgent, normalizedServiceUrl)
+      )
   });
+
+  return nextAgent;
 }
 
 function getLoopbackRedirectUri(): string {
@@ -717,23 +983,27 @@ async function getOAuthClient(): Promise<BrowserOAuthClient> {
   if (!oauthClientPromise) {
     oauthClientPromise = (async (): Promise<BrowserOAuthClient> => {
       const configuredClientId = process.env.NEXT_PUBLIC_ATPROTO_CLIENT_ID;
+      const oauthOptions = {
+        handleResolver: createMultiPdsHandleResolver(),
+        allowHttp: usesHttpAtprotoService()
+      };
 
       if (configuredClientId) {
         return BrowserOAuthClient.load({
           clientId: configuredClientId,
-          handleResolver: 'https://bsky.social'
+          ...oauthOptions
         });
       }
 
       if (!isLoopbackHost(window.location.hostname)) {
         return BrowserOAuthClient.load({
           clientId: getHostedOAuthClientId(),
-          handleResolver: 'https://bsky.social'
+          ...oauthOptions
         });
       }
 
       return new BrowserOAuthClient({
-        handleResolver: 'https://bsky.social',
+        ...oauthOptions,
         clientMetadata: buildAtprotoLoopbackClientMetadata({
           scope: OAUTH_SCOPE,
           redirect_uris: [getLoopbackRedirectUri() as never]
@@ -748,6 +1018,19 @@ async function getOAuthClient(): Promise<BrowserOAuthClient> {
 function getAgent(): Agent {
   if (!agent) throw new Error('Sign in with Bluesky before loading this view.');
   return agent;
+}
+
+async function getActivePdsDid(): Promise<string> {
+  if (!activePdsDidPromise) {
+    activePdsDidPromise = getAgent()
+      .com.atproto.server.describeServer()
+      .then(({ data }) => {
+        ensureValidDid(data.did);
+        return data.did;
+      });
+  }
+
+  return activePdsDidPromise;
 }
 
 function getXrpcPath(url: string): string {
@@ -804,50 +1087,62 @@ async function getServiceAuthToken(
   service: BskyServiceConfig,
   method: string
 ): Promise<string> {
-  if (!oauthSession) throwServiceError(service, new Error('Not signed in'));
-
+  const audience =
+    service.service === BSKY_VIDEO_SERVICE
+      ? await getActivePdsDid()
+      : service.did;
+  const serviceAuthMethod =
+    service.service === BSKY_VIDEO_SERVICE &&
+    method === 'app.bsky.video.uploadVideo'
+      ? BSKY_VIDEO_UPLOAD_AUTH_METHOD
+      : method;
   const now = Math.floor(Date.now() / 1000);
-  const cacheKey = `${service.proxy}:${method}`;
+  const cacheKey = `${service.proxy}:${audience}:${serviceAuthMethod}`;
   const cached = serviceAuthTokenCache.get(cacheKey);
 
   if (cached && cached.expiresAt > now + 5) return cached.token;
 
   const expiresAt = now + SERVICE_AUTH_TOKEN_TTL_SECONDS;
-  const audiences =
-    service.proxy === service.did ? [service.did] : [service.did, service.proxy];
-  let lastError: unknown = null;
+  const query = new URLSearchParams({
+    aud: audience,
+    exp: String(expiresAt),
+    lxm: serviceAuthMethod
+  });
+  let token: string | null = null;
 
-  for (const aud of audiences) {
-    const query = new URLSearchParams({
-      aud,
-      exp: String(expiresAt),
-      lxm: method
-    });
-
+  if (oauthSession) {
     const response = await oauthSession.fetchHandler(
       `/xrpc/com.atproto.server.getServiceAuth?${query.toString()}`,
       { method: 'GET' }
     );
 
-    if (!response.ok) {
-      lastError = await createResponseError(response);
-      continue;
-    }
+    if (!response.ok)
+      throwServiceError(service, await createResponseError(response));
 
     const body = (await response.json().catch(() => null)) as {
       token?: unknown;
     } | null;
 
-    if (typeof body?.token !== 'string') {
-      lastError = new Error('Missing Bluesky service token');
-      continue;
+    token = typeof body?.token === 'string' ? body.token : null;
+  } else {
+    try {
+      token = (
+        await getAgent().com.atproto.server.getServiceAuth({
+          aud: audience,
+          exp: expiresAt,
+          lxm: serviceAuthMethod
+        })
+      ).data.token;
+    } catch (error) {
+      throwServiceError(service, error);
     }
-
-    serviceAuthTokenCache.set(cacheKey, { token: body.token, expiresAt });
-    return body.token;
   }
 
-  throwServiceError(service, lastError ?? new Error('Missing service token'));
+  if (!token)
+    throwServiceError(service, new Error('Missing Bluesky service token'));
+
+  serviceAuthTokenCache.set(cacheKey, { token, expiresAt });
+  return token;
 }
 
 async function fetchServiceXrpc(
@@ -859,7 +1154,7 @@ async function fetchServiceXrpc(
   const method = getXrpcMethod(path);
   const headers = new Headers(init.headers);
 
-  if (!oauthSession) {
+  if (!oauthSession && !service.direct) {
     headers.set('atproto-proxy', service.proxy);
 
     return getAgent().sessionManager.fetchHandler(path, { ...init, headers });
@@ -895,6 +1190,10 @@ function getChatAgent(): Agent {
   if (oauthSession) return createAuthenticatedServiceAgent(BSKY_CHAT_CONFIG);
 
   return getAgent().withProxy(BSKY_CHAT_SERVICE, BSKY_CHAT_DID);
+}
+
+function getVideoAgent(): Agent {
+  return createAuthenticatedServiceAgent(BSKY_VIDEO_CONFIG);
 }
 
 function getErrorStatus(error: unknown): number | null {
@@ -1493,7 +1792,55 @@ function getLocalProfileOverride(data: Partial<User>): Partial<User> {
   return override;
 }
 
-function applyLocalProfileUpdate(userId: string, data: Partial<User>): void {
+function isUsableLocalProfileImageUrl(
+  value: string | null | undefined
+): boolean {
+  return !!value && !value.startsWith('blob:');
+}
+
+function getProfileBlobExtension(blob: StrictBlobRef): string {
+  if (blob.mimeType === 'image/png') return 'png';
+  if (blob.mimeType === 'image/gif') return 'gif';
+
+  return 'jpeg';
+}
+
+function getProfileMediaCdnUrl(
+  userId: string,
+  type: 'avatar' | 'banner',
+  blob: BlobRef | null | undefined
+): string | undefined {
+  if (!blob) return undefined;
+
+  try {
+    const parsedBlob = parseBlobRef(blob);
+    const cid = encodeURIComponent(String(parsedBlob.ref));
+    const extension = getProfileBlobExtension(parsedBlob);
+
+    return (
+      `https://cdn.bsky.app/img/${type}/plain/` +
+      `${userId}/${cid}@${extension}`
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+function invalidateUserProfileCache(userId: string): void {
+  const cachedUser = userCache.get(userId);
+
+  detailedUserCache.delete(userId);
+
+  if (cachedUser) {
+    userHandleCache.delete(cachedUser.username);
+  }
+}
+
+function applyLocalProfileUpdate(
+  userId: string,
+  data: Partial<User>,
+  mediaUrls: LocalProfileMediaUrls = {}
+): void {
   const cachedUser = userCache.get(userId);
   const targetUser = currentUser?.id === userId ? currentUser : cachedUser;
 
@@ -1504,8 +1851,19 @@ function applyLocalProfileUpdate(userId: string, data: Partial<User>): void {
   if ('pronouns' in data)
     targetUser.pronouns = data.pronouns ? data.pronouns : null;
   if ('website' in data) targetUser.website = data.website ?? null;
-  if ('coverPhotoURL' in data && data.coverPhotoURL === null)
-    targetUser.coverPhotoURL = DEFAULT_PROFILE_COVER_URL;
+  if ('photoURL' in data) {
+    if (mediaUrls.photoURL) targetUser.photoURL = mediaUrls.photoURL;
+    else if (isUsableLocalProfileImageUrl(data.photoURL))
+      targetUser.photoURL = data.photoURL as string;
+  }
+  if ('coverPhotoURL' in data) {
+    if (data.coverPhotoURL === null)
+      targetUser.coverPhotoURL = DEFAULT_PROFILE_COVER_URL;
+    else if (mediaUrls.coverPhotoURL)
+      targetUser.coverPhotoURL = mediaUrls.coverPhotoURL;
+    else if (isUsableLocalProfileImageUrl(data.coverPhotoURL))
+      targetUser.coverPhotoURL = data.coverPhotoURL as string;
+  }
 
   targetUser.updatedAt = Timestamp.now();
   userCache.set(targetUser.id, targetUser);
@@ -1556,7 +1914,7 @@ function canvasToBlob(
 
 async function encodeCanvasImage(
   canvas: HTMLCanvasElement,
-  targetBytes = BSKY_IMAGE_TARGET_BYTES,
+  targetBytes = BSKY_POST_IMAGE_TARGET_BYTES,
   mimeTypes: readonly string[] = ['image/webp', 'image/jpeg']
 ): Promise<Blob> {
   let fallbackBlob: Blob | null = null;
@@ -1612,11 +1970,15 @@ async function prepareImageForBluesky(
   options?: {
     acceptedTypes?: RegExp;
     outputMimeTypes?: readonly string[];
+    maxBytes?: number;
+    targetBytes?: number;
   }
 ): Promise<PreparedImageUpload> {
   const {
-    acceptedTypes = /^image\/(?:jpe?g|png|webp|gif)$/i,
-    outputMimeTypes = ['image/webp', 'image/jpeg']
+    acceptedTypes = BSKY_POST_IMAGE_ACCEPTED_TYPES,
+    outputMimeTypes = ['image/webp', 'image/jpeg'],
+    maxBytes = BSKY_POST_IMAGE_MAX_BYTES,
+    targetBytes = BSKY_POST_IMAGE_TARGET_BYTES
   } = options ?? {};
   const image = await loadImageElement(file);
   const originalAspectRatio = getImageAspectRatio(
@@ -1624,7 +1986,7 @@ async function prepareImageForBluesky(
     image.naturalHeight
   );
 
-  if (file.size <= BSKY_IMAGE_MAX_BYTES && acceptedTypes.test(file.type)) {
+  if (file.size <= maxBytes && acceptedTypes.test(file.type)) {
     return {
       file,
       encoding: file.type || 'image/jpeg',
@@ -1635,12 +1997,12 @@ async function prepareImageForBluesky(
   const canvas = drawImageToCanvas(image, outputMimeTypes);
   let blob = await encodeCanvasImage(
     canvas,
-    BSKY_IMAGE_TARGET_BYTES,
+    targetBytes,
     outputMimeTypes
   );
 
   while (
-    blob.size > BSKY_IMAGE_MAX_BYTES &&
+    blob.size > maxBytes &&
     canvas.width > 640 &&
     canvas.height > 640
   ) {
@@ -1671,12 +2033,12 @@ async function prepareImageForBluesky(
 
     blob = await encodeCanvasImage(
       canvas,
-      BSKY_IMAGE_TARGET_BYTES,
+      targetBytes,
       outputMimeTypes
     );
   }
 
-  if (blob.size > BSKY_IMAGE_MAX_BYTES) {
+  if (blob.size > maxBytes) {
     throw new Error('Image is too large for Bluesky.');
   }
 
@@ -1692,7 +2054,9 @@ function prepareProfileImageForBluesky(
 ): Promise<PreparedImageUpload> {
   return prepareImageForBluesky(file, {
     acceptedTypes: BSKY_PROFILE_IMAGE_ACCEPTED_TYPES,
-    outputMimeTypes: [BSKY_PROFILE_IMAGE_MIME_TYPE]
+    outputMimeTypes: [BSKY_PROFILE_IMAGE_MIME_TYPE],
+    maxBytes: BSKY_PROFILE_IMAGE_MAX_BYTES,
+    targetBytes: BSKY_PROFILE_IMAGE_TARGET_BYTES
   });
 }
 
@@ -2559,6 +2923,56 @@ function getHostname(url: string): string | null {
   }
 }
 
+function isSafariBrowser(): boolean {
+  if (typeof navigator === 'undefined') return false;
+
+  return /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+}
+
+type TenorGifInfo = {
+  playbackUrl: string;
+  aspectRatio: AppBskyEmbedImages.Image['aspectRatio'];
+  alt: string;
+};
+
+function parseTenorGifUrl(value: string): TenorGifInfo | null {
+  try {
+    const url = new URL(value);
+    if (url.hostname !== 'media.tenor.com') return null;
+
+    let [, id, filename] = url.pathname.split('/');
+    if (!id || !filename || !/\.gif$/i.test(filename)) return null;
+
+    if (id.includes('AAAAC')) {
+      if (typeof window !== 'undefined' && !isSafariBrowser()) {
+        id = id.replace('AAAAC', 'AAAP3');
+        filename = filename.replace(/\.gif$/i, '.webm');
+      } else if (typeof window !== 'undefined') {
+        id = id.replace('AAAAC', 'AAAP1');
+        filename = filename.replace(/\.gif$/i, '.mp4');
+      } else {
+        id = id.replace('AAAAC', 'AAAAM');
+      }
+    }
+
+    const width = Number(url.searchParams.get('ww'));
+    const height = Number(url.searchParams.get('hh'));
+    const alt = url.searchParams.get('alt') ?? '';
+
+    return {
+      playbackUrl: `https://t.gifs.bsky.app/${id}/${filename}`,
+      aspectRatio: getImageAspectRatio(width, height),
+      alt
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isTenorGifUrl(value: string): boolean {
+  return !!parseTenorGifUrl(value);
+}
+
 function getBskyWebUrl(uri: string): string {
   const atUriMatch = uri.match(/^at:\/\/([^/]+)\/([^/]+)\/([^/]+)$/);
   if (!atUriMatch) return uri;
@@ -2658,6 +3072,23 @@ function mapRecordSummaryCard(
 function mapMedia(embed: unknown): ImagesPreview | null {
   if (!embed) return null;
 
+  if (AppBskyEmbedExternal.isView(embed)) {
+    const { external } = embed as AppBskyEmbedExternal.View;
+    const tenorGif = parseTenorGifUrl(external.uri);
+
+    if (tenorGif)
+      return [
+        {
+          id: `${external.uri}-tenor-gif`,
+          src: tenorGif.playbackUrl,
+          alt: tenorGif.alt || external.title || 'GIF',
+          type: 'gif',
+          poster: external.thumb ?? null,
+          aspectRatio: tenorGif.aspectRatio
+        }
+      ];
+  }
+
   if (AppBskyEmbedImages.isView(embed))
     return (embed as AppBskyEmbedImages.View).images.map((image, index) => ({
       id: `${image.fullsize}-${index}`,
@@ -2695,8 +3126,13 @@ function mapMedia(embed: unknown): ImagesPreview | null {
 function mapCard(embed: unknown): TweetCard | null {
   if (!embed) return null;
 
-  if (AppBskyEmbedExternal.isView(embed))
-    return mapExternalCard(embed as AppBskyEmbedExternal.View);
+  if (AppBskyEmbedExternal.isView(embed)) {
+    const externalEmbed = embed as AppBskyEmbedExternal.View;
+
+    if (isTenorGifUrl(externalEmbed.external.uri)) return null;
+
+    return mapExternalCard(externalEmbed);
+  }
 
   if (AppBskyEmbedRecordWithMedia.isView(embed)) {
     const recordWithMedia = embed as AppBskyEmbedRecordWithMedia.View;
@@ -2949,7 +3385,7 @@ function postHasVisibleMedia(post: AppBskyFeedDefs.PostView): boolean {
 
 async function waitForPublishedPost(
   uri: string,
-  requireMedia: boolean
+  requiredMediaLabel?: 'image' | 'video'
 ): Promise<Tweet> {
   let lastError: unknown = null;
 
@@ -2961,7 +3397,7 @@ async function waitForPublishedPost(
     try {
       const post = (await fetchAppViewPosts([uri])).posts[0];
 
-      if (post && (!requireMedia || postHasVisibleMedia(post)))
+      if (post && (!requiredMediaLabel || postHasVisibleMedia(post)))
         return mapPost(post);
     } catch (error) {
       lastError = error;
@@ -2970,9 +3406,9 @@ async function waitForPublishedPost(
     await wait(700 + attempt * 200);
   }
 
-  if (requireMedia) {
+  if (requiredMediaLabel) {
     throw new Error(
-      'Bluesky accepted the Tweet, but did not publish its attached image. Try a smaller image.'
+      `Bluesky accepted the Tweet, but did not publish its attached ${requiredMediaLabel}. Try a smaller file.`
     );
   }
 
@@ -3230,13 +3666,15 @@ export async function getFeedGeneratorPage(
   };
 }
 
+const DISCOVER_HOME_FEED_RKEY = 'whats-hot';
+
 export async function getDiscoverHomeFeedPage(
   cursor?: string,
   limit = 30
 ): Promise<HomeFeedPage> {
   const page = await getFeedGeneratorPage(
     'bsky.app',
-    'whats-hot',
+    DISCOVER_HOME_FEED_RKEY,
     cursor,
     limit
   );
@@ -3316,20 +3754,87 @@ async function getFeedGeneratorsByUri(
   return generators;
 }
 
+function getLegacySavedHomeFeed(
+  uri: string,
+  pinned: boolean
+): AppBskyActorDefs.SavedFeed | null {
+  if (!isFeedGeneratorUri(uri)) return null;
+
+  return {
+    id: uri,
+    type: 'feed',
+    value: uri,
+    pinned
+  };
+}
+
+function isSavedFeedsPrefV2Preference(
+  value: unknown
+): value is AppBskyActorDefs.SavedFeedsPrefV2 {
+  return (
+    isPlainObject(value) &&
+    value.$type === 'app.bsky.actor.defs#savedFeedsPrefV2' &&
+    Array.isArray(value.items)
+  );
+}
+
+function isSavedFeedsPrefPreference(
+  value: unknown
+): value is AppBskyActorDefs.SavedFeedsPref {
+  return (
+    isPlainObject(value) &&
+    value.$type === 'app.bsky.actor.defs#savedFeedsPref' &&
+    Array.isArray(value.pinned) &&
+    Array.isArray(value.saved)
+  );
+}
+
+function getSavedHomeFeedsFromPreferences(
+  preferences: AppBskyActorDefs.Preferences
+): AppBskyActorDefs.SavedFeed[] {
+  const savedFeeds: AppBskyActorDefs.SavedFeed[] = [];
+  const legacyPinnedUris: string[] = [];
+  const legacySavedUris: string[] = [];
+  const seenFeedUris = new Set<string>();
+  const appendFeed = (feed: AppBskyActorDefs.SavedFeed): void => {
+    if (feed.type !== 'feed' || !isFeedGeneratorUri(feed.value)) return;
+    if (seenFeedUris.has(feed.value)) return;
+
+    seenFeedUris.add(feed.value);
+    savedFeeds.push(feed);
+  };
+
+  for (const preference of preferences) {
+    if (isSavedFeedsPrefV2Preference(preference)) {
+      preference.items.forEach(appendFeed);
+      continue;
+    }
+
+    if (isSavedFeedsPrefPreference(preference)) {
+      legacyPinnedUris.push(...preference.pinned);
+      legacySavedUris.push(...preference.saved);
+    }
+  }
+
+  legacyPinnedUris.forEach((uri) => {
+    const feed = getLegacySavedHomeFeed(uri, true);
+    if (feed) appendFeed(feed);
+  });
+  legacySavedUris.forEach((uri) => {
+    const feed = getLegacySavedHomeFeed(uri, legacyPinnedUris.includes(uri));
+    if (feed) appendFeed(feed);
+  });
+
+  return savedFeeds;
+}
+
 export async function getSubscribedHomeFeeds(): Promise<SubscribedHomeFeed[]> {
-  const prefs = await getAppViewAgent().getPreferences();
-  const savedFeeds = prefs.savedFeeds.filter(
-    (feed) =>
-      feed.pinned &&
-      (feed.type === 'timeline' ||
-        (feed.type === 'feed' && isFeedGeneratorUri(feed.value)))
+  const response = await getAgent().app.bsky.actor.getPreferences();
+  const savedFeeds = getSavedHomeFeedsFromPreferences(
+    response.data.preferences
   );
   const feedUris = Array.from(
-    new Set(
-      savedFeeds
-        .filter((feed) => feed.type === 'feed')
-        .map(({ value }) => value)
-    )
+    new Set(savedFeeds.map(({ value }) => value))
   );
   const generators = await getFeedGeneratorsByUri(feedUris);
 
@@ -3995,6 +4500,7 @@ async function activateOAuthSession(
     oauthSession = nextSession;
     credentialAgent = null;
     sessionDid = did;
+    activePdsDidPromise = null;
     agent = new Agent(nextSession);
 
     const user = await refreshCurrentUser();
@@ -4040,11 +4546,15 @@ async function activateCredentialAgent(
     credentialAgent = nextAgent;
     agent = nextAgent;
     sessionDid = nextAgent.session.did;
+    activePdsDidPromise = null;
 
     const user = await refreshCurrentUser();
 
     if (hasStorage()) window.localStorage.removeItem(OAUTH_SUB_KEY);
-    writeCredentialSession(nextAgent.session);
+    writeCredentialSession(
+      nextAgent.session,
+      getCredentialAgentServiceUrl(nextAgent, getPrimaryAtprotoServiceUrl())
+    );
     if (shouldNotify) notify();
 
     return user
@@ -4062,13 +4572,13 @@ async function activateCredentialAgent(
 }
 
 async function resumeCredentialAuthUser(): Promise<AuthUser | null> {
-  const storedSession = readCredentialSession();
-  if (!storedSession) return null;
+  const storedCredentialSession = readCredentialSession();
+  if (!storedCredentialSession) return null;
 
-  const nextAgent = createCredentialAgent();
+  const nextAgent = createCredentialAgent(storedCredentialSession.serviceUrl);
 
   try {
-    await nextAgent.resumeSession(storedSession);
+    await nextAgent.resumeSession(storedCredentialSession.session);
     return activateCredentialAgent(nextAgent);
   } catch {
     writeCredentialSession();
@@ -4720,10 +5230,180 @@ async function createThreadgate(
   );
 }
 
+function isVideoUpload({ file }: UploadedImage): boolean {
+  return file.type === 'video/mp4' || /\.mp4$/i.test(file.name);
+}
+
+function isImageUpload(upload: UploadedImage): boolean {
+  return !isVideoUpload(upload);
+}
+
+type VideoMetadata = {
+  aspectRatio: AppBskyEmbedVideo.Main['aspectRatio'];
+  duration: number;
+};
+
+function loadVideoMetadata(file: File): Promise<VideoMetadata> {
+  return new Promise((resolve, reject) => {
+    const src = URL.createObjectURL(file);
+    const video = document.createElement('video');
+
+    const cleanup = (): void => {
+      URL.revokeObjectURL(src);
+      video.removeAttribute('src');
+      video.load();
+    };
+
+    video.preload = 'metadata';
+    video.onloadedmetadata = (): void => {
+      const metadata = {
+        aspectRatio: getImageAspectRatio(video.videoWidth, video.videoHeight),
+        duration: Number.isFinite(video.duration) ? video.duration : 0
+      };
+
+      cleanup();
+      resolve(metadata);
+    };
+    video.onerror = (): void => {
+      cleanup();
+      reject(new Error('Unable to read that video file.'));
+    };
+    video.src = src;
+  });
+}
+
+async function waitForVideoJob(
+  api: Agent,
+  initialStatus: AppBskyVideoDefs.JobStatus
+): Promise<AppBskyVideoDefs.JobStatus> {
+  let status = initialStatus;
+
+  for (let attempt = 0; attempt < BSKY_VIDEO_JOB_RETRIES; attempt += 1) {
+    if (status.state === 'JOB_STATE_COMPLETED') return status;
+
+    if (status.state === 'JOB_STATE_FAILED') {
+      throw new Error(
+        status.message || status.error || 'Bluesky could not process the video.'
+      );
+    }
+
+    await wait(1000);
+    status = (
+      await api.app.bsky.video.getJobStatus({ jobId: status.jobId })
+    ).data.jobStatus;
+  }
+
+  throw new Error('Bluesky is still processing that video. Try again shortly.');
+}
+
+async function uploadVideoForBluesky(
+  upload: UploadedImage
+): Promise<AppBskyEmbedVideo.Main> {
+  const { file, preview } = upload;
+
+  if (!isVideoUpload(upload))
+    throw new Error('Bluesky video uploads must be MP4 files.');
+
+  if (file.size > BSKY_VIDEO_MAX_BYTES)
+    throw new Error('Bluesky videos must be 100 MB or smaller.');
+
+  const [metadata, limits] = await Promise.all([
+    loadVideoMetadata(file),
+    getVideoAgent()
+      .app.bsky.video.getUploadLimits()
+      .then(({ data }) => data)
+      .catch(() => null)
+  ]);
+
+  if (metadata.duration > BSKY_VIDEO_MAX_DURATION_SECONDS)
+    throw new Error('Bluesky videos must be 3 minutes or shorter.');
+
+  if (limits && !limits.canUpload)
+    throw new Error(
+      limits.message || limits.error || 'Bluesky is not allowing video uploads.'
+    );
+
+  const videoApi = getVideoAgent();
+  const uploadResponse = await videoApi.app.bsky.video.uploadVideo(file, {
+    encoding: 'video/mp4'
+  });
+  const jobStatus = await waitForVideoJob(
+    videoApi,
+    uploadResponse.data.jobStatus
+  );
+
+  if (!jobStatus.blob)
+    throw new Error('Bluesky did not return a processed video blob.');
+
+  return {
+    $type: 'app.bsky.embed.video',
+    video: toPdsCompatibleBlobRef(jobStatus.blob),
+    alt: preview.alt || undefined,
+    aspectRatio: metadata.aspectRatio,
+    presentation: 'default'
+  };
+}
+
+async function uploadExternalThumbForBluesky(
+  api: Agent,
+  image: string | null,
+  title: string
+): Promise<AppBskyEmbedExternal.External['thumb'] | undefined> {
+  if (!image) return undefined;
+
+  try {
+    const response = await fetch(image);
+
+    if (!response.ok) return undefined;
+
+    const blob = await response.blob();
+    if (!blob.type.startsWith('image/')) return undefined;
+
+    const extension = blob.type.includes('png')
+      ? 'png'
+      : blob.type.includes('webp')
+      ? 'webp'
+      : 'jpg';
+    const file = new File([blob], `${title || 'thumbnail'}.${extension}`, {
+      type: blob.type
+    });
+    const preparedImage = await prepareImageForBluesky(file, {
+      maxBytes: BSKY_EXTERNAL_THUMB_MAX_BYTES,
+      targetBytes: BSKY_EXTERNAL_THUMB_TARGET_BYTES
+    });
+    const upload = await api.uploadBlob(preparedImage.file, {
+      encoding: preparedImage.encoding
+    });
+
+    return toPdsCompatibleBlobRef(upload.data.blob, preparedImage.file.size);
+  } catch {
+    return undefined;
+  }
+}
+
+async function buildExternalEmbed(
+  api: Agent,
+  card: TweetCard | null | undefined
+): Promise<AppBskyEmbedExternal.Main | undefined> {
+  if (!card || card.type !== 'external') return undefined;
+
+  return {
+    $type: 'app.bsky.embed.external',
+    external: {
+      uri: card.url,
+      title: card.title || card.url,
+      description: card.description ?? '',
+      thumb: await uploadExternalThumbForBluesky(api, card.image, card.title)
+    }
+  };
+}
+
 type AddTweetData = Partial<Tweet> & {
   quoteTarget?: { id: string; createdBy: string };
   replySetting?: TweetReplySetting;
 };
+
+type PostRecordEmbed = NonNullable<AppBskyFeedPost.Record['embed']>;
 
 export async function addTweet(data: AddTweetData): Promise<Tweet> {
   const api = getAgent();
@@ -4733,12 +5413,20 @@ export async function addTweet(data: AddTweetData): Promise<Tweet> {
 
   const images = stagedImages.get(data.createdBy ?? '') ?? [];
   stagedImages.delete(data.createdBy ?? '');
+  const imageUploads = images.filter(isImageUpload);
+  const videoUploads = images.filter(isVideoUpload);
 
-  const mediaEmbed = images.length
+  if (imageUploads.length && videoUploads.length)
+    throw new Error('Bluesky allows either one video or up to 4 images.');
+
+  if (videoUploads.length > 1)
+    throw new Error('Bluesky allows only one video per Tweet.');
+
+  const imageEmbed = imageUploads.length
     ? {
         $type: 'app.bsky.embed.images',
         images: await Promise.all(
-          images.slice(0, 4).map(async ({ file, preview }) => {
+          imageUploads.slice(0, 4).map(async ({ file, preview }) => {
             const preparedImage = await prepareImageForBluesky(file);
             const upload = await api.uploadBlob(preparedImage.file, {
               encoding: preparedImage.encoding
@@ -4756,21 +5444,34 @@ export async function addTweet(data: AddTweetData): Promise<Tweet> {
         )
       }
     : undefined;
+  const videoEmbed = videoUploads[0]
+    ? await uploadVideoForBluesky(videoUploads[0])
+    : undefined;
+  const externalEmbed = await buildExternalEmbed(api, data.card);
+  const mediaEmbeds = [imageEmbed, videoEmbed, externalEmbed].filter(Boolean);
+
+  if (mediaEmbeds.length > 1)
+    throw new Error('Bluesky allows one media attachment type per Tweet.');
+
+  const mediaEmbed = (imageEmbed ??
+    videoEmbed ??
+    externalEmbed) as PostRecordEmbed | undefined;
   const quoteRef = await getQuoteRef(data.quoteTarget);
   const quoteEmbed = quoteRef
-    ? {
+    ? ({
         $type: 'app.bsky.embed.record',
         record: quoteRef
-      }
+      } as PostRecordEmbed)
     : undefined;
-  const embed =
+  const embed = (
     mediaEmbed && quoteEmbed
       ? {
           $type: 'app.bsky.embed.recordWithMedia',
           record: quoteEmbed,
           media: mediaEmbed
         }
-      : mediaEmbed ?? quoteEmbed;
+      : mediaEmbed ?? quoteEmbed
+  ) as AppBskyFeedPost.Record['embed'];
 
   const parentId = data.parent?.id;
   const parentRef = parentId ? await getPostRef(parentId) : undefined;
@@ -4799,8 +5500,10 @@ export async function addTweet(data: AddTweetData): Promise<Tweet> {
   const localTweet: Tweet = {
     id: postIdFromUri(result.uri),
     text: richText.text || null,
-    images: images.length ? images.map(({ preview }) => preview) : null,
-    card: null,
+    images: images.length
+      ? images.map(({ preview }) => preview)
+      : data.images ?? null,
+    card: data.card && isTenorGifUrl(data.card.url) ? null : data.card ?? null,
     quotedTweet: data.quotedTweet ?? null,
     parent: data.parent ?? null,
     userLikes: [],
@@ -4814,10 +5517,13 @@ export async function addTweet(data: AddTweetData): Promise<Tweet> {
   };
   let visibleTweet = localTweet;
 
-  if (mediaEmbed) {
+  if (imageEmbed || videoEmbed) {
     try {
       visibleTweet = {
-        ...(await waitForPublishedPost(result.uri, true)),
+        ...(await waitForPublishedPost(
+          result.uri,
+          imageEmbed ? 'image' : 'video'
+        )),
         parent: localTweet.parent
       };
     } catch (error) {
@@ -4984,6 +5690,13 @@ export async function updateProfile(
         )
       : null
   ]);
+  const localMediaUrls: LocalProfileMediaUrls = {};
+  const avatarCdnUrl = getProfileMediaCdnUrl(userId, 'avatar', avatarUpload);
+  const bannerCdnUrl = getProfileMediaCdnUrl(userId, 'banner', bannerUpload);
+
+  if (avatarCdnUrl) localMediaUrls.photoURL = avatarCdnUrl;
+  if (bannerCdnUrl) localMediaUrls.coverPhotoURL = bannerCdnUrl;
+
   const shouldUpdateProfile =
     'name' in data ||
     'bio' in data ||
@@ -5020,8 +5733,12 @@ export async function updateProfile(
     });
   }
 
+  if (shouldUpdateProfile) invalidateUserProfileCache(userId);
   await refreshCurrentUser().catch(() => null);
-  applyLocalProfileUpdate(userId, data);
+  applyLocalProfileUpdate(userId, data, localMediaUrls);
+
+  if (currentUser?.id === userId) updateSavedAccount(currentUser);
+
   notify();
 }
 
