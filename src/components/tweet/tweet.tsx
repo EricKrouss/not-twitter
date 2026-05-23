@@ -4,6 +4,7 @@ import cn from 'clsx';
 import { useAuth } from '@lib/context/auth-context';
 import { useModal } from '@lib/hooks/useModal';
 import { getTweetPath, getUserPath } from '@lib/routes';
+import { createYouTubeCardFromText } from '@lib/youtube';
 import { delayScroll } from '@lib/utils';
 import { Modal } from '@components/modal/modal';
 import { TweetReplyModal } from '@components/modal/tweet-reply-modal';
@@ -99,6 +100,7 @@ export function Tweet(tweet: TweetProps): JSX.Element {
   const { open, openModal, closeModal } = useModal();
 
   const tweetLink = getTweetPath(tweetId, username);
+  const displayCard = card ?? createYouTubeCardFromText(text);
 
   const userId = user?.id ?? '';
 
@@ -207,7 +209,7 @@ export function Tweet(tweet: TweetProps): JSX.Element {
                       parentId={parentId}
                       parentUsername={parentUsername}
                       username={username}
-                      hasImages={!!images || !!card || !!quotedTweet}
+                      hasImages={!!images || !!displayCard || !!quotedTweet}
                       createdBy={createdBy}
                       blocking={tweetUserData.blocking}
                       blockingByListName={tweetUserData.blockingByListName}
@@ -240,7 +242,7 @@ export function Tweet(tweet: TweetProps): JSX.Element {
                     previewCount={images.length}
                   />
                 )}
-                <TweetEmbed card={card} quotedTweet={quotedTweet} />
+                <TweetEmbed card={displayCard} quotedTweet={quotedTweet} />
                 {!modal && (
                   <TweetStats
                     userId={userId}

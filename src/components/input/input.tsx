@@ -22,7 +22,7 @@ import {
 } from '@lib/hashtags';
 import { sleep } from '@lib/utils';
 import { getImagesData } from '@lib/validation';
-import { findYouTubeVideoInfo } from '@lib/youtube';
+import { createYouTubeCardFromText } from '@lib/youtube';
 import { UserAvatar } from '@components/user/user-avatar';
 import { TweetEmbed } from '@components/tweet/tweet-embed';
 import { InputForm, fromTop } from './input-form';
@@ -138,20 +138,6 @@ function createTenorGifCard(gif: GifSelection): TweetCard {
     description: `ALT: ${gif.title || 'GIF'}`,
     image: gif.preview || null,
     domain: getCardDomain(url)
-  };
-}
-
-function createYouTubeCardFromText(text: string): TweetCard | null {
-  const video = findYouTubeVideoInfo(text);
-  if (!video) return null;
-
-  return {
-    type: 'youtube',
-    url: video.url,
-    title: video.title,
-    description: null,
-    image: video.thumbnail,
-    domain: video.domain
   };
 }
 

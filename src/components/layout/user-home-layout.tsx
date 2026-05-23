@@ -113,6 +113,7 @@ export function UserHomeLayout({ children }: LayoutProps): JSX.Element {
                       userTargetId={userData.id}
                       userTargetUsername={userData.username}
                       userTargetFollowers={userData.followers}
+                      userTargetFollowing={userData.following}
                       userTargetBlocking={userData.blocking}
                       userTargetBlockedBy={userData.blockedBy}
                       userTargetBlockingByListName={userData.blockingByListName}

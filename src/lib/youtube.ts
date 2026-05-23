@@ -1,3 +1,5 @@
+import type { TweetCard } from '@lib/types/tweet';
+
 export type YouTubeVideoInfo = {
   id: string;
   url: string;
@@ -84,4 +86,20 @@ export function findYouTubeVideoInfo(text: string): YouTubeVideoInfo | null {
   }
 
   return null;
+}
+
+export function createYouTubeCardFromText(
+  text: string | null | undefined
+): TweetCard | null {
+  const video = findYouTubeVideoInfo(text ?? '');
+  if (!video) return null;
+
+  return {
+    type: 'youtube',
+    url: video.url,
+    title: video.title,
+    description: null,
+    image: video.thumbnail,
+    domain: video.domain
+  };
 }

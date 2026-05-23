@@ -4,6 +4,7 @@ import cn from 'clsx';
 import { useAuth } from '@lib/context/auth-context';
 import { useModal } from '@lib/hooks/useModal';
 import { getTweetPath, getUserPath } from '@lib/routes';
+import { createYouTubeCardFromText } from '@lib/youtube';
 import { Modal } from '@components/modal/modal';
 import { TweetReplyModal } from '@components/modal/tweet-reply-modal';
 import { ImagePreview } from '@components/input/image-preview';
@@ -53,6 +54,7 @@ export function ViewTweet(tweet: ViewTweetProps): JSX.Element {
   const { open, openModal, closeModal } = useModal();
 
   const tweetLink = getTweetPath(tweetId, username);
+  const displayCard = card ?? createYouTubeCardFromText(text);
 
   const userId = user?.id ?? '';
 
@@ -115,7 +117,7 @@ export function ViewTweet(tweet: ViewTweetProps): JSX.Element {
                 parentId={parentId}
                 parentUsername={parentUsername}
                 username={username}
-                hasImages={!!images || !!card || !!quotedTweet}
+                hasImages={!!images || !!displayCard || !!quotedTweet}
                 createdBy={createdBy}
               />
             </div>
@@ -142,7 +144,7 @@ export function ViewTweet(tweet: ViewTweetProps): JSX.Element {
             previewCount={images.length}
           />
         )}
-        <TweetEmbed card={card} quotedTweet={quotedTweet} viewTweet />
+        <TweetEmbed card={displayCard} quotedTweet={quotedTweet} viewTweet />
         <div
           className='inner:hover-animation inner:border-b inner:border-light-border
                      dark:inner:border-dark-border'

@@ -11,6 +11,7 @@ type FollowButtonProps = {
   userTargetId: string;
   userTargetUsername: string;
   userTargetFollowers?: string[];
+  userTargetFollowing?: string[];
   userTargetBlocking?: boolean;
   userTargetBlockedBy?: boolean;
   userTargetBlockingByListName?: string | null;
@@ -20,6 +21,7 @@ export function FollowButton({
   userTargetId,
   userTargetUsername,
   userTargetFollowers,
+  userTargetFollowing,
   userTargetBlocking,
   userTargetBlockedBy,
   userTargetBlockingByListName
@@ -49,10 +51,12 @@ export function FollowButton({
     closeModal();
   };
 
-  const userIsFollowed = !!(
-    userTargetFollowers?.includes(userId ?? '') ??
-    following?.includes(userTargetId ?? '')
-  );
+  const userIsFollowed = [
+    following?.includes(userTargetId),
+    userTargetFollowers?.includes(userId ?? '')
+  ].some(Boolean);
+  const userFollowsViewer = !!userTargetFollowing?.includes(userId ?? '');
+  const followLabel = userFollowsViewer ? 'Follow Back' : 'Follow';
 
   if (!user)
     return (
@@ -120,12 +124,18 @@ export function FollowButton({
       </Modal>
       {userIsFollowed ? (
         <Button
-          className='dark-bg-tab min-w-[106px] self-start border border-light-line-reply px-4 py-1.5 
+          className='dark-bg-tab group min-w-[106px] self-start border border-light-line-reply px-4 py-1.5
                      font-bold hover:border-accent-red hover:bg-accent-red/10 hover:text-accent-red
-                     hover:before:content-["Unfollow"] inner:hover:hidden dark:border-light-secondary'
+                     focus-visible:border-accent-red focus-visible:bg-accent-red/10 focus-visible:text-accent-red
+                     dark:border-light-secondary'
           onClick={preventBubbling(openModal)}
         >
-          <span>Following</span>
+          <span className='group-hover:hidden group-focus-visible:hidden'>
+            Following
+          </span>
+          <span className='hidden group-hover:inline group-focus-visible:inline'>
+            Unfollow
+          </span>
         </Button>
       ) : (
         <Button
@@ -135,7 +145,7 @@ export function FollowButton({
                      dark:active:bg-light-border/75'
           onClick={preventBubbling(handleFollow)}
         >
-          Follow
+          {followLabel}
         </Button>
       )}
     </>

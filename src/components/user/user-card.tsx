@@ -83,6 +83,7 @@ export function UserCard(user: UserCardProps): JSX.Element {
             userTargetId={id}
             userTargetUsername={username}
             userTargetFollowers={followers}
+            userTargetFollowing={following}
             userTargetBlocking={blocking}
             userTargetBlockedBy={blockedBy}
             userTargetBlockingByListName={blockingByListName}

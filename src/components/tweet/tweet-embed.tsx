@@ -2,7 +2,7 @@ import { useRouter } from 'next/router';
 import cn from 'clsx';
 import { formatDate } from '@lib/date';
 import { getTweetPath } from '@lib/routes';
-import { getYouTubeVideoInfo } from '@lib/youtube';
+import { createYouTubeCardFromText, getYouTubeVideoInfo } from '@lib/youtube';
 import { ImagePreview } from '@components/input/image-preview';
 import { CustomIcon } from '@components/ui/custom-icon';
 import { HeroIcon } from '@components/ui/hero-icon';
@@ -277,6 +277,8 @@ function QuotedTweetCard({
   if (quotedTweet.unavailable)
     return <TweetUnavailableCard quotedTweet={quotedTweet} />;
 
+  const quotedTweetCard =
+    quotedTweet.card ?? createYouTubeCardFromText(quotedTweet.text);
   const tweetHref = quotedTweet.id
     ? getTweetPath(quotedTweet.id, quotedTweet.authorUsername)
     : null;
@@ -343,7 +345,7 @@ function QuotedTweetCard({
             previewCount={quotedTweet.images.length}
           />
         )}
-        {quotedTweet.card && <TweetLinkCard card={quotedTweet.card} compact />}
+        {quotedTweetCard && <TweetLinkCard card={quotedTweetCard} compact />}
       </div>
     </CardShell>
   );

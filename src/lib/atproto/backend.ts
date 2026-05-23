@@ -11,6 +11,8 @@ import {
   AtpAgent,
   BlobRef,
   jsonToLex,
+  moderateNotification,
+  moderatePost,
   RichText,
   type AppBskyActorProfile,
   type AppBskyActorDefs,
@@ -18,11 +20,13 @@ import {
   type AppBskyFeedThreadgate,
   type AppBskyNotificationListNotifications,
   type AppBskyVideoDefs,
+  type AppBskyVideoGetUploadLimits,
   type AtpSessionData,
   type BskyFeedViewPreference,
   type BskyThreadViewPreference,
   type ChatBskyActorDeclaration,
-  type ChatBskyConvoDefs
+  type ChatBskyConvoDefs,
+  type ModerationOpts
 } from '@atproto/api';
 import { BrowserOAuthClient } from '@atproto/oauth-client-browser';
 import { buildAtprotoLoopbackClientMetadata } from '@atproto/oauth-types';
@@ -146,7 +150,6 @@ const PUBLIC_BSKY_APPVIEW_METHODS = new Set([
   'app.bsky.feed.getPosts',
   'app.bsky.feed.getQuotes',
   'app.bsky.feed.getRepostedBy',
-  'app.bsky.feed.searchPosts',
   'app.bsky.graph.getFollowers',
   'app.bsky.graph.getFollows',
   'app.bsky.graph.getList',
@@ -283,6 +286,11 @@ type AppViewFeedGeneratorsResponse = {
 type AppViewPostsResponse = {
   posts: AppBskyFeedDefs.PostView[];
 };
+type AppViewSearchPostsResponse = {
+  cursor?: string;
+  hitsTotal?: number;
+  posts: AppBskyFeedDefs.PostView[];
+};
 type AppViewNotificationsResponse = {
   cursor?: string;
   notifications: AppBskyNotificationListNotifications.Notification[];
@@ -390,6 +398,11 @@ export type NotificationsPage = {
   notifications: NotificationItem[];
   cursor: string | null;
   seenAt: string | null;
+};
+
+type NotificationTweetLookup = {
+  tweetByUri: Map<string, Tweet>;
+  hiddenUris: Set<string>;
 };
 
 export type ChatParticipant = Pick<
@@ -581,6 +594,8 @@ let activePdsDidPromise: Promise<string> | null = null;
 let currentUser: User | null = null;
 let currentFollowing = new Set<string>();
 let malformedMediaRepairPromise: Promise<void> | null = null;
+let moderationOptsPromise: Promise<ModerationOpts | null> | null = null;
+let moderationLabelerDids: string[] = [];
 
 function hasStorage(): boolean {
   return typeof window !== 'undefined' && !!window.localStorage;
@@ -914,6 +929,17 @@ function removeSavedAccount(
   return nextAccounts;
 }
 
+function clearModerationSettingsCache(): void {
+  moderationOptsPromise = null;
+  moderationLabelerDids = [];
+}
+
+function deleteCachedTweetsByAuthor(authorDid: string): void {
+  tweetCache.forEach((tweet, id) => {
+    if (tweet.createdBy === authorDid) tweetCache.delete(id);
+  });
+}
+
 function clearActiveAuthState(): void {
   agent = null;
   credentialAgent = null;
@@ -924,6 +950,7 @@ function clearActiveAuthState(): void {
   currentUser = null;
   currentFollowing = new Set();
   malformedMediaRepairPromise = null;
+  clearModerationSettingsCache();
   followUriCache.clear();
   blockUriCache.clear();
   locallyCreatedTweets.clear();
@@ -1174,12 +1201,6 @@ async function fetchServiceXrpc(
     return getAgent().sessionManager.fetchHandler(path, { ...init, headers });
   }
 
-  if (!service.chat && PUBLIC_BSKY_APPVIEW_METHODS.has(method)) {
-    headers.delete('authorization');
-    headers.delete('atproto-proxy');
-    return fetch(new URL(path, PUBLIC_BSKY_APPVIEW_URL), { ...init, headers });
-  }
-
   const token = await getServiceAuthToken(service, method);
   headers.set('authorization', `Bearer ${token}`);
   headers.delete('atproto-proxy');
@@ -1194,10 +1215,22 @@ function createAuthenticatedServiceAgent(service: BskyServiceConfig): Agent {
   });
 }
 
-function getAppViewAgent(): Agent {
-  if (oauthSession) return createAuthenticatedServiceAgent(BSKY_APPVIEW_CONFIG);
+function configureModerationLabelers(api: Agent): Agent {
+  if (moderationLabelerDids.length)
+    api.configureLabelers(moderationLabelerDids);
 
-  return getAgent().withProxy(BSKY_APPVIEW_SERVICE, BSKY_APPVIEW_DID);
+  return api;
+}
+
+function getAppViewAgent(): Agent {
+  if (oauthSession)
+    return configureModerationLabelers(
+      createAuthenticatedServiceAgent(BSKY_APPVIEW_CONFIG)
+    );
+
+  return configureModerationLabelers(
+    getAgent().withProxy(BSKY_APPVIEW_SERVICE, BSKY_APPVIEW_DID)
+  );
 }
 
 function getChatAgent(): Agent {
@@ -1207,7 +1240,7 @@ function getChatAgent(): Agent {
 }
 
 function getVideoAgent(): Agent {
-  return createAuthenticatedServiceAgent(BSKY_VIDEO_CONFIG);
+  return new Agent(BSKY_VIDEO_URL);
 }
 
 function getErrorStatus(error: unknown): number | null {
@@ -1398,6 +1431,8 @@ async function callServiceRawXrpc<T>(
   const headers = new Headers();
 
   if (data) headers.set('content-type', 'application/json');
+  if (service.service === BSKY_APPVIEW_SERVICE && moderationLabelerDids.length)
+    headers.set('atproto-accept-labelers', moderationLabelerDids.join(','));
 
   const response = await fetchServiceXrpc(
     service,
@@ -1461,12 +1496,18 @@ async function readXrpcError(response: Response): Promise<string> {
 
   return response
     .json()
-    .then((body: { error?: unknown; message?: unknown }) =>
-      [body.error, body.message]
-        .filter((value): value is string => typeof value === 'string')
-        .join(': ')
-    )
+    .then((body) => getXrpcErrorMessage(body, fallbackMessage))
     .catch(() => fallbackMessage);
+}
+
+function getXrpcErrorMessage(body: unknown, fallbackMessage: string): string {
+  if (!isPlainObject(body)) return fallbackMessage;
+
+  return (
+    [body.error, body.message]
+      .filter((value): value is string => typeof value === 'string')
+      .join(': ') || fallbackMessage
+  );
 }
 
 function appendXrpcQueryParam(
@@ -1504,7 +1545,8 @@ async function callAppQueryXrpc<T>(
   );
 }
 
-async function callPublicAppQueryXrpc<T>(
+async function callRawAppViewQueryXrpc<T>(
+  baseUrl: string,
   method: string,
   params: Record<string, unknown>
 ): Promise<T> {
@@ -1515,18 +1557,43 @@ async function callPublicAppQueryXrpc<T>(
   });
 
   const queryString = query.toString();
+  const headers = new Headers();
+
+  if (moderationLabelerDids.length)
+    headers.set('atproto-accept-labelers', moderationLabelerDids.join(','));
+
   const response = await fetch(
-    `${PUBLIC_BSKY_APPVIEW_URL}/xrpc/${method}${
-      queryString ? `?${queryString}` : ''
-    }`
+    `${baseUrl}/xrpc/${method}${queryString ? `?${queryString}` : ''}`,
+    { headers }
   );
 
   if (!response.ok) {
     const fallbackMessage = response.statusText || `HTTP ${response.status}`;
-    throw new Error((await readXrpcError(response)) || fallbackMessage);
+    const error = new Error(
+      (await readXrpcError(response)) || fallbackMessage
+    ) as Error & {
+      status?: number;
+    };
+
+    error.status = response.status;
+    throw error;
   }
 
   return (await response.json()) as T;
+}
+
+async function callDirectAppQueryXrpc<T>(
+  method: string,
+  params: Record<string, unknown>
+): Promise<T> {
+  return callRawAppViewQueryXrpc<T>(BSKY_APPVIEW_URL, method, params);
+}
+
+async function callPublicAppQueryXrpc<T>(
+  method: string,
+  params: Record<string, unknown>
+): Promise<T> {
+  return callRawAppViewQueryXrpc<T>(PUBLIC_BSKY_APPVIEW_URL, method, params);
 }
 
 async function callPublicFallbackAppQueryXrpc<T>(
@@ -1536,6 +1603,8 @@ async function callPublicFallbackAppQueryXrpc<T>(
   try {
     return await callAppQueryXrpc<T>(method, params);
   } catch (error) {
+    if (!PUBLIC_BSKY_APPVIEW_METHODS.has(method)) throw error;
+
     try {
       return await callPublicAppQueryXrpc<T>(method, params);
     } catch {
@@ -1553,6 +1622,8 @@ async function fetchAppViewFeed(
   cursor?: string,
   limit = 30
 ): Promise<AppViewFeedResponse> {
+  await getSafeModerationOpts();
+
   return callPublicFallbackAppQueryXrpc<AppViewFeedResponse>(
     'app.bsky.feed.getFeed',
     {
@@ -1567,6 +1638,7 @@ async function fetchAppViewTimeline(
   cursor?: string,
   limit = 30
 ): Promise<AppViewFeedResponse> {
+  await getSafeModerationOpts();
   await ensureAppViewAccessScope('app.bsky.feed.getTimeline');
 
   return callAppQueryXrpc<AppViewFeedResponse>('app.bsky.feed.getTimeline', {
@@ -1578,11 +1650,36 @@ async function fetchAppViewTimeline(
 async function fetchAppViewPosts(
   uris: string[]
 ): Promise<AppViewPostsResponse> {
+  await getSafeModerationOpts();
+
   return callPublicFallbackAppQueryXrpc<AppViewPostsResponse>(
     'app.bsky.feed.getPosts',
     {
       uris
     }
+  );
+}
+
+async function fetchAppViewSearchPosts(
+  params: Record<string, unknown>
+): Promise<AppViewSearchPostsResponse> {
+  await getSafeModerationOpts();
+
+  return callDirectAppQueryXrpc<AppViewSearchPostsResponse>(
+    'app.bsky.feed.searchPosts',
+    params
+  );
+}
+
+function isTemporaryFeedUnavailableError(error: unknown): boolean {
+  const status = getErrorStatus(error);
+  const message = getUnknownErrorMessage(error);
+
+  return (
+    (typeof status === 'number' && status >= 500 && status < 600) ||
+    /Bad Gateway|Gateway Timeout|InternalServerError|Service Unavailable|Upstream server responded/i.test(
+      message
+    )
   );
 }
 
@@ -1654,17 +1751,60 @@ function hasJsonRepresentation(
   );
 }
 
+function isLikelyCidString(value: string): boolean {
+  return value.length > 10 && /^[a-z0-9]+$/i.test(value);
+}
+
+function getBlobRefCidString(ref: unknown): string | null {
+  if (typeof ref === 'string' && isLikelyCidString(ref)) return ref;
+
+  if (isPlainObject(ref)) {
+    const link = ref.$link ?? ref['/'];
+    if (typeof link === 'string' && isLikelyCidString(link)) return link;
+  }
+
+  const toString = (ref as { toString?: unknown })?.toString;
+  if (typeof toString === 'function') {
+    const value: unknown = toString.call(ref);
+    if (typeof value === 'string' && isLikelyCidString(value)) return value;
+  }
+
+  return null;
+}
+
+function normalizeJsonBlobRef(blob: unknown): unknown {
+  const value = hasJsonRepresentation(blob) ? blob.toJSON() : blob;
+
+  if (!isPlainObject(value) || value.$type !== 'blob') return value;
+
+  const cid = getBlobRefCidString(value.ref);
+  if (!cid || (isPlainObject(value.ref) && value.ref.$link === cid))
+    return value;
+
+  return {
+    ...value,
+    ref: { $link: cid }
+  };
+}
+
 function asStrictBlobRef(blob: BlobRef): StrictBlobRef {
   return blob as StrictBlobRef;
 }
 
 function parseBlobRef(blob: unknown): StrictBlobRef {
-  if (blob instanceof BlobRef) return asStrictBlobRef(blob);
+  if (blob instanceof BlobRef) {
+    const normalizedBlob = jsonToLex(
+      normalizeJsonBlobRef(blob) as Parameters<typeof jsonToLex>[0]
+    );
+
+    if (normalizedBlob instanceof BlobRef)
+      return asStrictBlobRef(normalizedBlob);
+
+    return asStrictBlobRef(blob);
+  }
 
   const parsedBlob = jsonToLex(
-    (hasJsonRepresentation(blob) ? blob.toJSON() : blob) as Parameters<
-      typeof jsonToLex
-    >[0]
+    normalizeJsonBlobRef(blob) as Parameters<typeof jsonToLex>[0]
   );
 
   if (parsedBlob instanceof BlobRef) return asStrictBlobRef(parsedBlob);
@@ -1685,6 +1825,8 @@ function toPdsCompatibleBlobRef(blob: unknown, sizeOverride?: number): BlobRef {
 
   if (!size)
     throw new Error('Bluesky returned a media blob without a valid size.');
+
+  if (parsedBlob.size === size) return parsedBlob;
 
   return new BlobRef(parsedBlob.ref, parsedBlob.mimeType, size);
 }
@@ -2209,6 +2351,94 @@ function normalizeNotificationPreferences(
   );
 }
 
+async function loadModerationOpts(): Promise<ModerationOpts | null> {
+  if (!sessionDid) return null;
+
+  const userDid = sessionDid;
+  const api = getAppViewAgent();
+  const prefs = await api.getPreferences();
+
+  moderationLabelerDids =
+    prefs.moderationPrefs.labelers?.map(({ did }) => did) ?? [];
+
+  const labelDefs = await api.getLabelDefinitions(prefs).catch(() => undefined);
+
+  return {
+    userDid,
+    prefs: prefs.moderationPrefs,
+    labelDefs
+  };
+}
+
+function getModerationOpts(): Promise<ModerationOpts | null> {
+  if (!moderationOptsPromise) {
+    moderationOptsPromise = loadModerationOpts().catch((error) => {
+      moderationOptsPromise = null;
+      throw error;
+    });
+  }
+
+  return moderationOptsPromise;
+}
+
+async function getSafeModerationOpts(): Promise<ModerationOpts | null> {
+  try {
+    return await getModerationOpts();
+  } catch {
+    return null;
+  }
+}
+
+function isModerationFilteredPost(
+  post: AppBskyFeedDefs.PostView,
+  opts: ModerationOpts | null
+): boolean {
+  try {
+    return !!opts && moderatePost(post, opts).ui('contentList').filter;
+  } catch {
+    return false;
+  }
+}
+
+function isModerationFilteredNotification(
+  notification: AppBskyNotificationListNotifications.Notification,
+  opts: ModerationOpts | null
+): boolean {
+  try {
+    return (
+      !!opts &&
+      moderateNotification(notification, opts).ui('contentList').filter
+    );
+  } catch {
+    return false;
+  }
+}
+
+function filterVisiblePostViews<T extends AppBskyFeedDefs.PostView>(
+  posts: T[],
+  opts: ModerationOpts | null
+): T[] {
+  if (!opts) return posts;
+
+  return posts.filter((post) => !isModerationFilteredPost(post, opts));
+}
+
+function filterVisibleFeedItems<T extends ActorFeedPost>(
+  items: T[],
+  opts: ModerationOpts | null
+): T[] {
+  if (!opts) return items;
+
+  return items.filter(({ post }) => !isModerationFilteredPost(post, opts));
+}
+
+function isVisibleThreadPost(
+  thread: AppBskyFeedDefs.ThreadViewPost,
+  opts: ModerationOpts | null
+): boolean {
+  return !isModerationFilteredPost(thread.post, opts);
+}
+
 function getRuleType(rule: unknown): string | null {
   if (!isPlainObject(rule)) return null;
 
@@ -2370,6 +2600,7 @@ export async function setAdultContentSetting(
   enabled: boolean
 ): Promise<BlueskySettings> {
   await getAppViewAgent().setAdultContentEnabled(enabled);
+  clearModerationSettingsCache();
   notify();
 
   return getBlueskySettings();
@@ -2478,6 +2709,7 @@ export async function setContentLabelSetting(
     throw new Error('Unsupported content label.');
 
   await getAppViewAgent().setContentLabelPref(label, preference);
+  clearModerationSettingsCache();
   notify();
 
   return getBlueskySettings();
@@ -2608,6 +2840,7 @@ export async function addSettingsMutedWord(
     actorTarget: safeActorTarget,
     expiresAt: safeExpiresAt?.toISOString()
   });
+  clearModerationSettingsCache();
   notify();
 
   return getBlueskySettings();
@@ -2617,6 +2850,7 @@ export async function removeSettingsMutedWord(
   mutedWord: SettingsMutedWord
 ): Promise<BlueskySettings> {
   await getAppViewAgent().removeMutedWord(mutedWord);
+  clearModerationSettingsCache();
   notify();
 
   return getBlueskySettings();
@@ -3394,13 +3628,15 @@ function mapThreadPost(thread: AppBskyFeedDefs.ThreadViewPost): TweetWithUser {
 }
 
 function mapThreadParents(
-  thread: AppBskyFeedDefs.ThreadViewPost
+  thread: AppBskyFeedDefs.ThreadViewPost,
+  moderationOpts?: ModerationOpts | null
 ): TweetWithUser[] {
   const parents: TweetWithUser[] = [];
   let currentParent = thread.parent;
 
   while (AppBskyFeedDefs.isThreadViewPost(currentParent)) {
-    parents.unshift(mapThreadPost(currentParent));
+    if (isVisibleThreadPost(currentParent, moderationOpts ?? null))
+      parents.unshift(mapThreadPost(currentParent));
     currentParent = currentParent.parent;
   }
 
@@ -3408,9 +3644,12 @@ function mapThreadParents(
 }
 
 function getVisibleThreadReplies(
-  thread: AppBskyFeedDefs.ThreadViewPost
+  thread: AppBskyFeedDefs.ThreadViewPost,
+  moderationOpts?: ModerationOpts | null
 ): AppBskyFeedDefs.ThreadViewPost[] {
-  return (thread.replies ?? []).filter(AppBskyFeedDefs.isThreadViewPost);
+  return (thread.replies ?? [])
+    .filter(AppBskyFeedDefs.isThreadViewPost)
+    .filter((reply) => isVisibleThreadPost(reply, moderationOpts ?? null));
 }
 
 function compareThreadPostsByCreatedAt(
@@ -3427,9 +3666,10 @@ function compareThreadPostsByCreatedAt(
 function collectAuthorThreadReplies(
   thread: AppBskyFeedDefs.ThreadViewPost,
   authorDid: string,
-  seenUris: Set<string>
+  seenUris: Set<string>,
+  moderationOpts?: ModerationOpts | null
 ): AppBskyFeedDefs.ThreadViewPost[] {
-  const authorReplies = getVisibleThreadReplies(thread)
+  const authorReplies = getVisibleThreadReplies(thread, moderationOpts)
     .filter((reply) => reply.post.author.did === authorDid)
     .sort(compareThreadPostsByCreatedAt);
   const threadReplies: AppBskyFeedDefs.ThreadViewPost[] = [];
@@ -3440,14 +3680,17 @@ function collectAuthorThreadReplies(
     seenUris.add(reply.post.uri);
     threadReplies.push(
       reply,
-      ...collectAuthorThreadReplies(reply, authorDid, seenUris)
+      ...collectAuthorThreadReplies(reply, authorDid, seenUris, moderationOpts)
     );
   });
 
   return threadReplies;
 }
 
-function mapThreadReplies(thread: AppBskyFeedDefs.ThreadViewPost): {
+function mapThreadReplies(
+  thread: AppBskyFeedDefs.ThreadViewPost,
+  moderationOpts?: ModerationOpts | null
+): {
   threadReplies: TweetWithUser[];
   replies: TweetWithUser[];
 } {
@@ -3455,9 +3698,10 @@ function mapThreadReplies(thread: AppBskyFeedDefs.ThreadViewPost): {
   const authorThreadReplies = collectAuthorThreadReplies(
     thread,
     thread.post.author.did,
-    threadReplyUris
+    threadReplyUris,
+    moderationOpts
   );
-  const replies = getVisibleThreadReplies(thread).filter(
+  const replies = getVisibleThreadReplies(thread, moderationOpts).filter(
     (reply) => !threadReplyUris.has(reply.post.uri)
   );
 
@@ -3529,7 +3773,9 @@ function mapFeedItem(item: ActorFeedPost): Tweet {
 async function mapFeedItemsWithUsers(
   items: ActorFeedPost[]
 ): Promise<TweetWithUser[]> {
-  const feed = items.map((item) => {
+  const moderationOpts = await getSafeModerationOpts();
+  const visibleItems = filterVisibleFeedItems(items, moderationOpts);
+  const feed = visibleItems.map((item) => {
     const tweet = mapFeedItem(item);
     return { item, tweet };
   });
@@ -3622,17 +3868,20 @@ export async function searchTweets(
 
   const filter = options?.filter ?? 'top';
   const apiLimit = Math.min(Math.max(options?.limit ?? 50, 1), 100);
-  const response = await getAppViewAgent().app.bsky.feed.searchPosts({
+  const moderationOpts = await getSafeModerationOpts();
+  const response = await fetchAppViewSearchPosts({
     q: trimmedQuery,
     sort: filter === 'latest' ? 'latest' : 'top',
     cursor: options?.cursor,
     limit: filter === 'photos' || filter === 'videos' ? 100 : apiLimit
   });
 
-  const posts = response.data.posts.map((post) => ({
-    post,
-    tweet: mapPost(post)
-  }));
+  const posts = filterVisiblePostViews(response.posts, moderationOpts).map(
+    (post) => ({
+      post,
+      tweet: mapPost(post)
+    })
+  );
   const users = await hydrateProfiles(posts.map(({ post }) => post.author));
   const usersByDid = new Map(users.map((user) => [user.id, user]));
 
@@ -3653,8 +3902,8 @@ export async function searchTweets(
 
   return {
     tweets,
-    cursor: response.data.cursor ?? null,
-    hitsTotal: response.data.hitsTotal ?? null
+    cursor: response.cursor ?? null,
+    hitsTotal: response.hitsTotal ?? null
   };
 }
 
@@ -3985,7 +4234,18 @@ export async function getSubscribedHomeFeedPage(
   cursor?: string,
   limit = 30
 ): Promise<HomeFeedPage> {
-  const response = await fetchAppViewFeed(feedUri, cursor, limit);
+  let response: AppViewFeedResponse;
+
+  try {
+    response = await fetchAppViewFeed(feedUri, cursor, limit);
+  } catch (error) {
+    if (isTemporaryFeedUnavailableError(error))
+      throw new Error(
+        'This Bluesky feed is temporarily unavailable. Try another Home tab or check back soon.'
+      );
+
+    throw error;
+  }
 
   return {
     tweets: mergeLocalCreatedTweetsWithUsers(
@@ -4042,8 +4302,9 @@ function getNotificationTweetUri(
 }
 
 async function getNotificationTweetByUri(
-  notifications: AppBskyNotificationListNotifications.Notification[]
-): Promise<Map<string, Tweet>> {
+  notifications: AppBskyNotificationListNotifications.Notification[],
+  moderationOpts: ModerationOpts | null
+): Promise<NotificationTweetLookup> {
   const uris = Array.from(
     new Set(
       notifications
@@ -4052,14 +4313,20 @@ async function getNotificationTweetByUri(
     )
   );
   const tweetByUri = new Map<string, Tweet>();
+  const hiddenUris = new Set<string>();
 
-  if (!uris.length) return tweetByUri;
+  if (!uris.length) return { tweetByUri, hiddenUris };
 
   for (let index = 0; index < uris.length; index += 25) {
     try {
       const response = await fetchAppViewPosts(uris.slice(index, index + 25));
 
       response.posts.forEach((post) => {
+        if (isModerationFilteredPost(post, moderationOpts)) {
+          hiddenUris.add(post.uri);
+          return;
+        }
+
         tweetByUri.set(post.uri, mapPost(post));
       });
     } catch {
@@ -4067,7 +4334,7 @@ async function getNotificationTweetByUri(
     }
   }
 
-  return tweetByUri;
+  return { tweetByUri, hiddenUris };
 }
 
 function isNotificationView(
@@ -4121,6 +4388,8 @@ export async function listNotificationsPage(
   cursor?: string,
   options?: { mentionsOnly?: boolean; limit?: number }
 ): Promise<NotificationsPage> {
+  const moderationOpts = await getSafeModerationOpts();
+
   await ensureAppViewAccessScope('app.bsky.notification.listNotifications');
 
   const response = await callAppQueryXrpc<AppViewNotificationsResponse>(
@@ -4132,13 +4401,24 @@ export async function listNotificationsPage(
     }
   );
   const responseNotifications = Array.isArray(response.notifications)
-    ? response.notifications.filter(isNotificationView)
+    ? response.notifications
+        .filter(isNotificationView)
+        .filter(
+          (notification) =>
+            !isModerationFilteredNotification(notification, moderationOpts)
+        )
     : [];
-  const tweetByUri = await getNotificationTweetByUri(responseNotifications);
+  const { tweetByUri, hiddenUris } = await getNotificationTweetByUri(
+    responseNotifications,
+    moderationOpts
+  );
 
   return {
     notifications: responseNotifications.flatMap((notification) => {
       try {
+        const tweetUri = getNotificationTweetUri(notification);
+        if (tweetUri && hiddenUris.has(tweetUri)) return [];
+
         return [mapNotification(notification, tweetByUri)];
       } catch {
         return [];
@@ -4664,6 +4944,7 @@ async function activateOAuthSession(
     credentialAgent = null;
     sessionDid = did;
     activePdsDidPromise = null;
+    clearModerationSettingsCache();
     if (previousState.sessionDid !== did) {
       locallyCreatedTweets.clear();
       locallyDeletedTweetIds.clear();
@@ -4714,6 +4995,7 @@ async function activateCredentialAgent(
     agent = nextAgent;
     sessionDid = nextAgent.session.did;
     activePdsDidPromise = null;
+    clearModerationSettingsCache();
     if (previousState.sessionDid !== nextAgent.session.did) {
       locallyCreatedTweets.clear();
       locallyDeletedTweetIds.clear();
@@ -5008,13 +5290,15 @@ export async function getTweet(id: string): Promise<Tweet | null> {
   if (locallyDeletedTweetIds.has(id)) return null;
   if (locallyCreatedTweets.has(id))
     return locallyCreatedTweets.get(id) as Tweet;
-  if (tweetCache.has(id)) return tweetCache.get(id) as Tweet;
 
+  const moderationOpts = await getSafeModerationOpts();
   const uri = uriFromPostId(id);
   const response = await getAppViewAgent().getPosts({ uris: [uri] });
   const post = response.data.posts[0];
 
-  return post ? mapPost(post) : null;
+  if (!post || isModerationFilteredPost(post, moderationOpts)) return null;
+
+  return mapPost(post);
 }
 
 export async function getTweetThread(
@@ -5025,6 +5309,7 @@ export async function getTweetThread(
   if (locallyDeletedTweetIds.has(id)) return null;
 
   const uri = uriFromPostId(id);
+  const moderationOpts = await getSafeModerationOpts();
 
   try {
     const response = await getAppViewAgent().getPostThread({
@@ -5035,15 +5320,16 @@ export async function getTweetThread(
     const { thread } = response.data;
 
     if (!AppBskyFeedDefs.isThreadViewPost(thread)) return null;
+    if (!isVisibleThreadPost(thread, moderationOpts)) return null;
 
     const tweet = mapThreadPost(thread);
     if (locallyDeletedTweetIds.has(tweet.id)) return null;
 
-    const { threadReplies, replies } = mapThreadReplies(thread);
+    const { threadReplies, replies } = mapThreadReplies(thread, moderationOpts);
 
     return {
       tweet,
-      parents: filterDeletedTweets(mapThreadParents(thread)),
+      parents: filterDeletedTweets(mapThreadParents(thread, moderationOpts)),
       threadReplies: filterDeletedTweets(threadReplies),
       replies: mergeLocalCreatedTweetsWithUsers(
         replies,
@@ -5057,9 +5343,6 @@ export async function getTweetThread(
 }
 
 async function getPostRef(id: string): Promise<PostRef | null> {
-  const cachedRef = postRefCache.get(id);
-  if (cachedRef) return cachedRef;
-
   const tweet = await getTweet(id);
   if (!tweet) return null;
 
@@ -5076,6 +5359,7 @@ export async function listTweetStatsPage(
   const pageLimit = Math.min(Math.max(limit, 1), 100);
 
   if (!ref) return { users: [], tweets: [], cursor: null };
+  const moderationOpts = await getSafeModerationOpts();
 
   if (type === 'likes') {
     const response = await getAppViewAgent().getLikes({
@@ -5115,7 +5399,10 @@ export async function listTweetStatsPage(
     cursor,
     limit: pageLimit
   });
-  const quotePosts = response.data.posts.map((post) => ({
+  const quotePosts = filterVisiblePostViews(
+    response.data.posts,
+    moderationOpts
+  ).map((post) => ({
     post,
     tweet: mapPost(post)
   }));
@@ -5135,25 +5422,27 @@ export async function listTweetStatsPage(
 }
 
 async function getTimeline(limitCount?: number): Promise<Tweet[]> {
+  const moderationOpts = await getSafeModerationOpts();
   const response = await getAppViewAgent().getTimeline({
     limit: limitCount ?? 30
   });
-  return mergeLocalCreatedTweets(response.data.feed.map(mapFeedItem)).slice(
-    0,
-    limitCount
-  );
+  return mergeLocalCreatedTweets(
+    filterVisibleFeedItems(response.data.feed, moderationOpts).map(mapFeedItem)
+  ).slice(0, limitCount);
 }
 
 async function getAuthorFeed(
   actor: string,
   options?: { includeReplies?: boolean; onlyMedia?: boolean }
 ): Promise<Tweet[]> {
+  const moderationOpts = await getSafeModerationOpts();
   const response = await getAppViewAgent().getAuthorFeed({
     actor,
     limit: 50,
     filter: options?.includeReplies ? 'posts_with_replies' : 'posts_no_replies'
   });
   const tweets = response.data.feed
+    .filter((item) => !isModerationFilteredPost(item.post, moderationOpts))
     .filter((item) => item.post.author.did === actor)
     .map(mapFeedItem);
   const mergedTweets = mergeLocalCreatedTweets(
@@ -5166,6 +5455,7 @@ async function getAuthorFeed(
 }
 
 async function getRepostedFeed(actor: string): Promise<Tweet[]> {
+  const moderationOpts = await getSafeModerationOpts();
   const response = await getAppViewAgent().getAuthorFeed({
     actor,
     limit: 50,
@@ -5173,6 +5463,7 @@ async function getRepostedFeed(actor: string): Promise<Tweet[]> {
   });
 
   return response.data.feed
+    .filter((item) => !isModerationFilteredPost(item.post, moderationOpts))
     .filter(
       (item) =>
         item.post.author.did !== actor &&
@@ -5185,6 +5476,7 @@ async function getRepostedFeed(actor: string): Promise<Tweet[]> {
 }
 
 async function getLikedFeed(actor: string): Promise<Tweet[]> {
+  const moderationOpts = await getSafeModerationOpts();
   const response = await getAppViewAgent()
     .getActorLikes({ actor, limit: 50 })
     .catch((error) => {
@@ -5195,7 +5487,7 @@ async function getLikedFeed(actor: string): Promise<Tweet[]> {
   if (!response) return [];
 
   return filterDeletedTweets(
-    response.data.feed.map((item) => {
+    filterVisibleFeedItems(response.data.feed, moderationOpts).map((item) => {
       const tweet = mapFeedItem(item);
       if (!tweet.userLikes.includes(actor)) tweet.userLikes.unshift(actor);
       return tweet;
@@ -5205,14 +5497,16 @@ async function getLikedFeed(actor: string): Promise<Tweet[]> {
 
 async function getThreadReplies(id: string): Promise<Tweet[]> {
   const uri = uriFromPostId(id);
+  const moderationOpts = await getSafeModerationOpts();
   const response = await getAppViewAgent().getPostThread({ uri, depth: 2 });
   const thread = response.data.thread;
 
   if (!AppBskyFeedDefs.isThreadViewPost(thread)) return [];
+  if (!isVisibleThreadPost(thread, moderationOpts)) return [];
 
-  const replies = thread.replies ?? [];
+  const replies = getVisibleThreadReplies(thread, moderationOpts);
   return mergeLocalCreatedTweets(
-    replies.filter(AppBskyFeedDefs.isThreadViewPost).map((reply) =>
+    replies.map((reply) =>
       mapPost(reply.post, {
         id,
         username: thread.post.author.handle
@@ -5297,6 +5591,7 @@ async function queryTweets(constraints: BackendConstraint[]): Promise<Tweet[]> {
 async function readBookmarks(_userId: string): Promise<Bookmark[]> {
   void _userId;
 
+  const moderationOpts = await getSafeModerationOpts();
   const bookmarks: Bookmark[] = [];
   let cursor: string | undefined;
 
@@ -5312,8 +5607,12 @@ async function readBookmarks(_userId: string): Promise<Bookmark[]> {
       const id = postIdFromUri(subject.uri);
 
       postRefCache.set(id, subject);
-      if (AppBskyFeedDefs.isPostView(item))
-        mapPost(item as AppBskyFeedDefs.PostView);
+      if (AppBskyFeedDefs.isPostView(item)) {
+        const postItem = item as AppBskyFeedDefs.PostView;
+
+        if (!isModerationFilteredPost(postItem, moderationOpts))
+          mapPost(postItem);
+      }
       bookmarks.push({
         id,
         createdAt: createdAt
@@ -5487,11 +5786,10 @@ async function waitForVideoJob(
   for (let attempt = 0; attempt < BSKY_VIDEO_JOB_RETRIES; attempt += 1) {
     if (status.state === 'JOB_STATE_COMPLETED') return status;
 
-    if (status.state === 'JOB_STATE_FAILED') {
+    if (status.state === 'JOB_STATE_FAILED')
       throw new Error(
-        status.message || status.error || 'Bluesky could not process the video.'
+        status.message ?? status.error ?? 'Bluesky could not process the video.'
       );
-    }
 
     await wait(1000);
     status = (await api.app.bsky.video.getJobStatus({ jobId: status.jobId }))
@@ -5515,13 +5813,56 @@ function parseVideoJobStatus(value: unknown): AppBskyVideoDefs.JobStatus {
   if (isPlainObject(value) && isVideoJobStatus(value.jobStatus))
     return value.jobStatus;
 
+  if (isPlainObject(value) && isPlainObject(value.jobStatus))
+    return parseVideoJobStatus(value.jobStatus);
+
+  if (isPlainObject(value) && value.blob)
+    return {
+      jobId: typeof value.jobId === 'string' ? value.jobId : '',
+      did: typeof value.did === 'string' ? value.did : sessionDid ?? '',
+      state: 'JOB_STATE_COMPLETED',
+      blob: value.blob as AppBskyVideoDefs.JobStatus['blob'],
+      error: typeof value.error === 'string' ? value.error : undefined,
+      message: typeof value.message === 'string' ? value.message : undefined
+    };
+
   throw new Error('Bluesky did not return a valid video processing job.');
+}
+
+function tryParseVideoJobStatus(
+  value: unknown
+): AppBskyVideoDefs.JobStatus | null {
+  try {
+    return parseVideoJobStatus(value);
+  } catch {
+    return null;
+  }
 }
 
 function getVideoUploadName(file: File): string {
   const trimmedName = file.name.trim();
-  if (!trimmedName) return 'video.mp4';
-  return /\.mp4$/i.test(trimmedName) ? trimmedName : `${trimmedName}.mp4`;
+  const name = trimmedName || 'video.mp4';
+  const extension = /\.mp4$/i.test(name) ? '' : '.mp4';
+  const baseName = (extension ? name : name.replace(/\.mp4$/i, ''))
+    .replace(/[^a-z0-9._-]+/gi, '-')
+    .replace(/^-+|-+$/g, '');
+  const uniqueSuffix = `${Date.now().toString(36)}-${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
+
+  return `${baseName || 'video'}-${uniqueSuffix}.mp4`;
+}
+
+async function getVideoUploadLimits(): Promise<AppBskyVideoGetUploadLimits.OutputSchema | null> {
+  try {
+    return (
+      await getAgent()
+        .withProxy(BSKY_VIDEO_SERVICE, BSKY_VIDEO_DID)
+        .app.bsky.video.getUploadLimits()
+    ).data;
+  } catch {
+    return null;
+  }
 }
 
 async function uploadVideoToBlueskyService(
@@ -5547,12 +5888,21 @@ async function uploadVideoToBlueskyService(
     body: file
   });
 
-  if (!response.ok) {
-    const fallbackMessage = response.statusText || `HTTP ${response.status}`;
-    throw new Error((await readXrpcError(response)) || fallbackMessage);
+  const body: unknown = await response.json().catch(() => null);
+  const jobStatus = tryParseVideoJobStatus(body);
+
+  if (response.ok) {
+    if (jobStatus) return jobStatus;
+
+    throw new Error('Bluesky did not return a valid video processing job.');
   }
 
-  return parseVideoJobStatus(await response.json());
+  if (response.status === 409 && jobStatus?.blob) return jobStatus;
+
+  {
+    const fallbackMessage = response.statusText || `HTTP ${response.status}`;
+    throw new Error(getXrpcErrorMessage(body, fallbackMessage));
+  }
 }
 
 async function uploadVideoForBluesky(
@@ -5568,10 +5918,7 @@ async function uploadVideoForBluesky(
 
   const [metadata, limits] = await Promise.all([
     loadVideoMetadata(file),
-    getVideoAgent()
-      .app.bsky.video.getUploadLimits()
-      .then(({ data }) => data)
-      .catch(() => null)
+    getVideoUploadLimits()
   ]);
 
   if (metadata.duration > BSKY_VIDEO_MAX_DURATION_SECONDS)
@@ -5579,7 +5926,7 @@ async function uploadVideoForBluesky(
 
   if (limits && !limits.canUpload)
     throw new Error(
-      limits.message || limits.error || 'Bluesky is not allowing video uploads.'
+      limits.message ?? limits.error ?? 'Bluesky is not allowing video uploads.'
     );
 
   const videoApi = getVideoAgent();
@@ -6077,6 +6424,8 @@ export async function blockUser(targetDid: string): Promise<void> {
 
   blockUriCache.set(targetDid, result.uri);
   applyLocalFollowRemoval(targetDid);
+  deleteCachedTweetsByAuthor(targetDid);
+  clearModerationSettingsCache();
 
   if (targetUser) {
     targetUser.blocking = true;
@@ -6106,6 +6455,7 @@ export async function unblockUser(targetDid: string): Promise<void> {
   }
 
   blockUriCache.delete(targetDid);
+  clearModerationSettingsCache();
   if (targetUser) {
     targetUser.blocking = false;
     targetUser.blockingUri = null;
