@@ -5,7 +5,8 @@ import useSWR from 'swr';
 import {
   getFollowingHomeFeedPage,
   getSubscribedHomeFeedPage,
-  getSubscribedHomeFeeds
+  getSubscribedHomeFeeds,
+  subscribeBackend
 } from '@lib/atproto/backend';
 import { useLiveUpdates } from '@lib/context/live-updates-context';
 import { useWindow } from '@lib/context/window-context';
@@ -35,6 +36,7 @@ type HomeFeedTabData = {
 
 const HOME_FEED_REFRESH_INTERVAL_MS = 15000;
 const FEED_TAB_PREFIX = 'feed:';
+type HomeFeedRefreshMode = 'banner' | 'replace';
 
 async function getHomeFeedPage(
   tab: HomeFeedTab,
@@ -337,11 +339,22 @@ export default function Home(): JSX.Element {
 
     let canceled = false;
 
-    const refreshHomeFeed = async (): Promise<void> => {
+    const refreshHomeFeed = async (
+      mode: HomeFeedRefreshMode = 'banner'
+    ): Promise<void> => {
       try {
         const nextPage = await getHomeFeedPage(activeTab);
 
         if (canceled) return;
+
+        if (mode === 'replace') {
+          setFeed(nextPage.tweets);
+          setNewTweets([]);
+          setCursor(nextPage.cursor);
+          if (activeTab === 'following')
+            clearHomeBadge(nextPage.tweets[0]?.id ?? null);
+          return;
+        }
 
         const currentFeed = feedRef.current;
 
@@ -371,11 +384,15 @@ export default function Home(): JSX.Element {
     const refreshSoon = (): void => {
       void refreshHomeFeed();
     };
+    const refreshImmediately = (): void => {
+      void refreshHomeFeed('replace');
+    };
 
     const intervalId = window.setInterval(
       refreshSoon,
       HOME_FEED_REFRESH_INTERVAL_MS
     );
+    const unsubscribe = subscribeBackend(refreshImmediately);
 
     window.addEventListener('focus', refreshSoon);
 
@@ -383,6 +400,7 @@ export default function Home(): JSX.Element {
       canceled = true;
       window.clearInterval(intervalId);
       window.removeEventListener('focus', refreshSoon);
+      unsubscribe();
     };
   }, [activeTab, clearHomeBadge, data]);
 

@@ -46,23 +46,25 @@ function getErrorMessage(error: unknown): string | null {
   return error instanceof Error && error.message ? error.message : null;
 }
 
+function getEditableUserData(user: User): EditableUserData {
+  const { bio, name, pronouns, website, photoURL, coverPhotoURL } = user;
+
+  return { bio, name, pronouns, website, photoURL, coverPhotoURL };
+}
+
 export function UserEditProfile({ hide }: UserEditProfileProps): JSX.Element {
   const { user } = useUser();
   const { open, openModal, closeModal } = useModal();
 
   const [loading, setLoading] = useState(false);
 
+  const currentUser = user as User;
   const { bio, name, pronouns, website, photoURL, coverPhotoURL } =
-    user as User;
+    currentUser;
 
-  const [editUserData, setEditUserData] = useState<EditableUserData>({
-    bio,
-    name,
-    pronouns,
-    website,
-    photoURL,
-    coverPhotoURL
-  });
+  const [editUserData, setEditUserData] = useState<EditableUserData>(() =>
+    getEditableUserData(currentUser)
+  );
 
   const [userImages, setUserImages] = useState<UserImages>({
     photoURL: [],
@@ -75,6 +77,18 @@ export function UserEditProfile({ hide }: UserEditProfileProps): JSX.Element {
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => cleanImage, []);
+
+  useEffect(() => {
+    if (!open)
+      setEditUserData({
+        bio,
+        name,
+        pronouns,
+        website,
+        photoURL,
+        coverPhotoURL
+      });
+  }, [open, bio, name, pronouns, website, photoURL, coverPhotoURL]);
 
   const inputNameError = !editUserData.name?.trim()
     ? "Name can't be blank"
@@ -222,14 +236,14 @@ export function UserEditProfile({ hide }: UserEditProfileProps): JSX.Element {
   const resetUserEditData = (): void => {
     cleanImage();
     closeMediaEditor();
-    setEditUserData({
-      bio,
-      name,
-      pronouns,
-      website,
-      photoURL,
-      coverPhotoURL
-    });
+    setEditUserData(getEditableUserData(currentUser));
+  };
+
+  const openEditProfile = (): void => {
+    cleanImage();
+    closeMediaEditor();
+    setEditUserData(getEditableUserData(currentUser));
+    openModal();
   };
 
   const handleCloseModal = (): void => {
@@ -328,7 +342,7 @@ export function UserEditProfile({ hide }: UserEditProfileProps): JSX.Element {
         className='dark-bg-tab self-start border border-light-line-reply px-4 py-1.5 font-bold
                    hover:bg-light-primary/10 active:bg-light-primary/20 dark:border-light-secondary
                    dark:hover:bg-dark-primary/10 dark:active:bg-dark-primary/20'
-        onClick={openModal}
+        onClick={openEditProfile}
       >
         Edit profile
       </Button>

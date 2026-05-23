@@ -2,6 +2,7 @@ import { useRouter } from 'next/router';
 import cn from 'clsx';
 import { formatDate } from '@lib/date';
 import { getTweetPath } from '@lib/routes';
+import { getYouTubeVideoInfo } from '@lib/youtube';
 import { ImagePreview } from '@components/input/image-preview';
 import { CustomIcon } from '@components/ui/custom-icon';
 import { HeroIcon } from '@components/ui/hero-icon';
@@ -9,6 +10,7 @@ import { NextImage } from '@components/ui/next-image';
 import { TweetText } from './tweet-text';
 import type { KeyboardEvent, MouseEvent, ReactNode } from 'react';
 import type { EmbeddedTweet, TweetCard } from '@lib/types/tweet';
+import type { YouTubeVideoInfo } from '@lib/youtube';
 
 type TweetEmbedProps = {
   card: TweetCard | null;
@@ -116,10 +118,62 @@ function LinkCardImage({ card, compact }: LinkCardProps): JSX.Element | null {
   );
 }
 
+function TweetYouTubeCard({
+  card,
+  video
+}: {
+  card: TweetCard;
+  video: YouTubeVideoInfo;
+}): JSX.Element {
+  const title = getCardTitle(card);
+  const openCard = (event: MouseEvent<HTMLButtonElement>): void => {
+    event.preventDefault();
+    event.stopPropagation();
+    window.open(video.url, '_blank', 'noopener,noreferrer');
+  };
+  const stopEmbedEvent = (
+    event: MouseEvent<HTMLDivElement> | KeyboardEvent<HTMLDivElement>
+  ): void => event.stopPropagation();
+
+  return (
+    <div
+      className='mt-2 overflow-hidden rounded-2xl border border-light-border bg-light-primary
+                 dark:border-dark-border dark:bg-dark-primary'
+      onClick={stopEmbedEvent}
+      onKeyDown={stopEmbedEvent}
+    >
+      <div className='relative bg-black pt-[56.25%]'>
+        <iframe
+          className='absolute inset-0 h-full w-full'
+          src={video.embedUrl}
+          title={title}
+          allow='accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share'
+          allowFullScreen
+          loading='lazy'
+          referrerPolicy='strict-origin-when-cross-origin'
+        />
+      </div>
+      <button
+        className='hover-card flex w-full min-w-0 flex-col px-3 py-2 text-left'
+        type='button'
+        onClick={openCard}
+      >
+        <span className='truncate text-sm text-light-secondary dark:text-dark-secondary'>
+          {card.domain ?? video.domain}
+        </span>
+        <span className='truncate text-[15px] text-light-primary dark:text-dark-primary'>
+          {title}
+        </span>
+      </button>
+    </div>
+  );
+}
+
 function TweetLinkCard({ card, compact }: LinkCardProps): JSX.Element {
   const router = useRouter();
   const title = getCardTitle(card);
   const description = getCardDescription(card);
+  const youtubeVideo = getYouTubeVideoInfo(card.url);
   const isCompact = compact === true || card.type === 'summary' || !card.image;
   const openCard = (event: CardEvent): void => {
     stopOuterTweet(event);
@@ -131,6 +185,9 @@ function TweetLinkCard({ card, compact }: LinkCardProps): JSX.Element {
 
     window.open(card.url, '_blank', 'noopener,noreferrer');
   };
+
+  if (youtubeVideo && compact !== true)
+    return <TweetYouTubeCard card={card} video={youtubeVideo} />;
 
   if (isCompact)
     return (

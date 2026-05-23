@@ -22,6 +22,7 @@ import {
 } from '@lib/hashtags';
 import { sleep } from '@lib/utils';
 import { getImagesData } from '@lib/validation';
+import { findYouTubeVideoInfo } from '@lib/youtube';
 import { UserAvatar } from '@components/user/user-avatar';
 import { TweetEmbed } from '@components/tweet/tweet-embed';
 import { InputForm, fromTop } from './input-form';
@@ -140,6 +141,20 @@ function createTenorGifCard(gif: GifSelection): TweetCard {
   };
 }
 
+function createYouTubeCardFromText(text: string): TweetCard | null {
+  const video = findYouTubeVideoInfo(text);
+  if (!video) return null;
+
+  return {
+    type: 'youtube',
+    url: video.url,
+    title: video.title,
+    description: null,
+    image: video.thumbnail,
+    domain: video.domain
+  };
+}
+
 export function Input({
   modal,
   reply,
@@ -168,9 +183,15 @@ export function Input({
   const { name, username, photoURL } = user as User;
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const youtubeCard = useMemo(
+    () => createYouTubeCardFromText(inputValue),
+    [inputValue]
+  );
 
   const previewCount = imagesPreview.length;
   const isUploadingImages = !!previewCount;
+  const activeExternalCard =
+    selectedGifCard ?? (!isUploadingImages ? youtubeCard : null);
 
   useEffect(
     () => {
@@ -206,7 +227,7 @@ export function Input({
         text: inputValue.trim() || null,
         parent: isReplying && parent ? parent : null,
         images: uploadedImages,
-        card: selectedGifCard,
+        card: activeExternalCard,
         quotedTweet,
         userLikes: [],
         createdBy: userId,
@@ -539,6 +560,11 @@ export function Input({
                 previewCount={previewCount}
                 removeImage={!loading ? removeImage : undefined}
               />
+            )}
+            {youtubeCard && !selectedGifCard && !isUploadingImages && (
+              <div className='min-w-0 max-w-full overflow-hidden'>
+                <TweetEmbed card={youtubeCard} quotedTweet={null} />
+              </div>
             )}
             {quotedTweetPreview && (
               <div className='min-w-0 max-w-full overflow-hidden'>

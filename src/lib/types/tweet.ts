@@ -12,7 +12,7 @@ export type TweetReplySetting =
   | 'none';
 
 export type TweetCard = {
-  type: 'external' | 'summary';
+  type: 'external' | 'summary' | 'youtube';
   url: string;
   title: string;
   description: string | null;

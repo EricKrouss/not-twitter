@@ -27,6 +27,7 @@ import {
 import { BrowserOAuthClient } from '@atproto/oauth-client-browser';
 import { buildAtprotoLoopbackClientMetadata } from '@atproto/oauth-types';
 import { ensureValidDid, isValidHandle } from '@atproto/syntax';
+import { getYouTubeVideoInfo } from '@lib/youtube';
 
 import { Timestamp } from './timestamp';
 import type { OAuthSession } from '@atproto/oauth-client';
@@ -80,6 +81,7 @@ const BSKY_IMAGE_MAX_DIMENSION = 2000;
 const BSKY_VIDEO_MAX_BYTES = 100_000_000;
 const BSKY_VIDEO_MAX_DURATION_SECONDS = 180;
 const BSKY_VIDEO_JOB_RETRIES = 90;
+const BSKY_VIDEO_UPLOAD_TOKEN_TTL_SECONDS = 30 * 60;
 const BSKY_PROFILE_IMAGE_MIME_TYPE = 'image/jpeg';
 const BSKY_PROFILE_IMAGE_ACCEPTED_TYPES = /^image\/(?:jpe?g|png)$/i;
 const BSKY_POST_IMAGE_ACCEPTED_TYPES = /^image\/(?:jpe?g|png|webp)$/i;
@@ -552,6 +554,8 @@ export class ChatAccessError extends Error {
 const userCache = new Map<string, User>();
 const userHandleCache = new Map<string, User>();
 const tweetCache = new Map<string, Tweet>();
+const locallyCreatedTweets = new Map<string, Tweet>();
+const locallyDeletedTweetIds = new Set<string>();
 const postRefCache = new Map<string, PostRef>();
 const postReplyRefCache = new Map<string, PostReplyRef>();
 const followUriCache = new Map<string, string>();
@@ -916,6 +920,8 @@ function clearActiveAuthState(): void {
   currentUser = null;
   currentFollowing = new Set();
   malformedMediaRepairPromise = null;
+  locallyCreatedTweets.clear();
+  locallyDeletedTweetIds.clear();
   serviceAuthTokenCache.clear();
 
   if (hasStorage()) window.localStorage.removeItem(OAUTH_SUB_KEY);
@@ -1096,13 +1102,18 @@ async function getServiceAuthToken(
     method === 'app.bsky.video.uploadVideo'
       ? BSKY_VIDEO_UPLOAD_AUTH_METHOD
       : method;
+  const tokenTtlSeconds =
+    service.service === BSKY_VIDEO_SERVICE &&
+    method === 'app.bsky.video.uploadVideo'
+      ? BSKY_VIDEO_UPLOAD_TOKEN_TTL_SECONDS
+      : SERVICE_AUTH_TOKEN_TTL_SECONDS;
   const now = Math.floor(Date.now() / 1000);
   const cacheKey = `${service.proxy}:${audience}:${serviceAuthMethod}`;
   const cached = serviceAuthTokenCache.get(cacheKey);
 
   if (cached && cached.expiresAt > now + 5) return cached.token;
 
-  const expiresAt = now + SERVICE_AUTH_TOKEN_TTL_SECONDS;
+  const expiresAt = now + tokenTtlSeconds;
   const query = new URLSearchParams({
     aud: audience,
     exp: String(expiresAt),
@@ -1826,14 +1837,70 @@ function getProfileMediaCdnUrl(
   }
 }
 
+async function getLiveProfileRecord(
+  api: Agent,
+  userId: string
+): Promise<Partial<AppBskyActorProfile.Record> | null> {
+  try {
+    const response = await api.com.atproto.repo.getRecord({
+      repo: userId,
+      collection: 'app.bsky.actor.profile',
+      rkey: 'self'
+    });
+
+    return isPlainObject(response.data.value)
+      ? (response.data.value as Partial<AppBskyActorProfile.Record>)
+      : null;
+  } catch (error) {
+    if (isRecordNotFoundError(error)) return null;
+    throw error;
+  }
+}
+
+function getProfileRecordUserData(
+  userId: string,
+  record: Partial<AppBskyActorProfile.Record>
+): Partial<User> {
+  const avatarUrl = getProfileMediaCdnUrl(userId, 'avatar', record.avatar);
+  const bannerUrl = getProfileMediaCdnUrl(userId, 'banner', record.banner);
+  const fallbackName =
+    userCache.get(userId)?.username ?? currentUser?.username ?? '';
+
+  return {
+    name:
+      typeof record.displayName === 'string' && record.displayName
+        ? record.displayName
+        : fallbackName,
+    bio:
+      typeof record.description === 'string' && record.description
+        ? record.description
+        : null,
+    pronouns:
+      typeof record.pronouns === 'string' && record.pronouns
+        ? record.pronouns
+        : null,
+    website:
+      typeof record.website === 'string' && record.website
+        ? record.website
+        : null,
+    photoURL: avatarUrl ?? DEFAULT_PROFILE_PHOTO_URL,
+    coverPhotoURL: bannerUrl ?? DEFAULT_PROFILE_COVER_URL
+  };
+}
+
 function invalidateUserProfileCache(userId: string): void {
   const cachedUser = userCache.get(userId);
 
+  userCache.delete(userId);
   detailedUserCache.delete(userId);
 
   if (cachedUser) {
     userHandleCache.delete(cachedUser.username);
   }
+
+  userHandleCache.forEach((user, username) => {
+    if (user.id === userId) userHandleCache.delete(username);
+  });
 }
 
 function applyLocalProfileUpdate(
@@ -2993,14 +3060,15 @@ function getBskyWebUrl(uri: string): string {
 
 function mapExternalCard(embed: AppBskyEmbedExternal.View): TweetCard {
   const { external } = embed;
+  const youtubeInfo = getYouTubeVideoInfo(external.uri);
 
   return {
-    type: 'external',
-    url: external.uri,
-    title: external.title || external.uri,
+    type: youtubeInfo ? 'youtube' : 'external',
+    url: youtubeInfo?.url ?? external.uri,
+    title: external.title || youtubeInfo?.title || external.uri,
     description: external.description || null,
-    image: external.thumb ?? null,
-    domain: getHostname(external.uri)
+    image: external.thumb ?? youtubeInfo?.thumbnail ?? null,
+    domain: youtubeInfo?.domain ?? getHostname(external.uri)
   };
 }
 
@@ -3448,10 +3516,61 @@ async function mapFeedItemsWithUsers(
   const users = await hydrateProfiles(feed.map(({ item }) => item.post.author));
   const usersByDid = new Map(users.map((user) => [user.id, user]));
 
-  return feed.map(({ item, tweet }) => ({
-    ...tweet,
-    user: usersByDid.get(tweet.createdBy) ?? mapProfile(item.post.author)
-  }));
+  return filterDeletedTweets(
+    feed.map(({ item, tweet }) => ({
+      ...tweet,
+      user: usersByDid.get(tweet.createdBy) ?? mapProfile(item.post.author)
+    }))
+  );
+}
+
+function filterDeletedTweets<T extends Tweet>(tweets: T[]): T[] {
+  return tweets.filter(({ id }) => !locallyDeletedTweetIds.has(id));
+}
+
+function getLocalCreatedTweets(
+  predicate: (tweet: Tweet) => boolean = (): boolean => true
+): Tweet[] {
+  return Array.from(locallyCreatedTweets.values())
+    .filter(({ id }) => !locallyDeletedTweetIds.has(id))
+    .filter(predicate);
+}
+
+function mergeLocalCreatedTweets<T extends Tweet>(
+  tweets: T[],
+  predicate?: (tweet: Tweet) => boolean
+): Tweet[] {
+  const visibleTweets = filterDeletedTweets(tweets);
+  const seenIds = new Set(visibleTweets.map(({ id }) => id));
+  const localTweets = getLocalCreatedTweets(predicate).filter(
+    ({ id }) => !seenIds.has(id)
+  );
+
+  return [...sortByCreatedAt(localTweets), ...visibleTweets];
+}
+
+function getLocalTweetUser(tweet: Tweet): User | null {
+  return (
+    getCachedUser(tweet.createdBy) ??
+    (tweet.createdBy === currentUser?.id ? currentUser : null)
+  );
+}
+
+function mergeLocalCreatedTweetsWithUsers(
+  tweets: TweetWithUser[],
+  predicate?: (tweet: Tweet) => boolean
+): TweetWithUser[] {
+  const visibleTweets = filterDeletedTweets(tweets);
+  const seenIds = new Set(visibleTweets.map(({ id }) => id));
+  const localTweets = getLocalCreatedTweets(predicate)
+    .filter(({ id }) => !seenIds.has(id))
+    .map((tweet): TweetWithUser | null => {
+      const user = getLocalTweetUser(tweet);
+      return user ? { ...tweet, user } : null;
+    })
+    .filter((tweet): tweet is TweetWithUser => !!tweet);
+
+  return [...sortByCreatedAt(localTweets), ...visibleTweets];
 }
 
 function isFollowedAuthor(tweet: Tweet): boolean {
@@ -3680,7 +3799,7 @@ export async function getDiscoverHomeFeedPage(
   );
 
   return {
-    tweets: page.feed,
+    tweets: mergeLocalCreatedTweetsWithUsers(page.feed),
     cursor: page.cursor
   };
 }
@@ -3851,7 +3970,9 @@ export async function getSubscribedHomeFeedPage(
   const response = await fetchAppViewFeed(feedUri, cursor, limit);
 
   return {
-    tweets: await mapFeedItemsWithUsers(response.feed),
+    tweets: mergeLocalCreatedTweetsWithUsers(
+      await mapFeedItemsWithUsers(response.feed)
+    ),
     cursor: response.cursor ?? null
   };
 }
@@ -3863,7 +3984,9 @@ export async function getFollowingHomeFeedPage(
   const response = await fetchAppViewTimeline(cursor, limit);
 
   return {
-    tweets: await mapFeedItemsWithUsers(response.feed),
+    tweets: mergeLocalCreatedTweetsWithUsers(
+      await mapFeedItemsWithUsers(response.feed)
+    ),
     cursor: response.cursor ?? null
   };
 }
@@ -4459,15 +4582,24 @@ async function refreshCurrentUser(): Promise<User | null> {
 
   const api = getAgent();
   const appView = getAppViewAgent();
-  const [profileResponse, followsResponse] = await Promise.all([
-    appView.getProfile({ actor: sessionDid }),
-    appView.getFollows({ actor: sessionDid, limit: 100 }).catch(() => null)
-  ]);
+  const [profileResponse, followsResponse, liveProfileRecord] =
+    await Promise.all([
+      appView.getProfile({ actor: sessionDid }),
+      appView.getFollows({ actor: sessionDid, limit: 100 }).catch(() => null),
+      getLiveProfileRecord(api, sessionDid).catch(() => null)
+    ]);
 
   currentFollowing = new Set(
     followsResponse?.data.follows.map((profile) => profile.did) ?? []
   );
   currentUser = mapProfile(profileResponse.data);
+  if (liveProfileRecord) {
+    applyLocalProfileUpdate(
+      sessionDid,
+      getProfileRecordUserData(sessionDid, liveProfileRecord)
+    );
+  }
+  currentUser = userCache.get(sessionDid) ?? currentUser;
   currentUser.following = Array.from(currentFollowing);
   userCache.set(currentUser.id, currentUser);
   userHandleCache.set(currentUser.username, currentUser);
@@ -4501,6 +4633,10 @@ async function activateOAuthSession(
     credentialAgent = null;
     sessionDid = did;
     activePdsDidPromise = null;
+    if (previousState.sessionDid !== did) {
+      locallyCreatedTweets.clear();
+      locallyDeletedTweetIds.clear();
+    }
     agent = new Agent(nextSession);
 
     const user = await refreshCurrentUser();
@@ -4547,6 +4683,10 @@ async function activateCredentialAgent(
     agent = nextAgent;
     sessionDid = nextAgent.session.did;
     activePdsDidPromise = null;
+    if (previousState.sessionDid !== nextAgent.session.did) {
+      locallyCreatedTweets.clear();
+      locallyDeletedTweetIds.clear();
+    }
 
     const user = await refreshCurrentUser();
 
@@ -4809,6 +4949,16 @@ export async function getUser(actor: string): Promise<User | null> {
   if (!normalizedActor) return null;
 
   const cachedUser = getCachedUser(normalizedActor);
+  const isCurrentUserProfile =
+    normalizedActor === sessionDid ||
+    cachedUser?.id === sessionDid ||
+    currentUser?.username === normalizedActor;
+
+  if (isCurrentUserProfile) {
+    const refreshedUser = await refreshCurrentUser().catch(() => null);
+    if (refreshedUser) return refreshedUser;
+  }
+
   if (cachedUser && detailedUserCache.has(cachedUser.id)) return cachedUser;
 
   try {
@@ -4824,6 +4974,9 @@ export async function getUser(actor: string): Promise<User | null> {
 
 export async function getTweet(id: string): Promise<Tweet | null> {
   if (!id || id === 'null') return null;
+  if (locallyDeletedTweetIds.has(id)) return null;
+  if (locallyCreatedTweets.has(id))
+    return locallyCreatedTweets.get(id) as Tweet;
   if (tweetCache.has(id)) return tweetCache.get(id) as Tweet;
 
   const uri = uriFromPostId(id);
@@ -4838,6 +4991,7 @@ export async function getTweetThread(
 ): Promise<TweetThreadPage | null> {
   if (!agent) return null;
   if (!id || id === 'null') return null;
+  if (locallyDeletedTweetIds.has(id)) return null;
 
   const uri = uriFromPostId(id);
 
@@ -4851,13 +5005,19 @@ export async function getTweetThread(
 
     if (!AppBskyFeedDefs.isThreadViewPost(thread)) return null;
 
+    const tweet = mapThreadPost(thread);
+    if (locallyDeletedTweetIds.has(tweet.id)) return null;
+
     const { threadReplies, replies } = mapThreadReplies(thread);
 
     return {
-      tweet: mapThreadPost(thread),
-      parents: mapThreadParents(thread),
-      threadReplies,
-      replies
+      tweet,
+      parents: filterDeletedTweets(mapThreadParents(thread)),
+      threadReplies: filterDeletedTweets(threadReplies),
+      replies: mergeLocalCreatedTweetsWithUsers(
+        replies,
+        (tweet) => tweet.parent?.id === id
+      )
     };
   } catch (error) {
     if (isRecordNotFoundError(error)) return null;
@@ -4947,7 +5107,10 @@ async function getTimeline(limitCount?: number): Promise<Tweet[]> {
   const response = await getAppViewAgent().getTimeline({
     limit: limitCount ?? 30
   });
-  return response.data.feed.map(mapFeedItem);
+  return mergeLocalCreatedTweets(response.data.feed.map(mapFeedItem)).slice(
+    0,
+    limitCount
+  );
 }
 
 async function getAuthorFeed(
@@ -4962,7 +5125,13 @@ async function getAuthorFeed(
   const tweets = response.data.feed
     .filter((item) => item.post.author.did === actor)
     .map(mapFeedItem);
-  return options?.onlyMedia ? tweets.filter((tweet) => !!tweet.images) : tweets;
+  const mergedTweets = mergeLocalCreatedTweets(
+    options?.onlyMedia ? tweets.filter((tweet) => !!tweet.images) : tweets,
+    (tweet) =>
+      tweet.createdBy === actor && (!options?.onlyMedia || !!tweet.images)
+  );
+
+  return mergedTweets;
 }
 
 async function getRepostedFeed(actor: string): Promise<Tweet[]> {
@@ -4980,7 +5149,8 @@ async function getRepostedFeed(actor: string): Promise<Tweet[]> {
         AppBskyFeedDefs.isReasonRepost(item.reason) &&
         item.reason.by.did === actor
     )
-    .map(mapFeedItem);
+    .map(mapFeedItem)
+    .filter(({ id }) => !locallyDeletedTweetIds.has(id));
 }
 
 async function getLikedFeed(actor: string): Promise<Tweet[]> {
@@ -4993,11 +5163,11 @@ async function getLikedFeed(actor: string): Promise<Tweet[]> {
 
   if (!response) return [];
 
-  return response.data.feed.map((item) => {
+  return filterDeletedTweets(response.data.feed.map((item) => {
     const tweet = mapFeedItem(item);
     if (!tweet.userLikes.includes(actor)) tweet.userLikes.unshift(actor);
     return tweet;
-  });
+  }));
 }
 
 async function getThreadReplies(id: string): Promise<Tweet[]> {
@@ -5008,11 +5178,14 @@ async function getThreadReplies(id: string): Promise<Tweet[]> {
   if (!AppBskyFeedDefs.isThreadViewPost(thread)) return [];
 
   const replies = thread.replies ?? [];
-  return replies.filter(AppBskyFeedDefs.isThreadViewPost).map((reply) =>
-    mapPost(reply.post, {
-      id,
-      username: thread.post.author.handle
-    })
+  return mergeLocalCreatedTweets(
+    replies.filter(AppBskyFeedDefs.isThreadViewPost).map((reply) =>
+      mapPost(reply.post, {
+        id,
+        username: thread.post.author.handle
+      })
+    ),
+    (tweet) => tweet.parent?.id === id
   );
 }
 
@@ -5296,6 +5469,63 @@ async function waitForVideoJob(
   throw new Error('Bluesky is still processing that video. Try again shortly.');
 }
 
+function isVideoJobStatus(value: unknown): value is AppBskyVideoDefs.JobStatus {
+  return (
+    isPlainObject(value) &&
+    typeof value.jobId === 'string' &&
+    typeof value.state === 'string'
+  );
+}
+
+function parseVideoJobStatus(value: unknown): AppBskyVideoDefs.JobStatus {
+  if (isVideoJobStatus(value)) return value;
+
+  if (isPlainObject(value) && isVideoJobStatus(value.jobStatus))
+    return value.jobStatus;
+
+  throw new Error('Bluesky did not return a valid video processing job.');
+}
+
+function getVideoUploadName(file: File): string {
+  const trimmedName = file.name.trim();
+  if (!trimmedName) return 'video.mp4';
+  return /\.mp4$/i.test(trimmedName) ? trimmedName : `${trimmedName}.mp4`;
+}
+
+async function uploadVideoToBlueskyService(
+  file: File
+): Promise<AppBskyVideoDefs.JobStatus> {
+  if (!sessionDid) throw new Error('Sign in with Bluesky first.');
+
+  const token = await getServiceAuthToken(
+    BSKY_VIDEO_CONFIG,
+    'app.bsky.video.uploadVideo'
+  );
+  const uploadUrl = new URL(
+    '/xrpc/app.bsky.video.uploadVideo',
+    BSKY_VIDEO_URL
+  );
+
+  uploadUrl.searchParams.set('did', sessionDid);
+  uploadUrl.searchParams.set('name', getVideoUploadName(file));
+
+  const response = await fetch(uploadUrl, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-type': 'video/mp4'
+    },
+    body: file
+  });
+
+  if (!response.ok) {
+    const fallbackMessage = response.statusText || `HTTP ${response.status}`;
+    throw new Error((await readXrpcError(response)) || fallbackMessage);
+  }
+
+  return parseVideoJobStatus(await response.json());
+}
+
 async function uploadVideoForBluesky(
   upload: UploadedImage
 ): Promise<AppBskyEmbedVideo.Main> {
@@ -5324,12 +5554,9 @@ async function uploadVideoForBluesky(
     );
 
   const videoApi = getVideoAgent();
-  const uploadResponse = await videoApi.app.bsky.video.uploadVideo(file, {
-    encoding: 'video/mp4'
-  });
   const jobStatus = await waitForVideoJob(
     videoApi,
-    uploadResponse.data.jobStatus
+    await uploadVideoToBlueskyService(file)
   );
 
   if (!jobStatus.blob)
@@ -5535,6 +5762,8 @@ export async function addTweet(data: AddTweetData): Promise<Tweet> {
   postRefCache.set(visibleTweet.id, result);
   if (replyRef) postReplyRefCache.set(visibleTweet.id, replyRef);
   tweetCache.set(visibleTweet.id, visibleTweet);
+  locallyDeletedTweetIds.delete(visibleTweet.id);
+  locallyCreatedTweets.set(visibleTweet.id, visibleTweet);
   notify();
 
   return visibleTweet;
@@ -5733,9 +5962,14 @@ export async function updateProfile(
     });
   }
 
-  if (shouldUpdateProfile) invalidateUserProfileCache(userId);
-  await refreshCurrentUser().catch(() => null);
-  applyLocalProfileUpdate(userId, data, localMediaUrls);
+  if (shouldUpdateProfile) {
+    invalidateUserProfileCache(userId);
+    applyLocalProfileUpdate(userId, data, localMediaUrls);
+    await refreshCurrentUser().catch(() => null);
+    applyLocalProfileUpdate(userId, data, localMediaUrls);
+  } else {
+    await refreshCurrentUser().catch(() => null);
+  }
 
   if (currentUser?.id === userId) updateSavedAccount(currentUser);
 
@@ -5852,6 +6086,8 @@ export async function deletePost(tweetId: string): Promise<void> {
 
   await getAgent().deletePost(ref.uri);
   tweetCache.delete(tweetId);
+  locallyCreatedTweets.delete(tweetId);
+  locallyDeletedTweetIds.add(tweetId);
   notify();
 }
 
