@@ -30,10 +30,13 @@ export function TweetShare({
 }: TweetShareProps): JSX.Element {
   const handleCopy = (closeMenu: () => void) => async (): Promise<void> => {
     closeMenu();
-    await navigator.clipboard.writeText(
-      `${siteURL}${getTweetPath(tweetId, username)}`
-    );
-    toast.success('Copied to clipboard');
+    let bskyPath = getTweetPath(tweetId, username);
+    if (!bskyPath.startsWith('/profile/')) {
+      const actor = username || 'did';
+      bskyPath = `/profile/${encodeURIComponent(actor)}/post/${encodeURIComponent(tweetId)}`;
+    }
+    await navigator.clipboard.writeText(`https://bsky.app${bskyPath}`);
+    toast.success('Copied link to Bluesky');
   };
 
   const handleBookmarkToggle = (closeMenu: () => void) => async (): Promise<void> => {
