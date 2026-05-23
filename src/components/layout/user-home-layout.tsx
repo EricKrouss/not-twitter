@@ -2,6 +2,7 @@ import { useRouter } from 'next/router';
 import { motion } from 'framer-motion';
 import { useAuth } from '@lib/context/auth-context';
 import { useUser } from '@lib/context/user-context';
+import { formatAtprotoDisplayIdentifier } from '@lib/atproto/identity';
 import { getProfileRouteId } from '@lib/static-routes';
 import { SEO } from '@components/common/seo';
 import { UserHomeCover } from '@components/user/user-home-cover';
@@ -28,6 +29,7 @@ export function UserHomeLayout({ children }: LayoutProps): JSX.Element {
     query: { id }
   } = useRouter();
   const routeId = (Array.isArray(id) ? id[0] : id) ?? getProfileRouteId(asPath);
+  const routeLabel = formatAtprotoDisplayIdentifier(routeId);
 
   const coverData = userData?.coverPhotoURL
     ? { src: userData.coverPhotoURL, alt: userData.name }
@@ -67,7 +69,9 @@ export function UserHomeLayout({ children }: LayoutProps): JSX.Element {
             <div className='flex flex-col'>
               <div className='relative flex flex-col gap-3 px-4 py-3 pb-12'>
                 <UserHomeAvatar />
-                <p className='text-xl font-extrabold'>@{routeId}</p>
+                <p className='break-words text-xl font-extrabold'>
+                  {routeLabel}
+                </p>
               </div>
               <div className='mx-auto w-full max-w-[250px] px-8 pt-5 text-left'>
                 <p className='text-[27px] font-extrabold leading-8'>

@@ -4,6 +4,7 @@ import { useDocument } from '@lib/hooks/useDocument';
 import { useUser } from '@lib/context/user-context';
 import { isPlural } from '@lib/utils';
 import { userStatsCollection } from '@lib/atproto/collections';
+import { formatAtprotoDisplayIdentifier } from '@lib/atproto/identity';
 import { getProfileRouteId, getProfileRouteView } from '@lib/static-routes';
 import { doc } from '@lib/atproto/store';
 import { UserName } from './user-name';
@@ -44,6 +45,7 @@ export function UserHeader(): JSX.Element {
 
   const currentView = getProfileRouteView(asPath);
   const routeId = (Array.isArray(id) ? id[0] : id) ?? getProfileRouteId(asPath);
+  const routeLabel = formatAtprotoDisplayIdentifier(routeId);
   const currentPage = currentView ?? pathname.split('/').pop() ?? '';
 
   const isInTweetPage = ['[id]', 'tweets', 'with_replies'].includes(
@@ -52,23 +54,23 @@ export function UserHeader(): JSX.Element {
   const isInFollowPage = ['following', 'followers'].includes(currentPage);
 
   return (
-    <AnimatePresence>
+    <AnimatePresence initial={false} mode='wait'>
       {loading || statsLoading ? (
         <motion.div
+          key='loading'
           className='-mb-1 inner:animate-pulse inner:rounded-lg 
                      inner:bg-light-secondary dark:inner:bg-dark-secondary'
           {...variants}
-          key='loading'
         >
           <div className='mb-1 -mt-1 h-5 w-24' />
           <div className='h-4 w-12' />
         </motion.div>
       ) : !user ? (
-        <motion.h2 className='text-xl font-bold' {...variants} key='not-found'>
-          {isInFollowPage ? `@${routeId ?? ''}` : 'Profile'}
+        <motion.h2 key='not-found' className='text-xl font-bold' {...variants}>
+          {isInFollowPage ? routeLabel : 'Profile'}
         </motion.h2>
       ) : (
-        <motion.div className='-mb-1 truncate' {...variants} key='found'>
+        <motion.div key='found' className='-mb-1 truncate' {...variants}>
           <UserName
             tag='h2'
             name={user.name}

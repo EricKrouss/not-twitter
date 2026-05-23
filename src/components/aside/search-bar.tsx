@@ -1,7 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import cn from 'clsx';
-import { normalizeProfileSearchActor } from '@lib/atproto/identity';
+import {
+  formatAtprotoDisplayIdentifier,
+  normalizeProfileSearchActor
+} from '@lib/atproto/identity';
 import { getUserPath } from '@lib/routes';
 import { HeroIcon } from '@components/ui/hero-icon';
 import { Button } from '@components/ui/button';
@@ -35,11 +38,7 @@ export function SearchBar({
   const blurTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const trimmedInput = inputValue.trim();
   const profileActor = normalizeProfileSearchActor(trimmedInput);
-  const profileActorLabel = profileActor
-    ? profileActor.startsWith('did:')
-      ? profileActor
-      : `@${profileActor}`
-    : '';
+  const profileActorLabel = formatAtprotoDisplayIdentifier(profileActor);
 
   useEffect(() => {
     setInputValue(getRouteParam(query.q));

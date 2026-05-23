@@ -13,7 +13,7 @@ import { HeroIcon } from '@components/ui/hero-icon';
 import { ToolTip } from '@components/ui/tooltip';
 import { TwitterVideoPlayer } from '@components/ui/twitter-video-player';
 import type { MotionProps } from 'framer-motion';
-import type { CSSProperties } from 'react';
+import type { CSSProperties, KeyboardEvent } from 'react';
 import type { ImagesPreview, ImageData } from '@lib/types/file';
 import type { TweetWithUser } from '@lib/types/tweet';
 
@@ -329,10 +329,20 @@ export function ImagePreview({
             ? postImageBorderRadius[visiblePreviewCount][index]
             : 'rounded-2xl';
           const shouldCropImage = Boolean(isTweet) || visiblePreviewCount > 1;
+          const mediaKey = `${id ?? src}-${index}`;
+          const openPreview = handleSelectedImage(index);
+          const handlePreviewKeyDown = (
+            event: KeyboardEvent<HTMLDivElement>
+          ): void => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+
+            event.preventDefault();
+            event.stopPropagation();
+            openPreview();
+          };
 
           return (
-            <motion.button
-              type='button'
+            <motion.div
               className={cn(
                 'accent-tab group relative overflow-hidden transition-shadow',
                 imageRadius,
@@ -343,13 +353,13 @@ export function ImagePreview({
                     (index === 0 && visiblePreviewCount === 3)
                 }
               )}
+              role={isGif ? undefined : 'button'}
+              tabIndex={isGif ? undefined : 0}
+              aria-label={isGif ? undefined : `Open image ${index + 1}`}
               {...variants}
-              onClick={
-                isGif
-                  ? preventBubbling()
-                  : preventBubbling(handleSelectedImage(index))
-              }
-              key={`${id ?? src}-${index}`}
+              onClick={isGif ? preventBubbling() : preventBubbling(openPreview)}
+              onKeyDown={isGif ? undefined : handlePreviewKeyDown}
+              key={mediaKey}
             >
               {isGif ? (
                 <TwitterGifMedia media={media} className={imageRadius} />
@@ -407,7 +417,7 @@ export function ImagePreview({
                   <ToolTip className='translate-y-2' tip='Remove' />
                 </Button>
               )}
-            </motion.button>
+            </motion.div>
           );
         })}
       </AnimatePresence>
