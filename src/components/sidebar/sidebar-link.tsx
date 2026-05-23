@@ -65,7 +65,10 @@ export function SidebarLink({
         >
           <span className='relative flex h-7 w-7 shrink-0 items-center justify-center leading-none'>
             <CustomIcon
-              className='block h-7 w-7 shrink-0'
+              className={cn(
+                'block shrink-0',
+                href === '/notifications' ? 'h-8 w-8' : 'h-7 w-7'
+              )}
               iconName={renderedIconName}
             />
             {showBadgeCount && (
