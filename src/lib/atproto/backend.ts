@@ -73,6 +73,8 @@ const GENERIC_SCOPE = 'transition:generic';
 const BSKY_IMAGE_MAX_BYTES = 1_000_000;
 const BSKY_IMAGE_TARGET_BYTES = 950_000;
 const BSKY_IMAGE_MAX_DIMENSION = 2000;
+const BSKY_PROFILE_IMAGE_MIME_TYPE = 'image/jpeg';
+const BSKY_PROFILE_IMAGE_ACCEPTED_TYPES = /^image\/(?:jpe?g|png)$/i;
 const BSKY_MEDIA_POST_VISIBILITY_RETRIES = 8;
 const BSKY_THREAD_REPLY_DEPTH = 25;
 const THEME_KEY = 'twitter-clone:bsky-theme';
@@ -154,6 +156,12 @@ type BookmarksResponse = {
 type UploadedImage = {
   file: File;
   preview: ImagesPreview[number];
+};
+
+type StrictBlobRef = BlobRef & {
+  ref: BlobRef['ref'];
+  mimeType: string;
+  size: number;
 };
 
 export type ProfileMediaFiles = Partial<
@@ -981,20 +989,35 @@ function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function parseBlobRef(blob: unknown): BlobRef {
-  if (blob instanceof BlobRef) return blob;
+function hasJsonRepresentation(
+  value: unknown
+): value is { toJSON: () => unknown } {
+  return (
+    !!value &&
+    typeof value === 'object' &&
+    typeof (value as { toJSON?: unknown }).toJSON === 'function'
+  );
+}
 
-  const jsonBlob =
-    typeof (blob as { toJSON?: unknown })?.toJSON === 'function'
-      ? (blob as { toJSON: () => unknown }).toJSON()
-      : blob;
-  const parsedBlob = jsonToLex(jsonBlob as Parameters<typeof jsonToLex>[0]);
-  if (parsedBlob instanceof BlobRef) return parsedBlob;
+function asStrictBlobRef(blob: BlobRef): StrictBlobRef {
+  return blob as StrictBlobRef;
+}
+
+function parseBlobRef(blob: unknown): StrictBlobRef {
+  if (blob instanceof BlobRef) return asStrictBlobRef(blob);
+
+  const parsedBlob = jsonToLex(
+    (hasJsonRepresentation(blob) ? blob.toJSON() : blob) as Parameters<
+      typeof jsonToLex
+    >[0]
+  );
+
+  if (parsedBlob instanceof BlobRef) return asStrictBlobRef(parsedBlob);
 
   throw new Error('Bluesky did not return a valid media blob.');
 }
 
-function getBlobRefSize(blob: BlobRef): number | null {
+function getBlobRefSize(blob: StrictBlobRef): number | null {
   return Number.isFinite(blob.size) && blob.size > 0 ? blob.size : null;
 }
 
@@ -1189,20 +1212,21 @@ function canvasToBlob(
 
 async function encodeCanvasImage(
   canvas: HTMLCanvasElement,
-  targetBytes = BSKY_IMAGE_TARGET_BYTES
+  targetBytes = BSKY_IMAGE_TARGET_BYTES,
+  mimeTypes: readonly string[] = ['image/webp', 'image/jpeg']
 ): Promise<Blob> {
   let fallbackBlob: Blob | null = null;
   const qualities = [0.92, 0.84, 0.76, 0.68, 0.6];
 
   for (const quality of qualities) {
-    const blob =
-      (await canvasToBlob(canvas, 'image/webp', quality)) ??
-      (await canvasToBlob(canvas, 'image/jpeg', quality));
+    for (const mimeType of mimeTypes) {
+      const blob = await canvasToBlob(canvas, mimeType, quality);
 
-    if (!blob) continue;
+      if (!blob) continue;
 
-    fallbackBlob = blob;
-    if (blob.size <= targetBytes) return blob;
+      fallbackBlob = blob;
+      if (blob.size <= targetBytes) return blob;
+    }
   }
 
   if (fallbackBlob) return fallbackBlob;
@@ -1210,26 +1234,10 @@ async function encodeCanvasImage(
   throw new Error('Unable to prepare image for Bluesky.');
 }
 
-async function prepareImageForBluesky(
-  file: File
-): Promise<PreparedImageUpload> {
-  const image = await loadImageElement(file);
-  const originalAspectRatio = getImageAspectRatio(
-    image.naturalWidth,
-    image.naturalHeight
-  );
-
-  if (
-    file.size <= BSKY_IMAGE_MAX_BYTES &&
-    /^image\/(jpe?g|png|webp|gif)$/i.test(file.type)
-  ) {
-    return {
-      file,
-      encoding: file.type || 'image/jpeg',
-      aspectRatio: originalAspectRatio
-    };
-  }
-
+function drawImageToCanvas(
+  image: HTMLImageElement,
+  outputMimeTypes: readonly string[]
+): HTMLCanvasElement {
   const scale = Math.min(
     1,
     BSKY_IMAGE_MAX_DIMENSION / Math.max(image.naturalWidth, image.naturalHeight)
@@ -1245,9 +1253,47 @@ async function prepareImageForBluesky(
 
   if (!context) throw new Error('Unable to prepare image for Bluesky.');
 
+  if (outputMimeTypes.includes(BSKY_PROFILE_IMAGE_MIME_TYPE)) {
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, width, height);
+  }
+
   context.drawImage(image, 0, 0, width, height);
 
-  let blob = await encodeCanvasImage(canvas);
+  return canvas;
+}
+
+async function prepareImageForBluesky(
+  file: File,
+  options?: {
+    acceptedTypes?: RegExp;
+    outputMimeTypes?: readonly string[];
+  }
+): Promise<PreparedImageUpload> {
+  const {
+    acceptedTypes = /^image\/(?:jpe?g|png|webp|gif)$/i,
+    outputMimeTypes = ['image/webp', 'image/jpeg']
+  } = options ?? {};
+  const image = await loadImageElement(file);
+  const originalAspectRatio = getImageAspectRatio(
+    image.naturalWidth,
+    image.naturalHeight
+  );
+
+  if (file.size <= BSKY_IMAGE_MAX_BYTES && acceptedTypes.test(file.type)) {
+    return {
+      file,
+      encoding: file.type || 'image/jpeg',
+      aspectRatio: originalAspectRatio
+    };
+  }
+
+  const canvas = drawImageToCanvas(image, outputMimeTypes);
+  let blob = await encodeCanvasImage(
+    canvas,
+    BSKY_IMAGE_TARGET_BYTES,
+    outputMimeTypes
+  );
 
   while (
     blob.size > BSKY_IMAGE_MAX_BYTES &&
@@ -1272,9 +1318,18 @@ async function prepareImageForBluesky(
 
     if (!resizedContext) break;
 
+    if (outputMimeTypes.includes(BSKY_PROFILE_IMAGE_MIME_TYPE)) {
+      resizedContext.fillStyle = '#ffffff';
+      resizedContext.fillRect(0, 0, nextWidth, nextHeight);
+    }
+
     resizedContext.drawImage(nextCanvas, 0, 0);
 
-    blob = await encodeCanvasImage(canvas);
+    blob = await encodeCanvasImage(
+      canvas,
+      BSKY_IMAGE_TARGET_BYTES,
+      outputMimeTypes
+    );
   }
 
   if (blob.size > BSKY_IMAGE_MAX_BYTES) {
@@ -1286,6 +1341,15 @@ async function prepareImageForBluesky(
     encoding: blob.type || 'image/jpeg',
     aspectRatio: getImageAspectRatio(canvas.width, canvas.height)
   };
+}
+
+function prepareProfileImageForBluesky(
+  file: File
+): Promise<PreparedImageUpload> {
+  return prepareImageForBluesky(file, {
+    acceptedTypes: BSKY_PROFILE_IMAGE_ACCEPTED_TYPES,
+    outputMimeTypes: [BSKY_PROFILE_IMAGE_MIME_TYPE]
+  });
 }
 
 function normalizeSettingsLabelPreference(
@@ -4409,14 +4473,14 @@ export function stageImages(userId: string, files: FilesWithId): ImagesPreview {
 
 async function fetchStoredBlobSize(
   api: Agent,
-  blob: BlobRef
+  blob: StrictBlobRef
 ): Promise<number | null> {
   if (!sessionDid) return null;
 
   try {
     const response = await api.com.atproto.sync.getBlob({
       did: sessionDid,
-      cid: blob.ref.toString()
+      cid: String(blob.ref)
     });
 
     return response.data.byteLength > 0 ? response.data.byteLength : null;
@@ -4431,7 +4495,7 @@ async function normalizeProfileBlobForWrite(
 ): Promise<BlobRef | null> {
   if (!blob) return null;
 
-  let parsedBlob: BlobRef;
+  let parsedBlob: StrictBlobRef;
 
   try {
     parsedBlob = parseBlobRef(blob);
@@ -4511,7 +4575,7 @@ export async function updateProfile(
   const api = getAgent();
   const [avatarUpload, bannerUpload] = await Promise.all([
     avatarFile
-      ? prepareImageForBluesky(avatarFile).then((preparedImage) =>
+      ? prepareProfileImageForBluesky(avatarFile).then((preparedImage) =>
           api
             .uploadBlob(preparedImage.file, {
               encoding: preparedImage.encoding
@@ -4526,7 +4590,7 @@ export async function updateProfile(
         )
       : null,
     bannerFile
-      ? prepareImageForBluesky(bannerFile).then((preparedImage) =>
+      ? prepareProfileImageForBluesky(bannerFile).then((preparedImage) =>
           api
             .uploadBlob(preparedImage.file, {
               encoding: preparedImage.encoding
