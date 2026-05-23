@@ -29,9 +29,9 @@ export function SidebarLink({
       : badgeCount.toString()
     : '';
   const compactCountBadgeClassName = cn(
-    `absolute -top-1.5 -right-1.5 flex h-4 items-center justify-center rounded-full
-     border border-main-background bg-main-accent text-[9px] font-bold leading-none text-white`,
-    badgeLabel.length === 1 ? 'w-4' : 'min-w-[18px] px-1'
+    `absolute -top-1 -right-1 flex h-[18px] items-center justify-center rounded-full
+     border-2 border-main-background bg-main-accent text-[11px] font-bold leading-none text-white`,
+    badgeLabel.length === 1 ? 'w-[18px]' : 'min-w-[18px] px-1'
   );
 
   const handleClick = (e: React.MouseEvent<HTMLAnchorElement>): void => {
@@ -65,10 +65,7 @@ export function SidebarLink({
         >
           <span className='relative flex h-7 w-7 shrink-0 items-center justify-center leading-none'>
             <CustomIcon
-              className={cn(
-                'block shrink-0',
-                href === '/notifications' ? 'h-8 w-8' : 'h-7 w-7'
-              )}
+              className='block h-7 w-7 shrink-0'
               iconName={renderedIconName}
             />
             {showBadgeCount && (
