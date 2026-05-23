@@ -114,6 +114,30 @@ const BSKY_CHAT_CONFIG: BskyServiceConfig = {
   chat: true
 };
 
+const PUBLIC_BSKY_APPVIEW_METHODS = new Set([
+  'app.bsky.actor.getProfile',
+  'app.bsky.actor.getProfiles',
+  'app.bsky.actor.getSuggestions',
+  'app.bsky.actor.searchActors',
+  'app.bsky.actor.searchActorsTypeahead',
+  'app.bsky.feed.getActorLikes',
+  'app.bsky.feed.getAuthorFeed',
+  'app.bsky.feed.getFeed',
+  'app.bsky.feed.getFeedGenerator',
+  'app.bsky.feed.getFeedGenerators',
+  'app.bsky.feed.getLikes',
+  'app.bsky.feed.getPostThread',
+  'app.bsky.feed.getPosts',
+  'app.bsky.feed.getQuotes',
+  'app.bsky.feed.getRepostedBy',
+  'app.bsky.feed.searchPosts',
+  'app.bsky.graph.getFollowers',
+  'app.bsky.graph.getFollows',
+  'app.bsky.graph.getList',
+  'app.bsky.graph.getLists',
+  'app.bsky.labeler.getServices'
+]);
+
 type AuthUser = {
   uid: string;
   displayName: string | null;
@@ -832,6 +856,7 @@ async function fetchServiceXrpc(
   init: RequestInit = {}
 ): Promise<Response> {
   const path = getXrpcPath(url);
+  const method = getXrpcMethod(path);
   const headers = new Headers(init.headers);
 
   if (!oauthSession) {
@@ -840,7 +865,13 @@ async function fetchServiceXrpc(
     return getAgent().sessionManager.fetchHandler(path, { ...init, headers });
   }
 
-  const token = await getServiceAuthToken(service, getXrpcMethod(path));
+  if (!service.chat && PUBLIC_BSKY_APPVIEW_METHODS.has(method)) {
+    headers.delete('authorization');
+    headers.delete('atproto-proxy');
+    return fetch(new URL(path, PUBLIC_BSKY_APPVIEW_URL), { ...init, headers });
+  }
+
+  const token = await getServiceAuthToken(service, method);
   headers.set('authorization', `Bearer ${token}`);
   headers.delete('atproto-proxy');
 
