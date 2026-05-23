@@ -41,6 +41,10 @@ export function UserHomeLayout({ children }: LayoutProps): JSX.Element {
 
   const isOwner = userData?.id === userId;
   const signedIn = !!user;
+  const viewerBlocksUser = !!userData?.blocking;
+  const viewerBlockedByUser = !!userData?.blockedBy;
+  const profileIsBlocked =
+    !!userData && (viewerBlockedByUser || viewerBlocksUser);
 
   const handleMessageClick = (): void => {
     if (userData)
@@ -85,8 +89,13 @@ export function UserHomeLayout({ children }: LayoutProps): JSX.Element {
                   <UserEditProfile />
                 ) : (
                   <div className='flex gap-2 self-start'>
-                    <UserShare username={userData.username} />
-                    {signedIn && (
+                    <UserShare
+                      targetId={userData.id}
+                      username={userData.username}
+                      blocking={userData.blocking}
+                      blockingByListName={userData.blockingByListName}
+                    />
+                    {signedIn && !profileIsBlocked && (
                       <Button
                         className='dark-bg-tab group relative border border-light-line-reply p-2
                                    hover:bg-light-primary/10 active:bg-light-primary/20 dark:border-light-secondary
@@ -104,6 +113,9 @@ export function UserHomeLayout({ children }: LayoutProps): JSX.Element {
                       userTargetId={userData.id}
                       userTargetUsername={userData.username}
                       userTargetFollowers={userData.followers}
+                      userTargetBlocking={userData.blocking}
+                      userTargetBlockedBy={userData.blockedBy}
+                      userTargetBlockingByListName={userData.blockingByListName}
                     />
                     {isAdmin && <UserEditProfile hide />}
                   </div>
@@ -114,12 +126,50 @@ export function UserHomeLayout({ children }: LayoutProps): JSX.Element {
           </>
         )}
       </motion.section>
-      {userData && (
-        <>
-          <UserNav />
-          {children}
-        </>
-      )}
+      {userData &&
+        (profileIsBlocked ? (
+          <BlockedProfileState
+            username={userData.username}
+            blockedBy={viewerBlockedByUser}
+            blockedByListName={userData.blockingByListName}
+          />
+        ) : (
+          <>
+            <UserNav />
+            {children}
+          </>
+        ))}
     </>
+  );
+}
+
+function BlockedProfileState({
+  username,
+  blockedBy,
+  blockedByListName
+}: {
+  username: string;
+  blockedBy: boolean;
+  blockedByListName: string | null;
+}): JSX.Element {
+  const title = blockedBy ? 'You’re blocked' : `You blocked @${username}`;
+  const description = blockedBy
+    ? `You can’t follow or see @${username}’s Tweets.`
+    : blockedByListName
+    ? `This account is blocked by ${blockedByListName}.`
+    : `You can view @${username}’s Tweets, but they still can’t follow or message you.`;
+
+  return (
+    <div
+      className='border-t border-light-border px-8 py-10 text-left dark:border-dark-border
+                 xs:px-4'
+    >
+      <div className='mx-auto flex w-full max-w-[360px] flex-col gap-3'>
+        <p className='text-[31px] font-extrabold leading-9'>{title}</p>
+        <p className='text-[15px] leading-5 text-light-secondary dark:text-dark-secondary'>
+          {description}
+        </p>
+      </div>
+    </div>
   );
 }

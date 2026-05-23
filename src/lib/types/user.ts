@@ -16,6 +16,10 @@ export type User = {
   followers: string[];
   followingCount: number;
   followersCount: number;
+  blocking: boolean;
+  blockedBy: boolean;
+  blockingUri: string | null;
+  blockingByListName: string | null;
   createdAt: Timestamp;
   updatedAt: Timestamp | null;
   totalTweets: number;
@@ -36,7 +40,13 @@ export const userConverter: DataConverter<User> = {
     return { ...user };
   },
   fromStore(snapshot, options) {
-    const data = snapshot.data(options);
-    return { ...data } as User;
+    const data = snapshot.data(options) as Partial<User>;
+    return {
+      ...data,
+      blocking: data.blocking ?? false,
+      blockedBy: data.blockedBy ?? false,
+      blockingUri: data.blockingUri ?? null,
+      blockingByListName: data.blockingByListName ?? null
+    } as User;
   }
 };

@@ -1,7 +1,7 @@
 import { useRouter } from 'next/router';
 import { useAuth } from '@lib/context/auth-context';
 import { useModal } from '@lib/hooks/useModal';
-import { manageFollow } from '@lib/atproto/utils';
+import { manageBlock, manageFollow } from '@lib/atproto/utils';
 import { preventBubbling } from '@lib/utils';
 import { Modal } from '@components/modal/modal';
 import { ActionModal } from '@components/modal/action-modal';
@@ -11,12 +11,18 @@ type FollowButtonProps = {
   userTargetId: string;
   userTargetUsername: string;
   userTargetFollowers?: string[];
+  userTargetBlocking?: boolean;
+  userTargetBlockedBy?: boolean;
+  userTargetBlockingByListName?: string | null;
 };
 
 export function FollowButton({
   userTargetId,
   userTargetUsername,
-  userTargetFollowers
+  userTargetFollowers,
+  userTargetBlocking,
+  userTargetBlockedBy,
+  userTargetBlockingByListName
 }: FollowButtonProps): JSX.Element | null {
   const { user } = useAuth();
   const { push } = useRouter();
@@ -38,6 +44,11 @@ export function FollowButton({
     closeModal();
   };
 
+  const handleUnblock = async (): Promise<void> => {
+    await manageBlock('unblock', userId as string, userTargetId);
+    closeModal();
+  };
+
   const userIsFollowed = !!(
     userTargetFollowers?.includes(userId ?? '') ??
     following?.includes(userTargetId ?? '')
@@ -54,6 +65,42 @@ export function FollowButton({
       >
         Follow
       </Button>
+    );
+
+  if (userTargetBlockedBy) return null;
+
+  if (userTargetBlocking)
+    return userTargetBlockingByListName ? (
+      <Button
+        className='self-start border border-accent-red bg-accent-red px-4 py-1.5 font-bold text-white'
+        disabled
+      >
+        Blocked
+      </Button>
+    ) : (
+      <>
+        <Modal
+          modalClassName='flex flex-col gap-6 max-w-xs bg-main-background w-full p-8 rounded-2xl'
+          open={open}
+          closeModal={closeModal}
+        >
+          <ActionModal
+            title={`Unblock @${userTargetUsername}?`}
+            description='They will be able to follow you and view your Tweets.'
+            mainBtnLabel='Unblock'
+            action={handleUnblock}
+            closeModal={closeModal}
+          />
+        </Modal>
+        <Button
+          className='min-w-[106px] self-start border border-accent-red bg-accent-red px-4 py-1.5
+                     font-bold text-white hover:bg-accent-red/90 hover:before:content-["Unblock"]
+                     inner:hover:hidden'
+          onClick={preventBubbling(openModal)}
+        >
+          <span>Blocked</span>
+        </Button>
+      </>
     );
 
   return (

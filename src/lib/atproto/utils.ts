@@ -1,11 +1,13 @@
 import {
   clearBookmarks,
+  blockUser,
   deletePost,
   followUser,
   likePost,
   repostPost,
   setBookmark,
   stageImages,
+  unblockUser,
   unfollowUser,
   updateProfile,
   type ProfileMediaFiles
@@ -75,6 +77,16 @@ export async function manageFollow(
   void _userId;
   if (type === 'follow') await followUser(targetUserId);
   else await unfollowUser(targetUserId);
+}
+
+export async function manageBlock(
+  type: 'block' | 'unblock',
+  _userId: string,
+  targetUserId: string
+): Promise<void> {
+  void _userId;
+  if (type === 'block') await blockUser(targetUserId);
+  else await unblockUser(targetUserId);
 }
 
 export async function removeTweet(tweetId: string): Promise<void> {

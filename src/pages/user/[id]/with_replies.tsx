@@ -18,11 +18,12 @@ export default function UserWithReplies(): JSX.Element {
   const { user } = useUser();
 
   const { id, name, username, pinnedTweet } = user ?? {};
+  const profileRestricted = !!user?.blocking || !!user?.blockedBy;
 
   const { data: pinnedData } = useDocument(
     doc(tweetsCollection, pinnedTweet ?? 'null'),
     {
-      disabled: !pinnedTweet,
+      disabled: !pinnedTweet || profileRestricted,
       allowNull: true,
       includeUser: true
     }
@@ -34,7 +35,7 @@ export default function UserWithReplies(): JSX.Element {
       where('createdBy', '==', id),
       orderBy('createdAt', 'desc')
     ),
-    { includeUser: true, allowNull: true }
+    { includeUser: true, allowNull: true, disabled: profileRestricted }
   );
 
   return (

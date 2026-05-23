@@ -27,7 +27,10 @@ export function UserCard(user: UserCardProps): JSX.Element {
     verified,
     photoURL,
     following,
-    followers
+    followers,
+    blocking,
+    blockedBy,
+    blockingByListName
   } = user;
   const userPath = getUserPath(username);
   const openUser = (event: MouseEvent<HTMLElement>): void => {
@@ -80,6 +83,9 @@ export function UserCard(user: UserCardProps): JSX.Element {
             userTargetId={id}
             userTargetUsername={username}
             userTargetFollowers={followers}
+            userTargetBlocking={blocking}
+            userTargetBlockedBy={blockedBy}
+            userTargetBlockingByListName={blockingByListName}
           />
         </div>
         {follow && bio && (

@@ -17,6 +17,7 @@ export default function UserMedia(): JSX.Element {
   const { user } = useUser();
 
   const { id, name, username } = user ?? {};
+  const profileRestricted = !!user?.blocking || !!user?.blockedBy;
 
   const { data, loading } = useCollection(
     query(
@@ -24,7 +25,7 @@ export default function UserMedia(): JSX.Element {
       where('createdBy', '==', id),
       where('images', '!=', null)
     ),
-    { includeUser: true, allowNull: true }
+    { includeUser: true, allowNull: true, disabled: profileRestricted }
   );
 
   const sortedTweets = mergeData(true, data);

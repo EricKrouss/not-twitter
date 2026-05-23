@@ -36,6 +36,40 @@ export const variants: Variants = {
   exit: { opacity: 0, transition: { duration: 0.12, ease: 'easeOut' } }
 };
 
+function BlockedTweetPlaceholder({
+  username,
+  blockedBy,
+  parentTweet
+}: {
+  username: string;
+  blockedBy: boolean;
+  parentTweet?: boolean;
+}): JSX.Element {
+  return (
+    <motion.article
+      {...variants}
+      className={cn(
+        'px-4 py-3',
+        !parentTweet && 'border-b border-light-border dark:border-dark-border'
+      )}
+    >
+      <div
+        className='rounded-2xl border border-light-border px-4 py-3 text-[15px]
+                   dark:border-dark-border'
+      >
+        <p className='font-bold text-light-primary dark:text-dark-primary'>
+          {blockedBy ? 'This Tweet is unavailable' : `You blocked @${username}`}
+        </p>
+        <p className='mt-1 text-light-secondary dark:text-dark-secondary'>
+          {blockedBy
+            ? `You can’t view this Tweet because @${username} blocked you.`
+            : 'This Tweet is from an account you blocked.'}
+        </p>
+      </div>
+    </motion.article>
+  );
+}
+
 export function Tweet(tweet: TweetProps): JSX.Element {
   const {
     id: tweetId,
@@ -69,6 +103,8 @@ export function Tweet(tweet: TweetProps): JSX.Element {
   const userId = user?.id ?? '';
 
   const isOwner = userId === createdBy;
+  const tweetIsHiddenByBlock =
+    !isOwner && (tweetUserData.blocking || tweetUserData.blockedBy);
 
   const { id: parentId, username: parentUsername = username } = parent ?? {};
 
@@ -80,6 +116,15 @@ export function Tweet(tweet: TweetProps): JSX.Element {
 
   const reply = !!parent;
   const tweetIsRetweeted = userRetweets.includes(profileId ?? '');
+
+  if (tweetIsHiddenByBlock)
+    return (
+      <BlockedTweetPlaceholder
+        username={username}
+        blockedBy={tweetUserData.blockedBy}
+        parentTweet={parentTweet}
+      />
+    );
 
   return (
     <motion.article
@@ -166,6 +211,8 @@ export function Tweet(tweet: TweetProps): JSX.Element {
                       username={username}
                       hasImages={!!images || !!card || !!quotedTweet}
                       createdBy={createdBy}
+                      blocking={tweetUserData.blocking}
+                      blockingByListName={tweetUserData.blockingByListName}
                     />
                   )}
                 </div>

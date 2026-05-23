@@ -1,5 +1,5 @@
-import { doc, query, where } from '@lib/atproto/store';
 import { AnimatePresence } from 'framer-motion';
+import { doc, query, where } from '@lib/atproto/store';
 import { useUser } from '@lib/context/user-context';
 import { useCollection } from '@lib/hooks/useCollection';
 import { useDocument } from '@lib/hooks/useDocument';
@@ -17,11 +17,12 @@ export default function UserTweets(): JSX.Element {
   const { user } = useUser();
 
   const { id, username, pinnedTweet } = user ?? {};
+  const profileRestricted = !!user?.blocking || !!user?.blockedBy;
 
   const { data: pinnedData } = useDocument(
     doc(tweetsCollection, pinnedTweet ?? 'null'),
     {
-      disabled: !pinnedTweet,
+      disabled: !pinnedTweet || profileRestricted,
       allowNull: true,
       includeUser: true
     }
@@ -33,7 +34,7 @@ export default function UserTweets(): JSX.Element {
       where('createdBy', '==', id),
       where('parent', '==', null)
     ),
-    { includeUser: true, allowNull: true }
+    { includeUser: true, allowNull: true, disabled: profileRestricted }
   );
 
   const { data: peopleTweets, loading: peopleLoading } = useCollection(
@@ -42,7 +43,7 @@ export default function UserTweets(): JSX.Element {
       where('createdBy', '!=', id),
       where('userRetweets', 'array-contains', id)
     ),
-    { includeUser: true, allowNull: true }
+    { includeUser: true, allowNull: true, disabled: profileRestricted }
   );
 
   const mergedTweets = mergeData(true, ownerTweets, peopleTweets);

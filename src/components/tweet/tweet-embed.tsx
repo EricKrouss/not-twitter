@@ -137,8 +137,8 @@ function TweetYouTubeCard({
 
   return (
     <div
-      className='mt-2 overflow-hidden rounded-2xl border border-light-border bg-light-primary
-                 dark:border-dark-border dark:bg-dark-primary'
+      className='mt-2 overflow-hidden rounded-2xl border border-light-border bg-main-background
+                 text-left dark:border-dark-border'
       onClick={stopEmbedEvent}
       onKeyDown={stopEmbedEvent}
     >
@@ -154,14 +154,19 @@ function TweetYouTubeCard({
         />
       </div>
       <button
-        className='hover-card flex w-full min-w-0 flex-col px-3 py-2 text-left'
+        className='flex w-full min-w-0 flex-col border-t border-light-border px-3 py-2.5
+                   text-left transition-colors hover:bg-light-primary/[0.03]
+                   focus-visible:bg-light-primary/[0.03] focus-visible:outline-none
+                   dark:border-dark-border dark:hover:bg-dark-primary/[0.03]
+                   dark:focus-visible:bg-dark-primary/[0.03]'
         type='button'
+        aria-label={`Open ${title} on YouTube`}
         onClick={openCard}
       >
-        <span className='truncate text-sm text-light-secondary dark:text-dark-secondary'>
+        <span className='truncate text-[13px] leading-4 text-light-secondary dark:text-dark-secondary'>
           {card.domain ?? video.domain}
         </span>
-        <span className='truncate text-[15px] text-light-primary dark:text-dark-primary'>
+        <span className='line-clamp-2 text-[15px] leading-5 text-light-primary dark:text-dark-primary'>
           {title}
         </span>
       </button>

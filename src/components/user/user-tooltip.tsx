@@ -25,6 +25,9 @@ type UserTooltipProps = Pick<
   | 'followers'
   | 'followingCount'
   | 'followersCount'
+  | 'blocking'
+  | 'blockedBy'
+  | 'blockingByListName'
   | 'coverPhotoURL'
 > & {
   modal?: boolean;
@@ -48,6 +51,9 @@ export function UserTooltip({
   followers,
   followingCount,
   followersCount,
+  blocking,
+  blockedBy,
+  blockingByListName,
   coverPhotoURL
 }: UserTooltipProps): JSX.Element {
   const { isMobile } = useWindow();
@@ -111,6 +117,9 @@ export function UserTooltip({
                 userTargetId={id}
                 userTargetUsername={username}
                 userTargetFollowers={followers}
+                userTargetBlocking={blocking}
+                userTargetBlockedBy={blockedBy}
+                userTargetBlockingByListName={blockingByListName}
               />
             </div>
             <div>

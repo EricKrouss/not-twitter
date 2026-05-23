@@ -7,9 +7,11 @@ import { toast } from 'react-hot-toast';
 import { useAuth } from '@lib/context/auth-context';
 import { useModal } from '@lib/hooks/useModal';
 import { tweetsCollection } from '@lib/atproto/collections';
+import { doc, getDoc } from '@lib/atproto/store';
 import { getTweetPath } from '@lib/routes';
 import {
   removeTweet,
+  manageBlock,
   manageReply,
   manageFollow,
   managePinnedTweet,
@@ -23,7 +25,6 @@ import { Button } from '@components/ui/button';
 import { ToolTip } from '@components/ui/tooltip';
 import { HeroIcon } from '@components/ui/hero-icon';
 import { CustomIcon } from '@components/ui/custom-icon';
-import { doc, getDoc } from '@lib/atproto/store';
 import type { Variants } from 'framer-motion';
 import type { Tweet } from '@lib/types/tweet';
 
@@ -47,6 +48,8 @@ type TweetActionsProps = Pick<Tweet, 'createdBy'> & {
   parentId?: string;
   parentUsername?: string;
   hasImages: boolean;
+  blocking?: boolean;
+  blockingByListName?: string | null;
   viewTweet?: boolean;
 };
 
@@ -75,6 +78,8 @@ export function TweetActions({
   parentUsername,
   username,
   hasImages,
+  blocking,
+  blockingByListName,
   viewTweet,
   createdBy
 }: TweetActionsProps): JSX.Element {
@@ -91,6 +96,11 @@ export function TweetActions({
     open: pinOpen,
     openModal: pinOpenModal,
     closeModal: pinCloseModal
+  } = useModal();
+  const {
+    open: blockOpen,
+    openModal: blockOpenModal,
+    closeModal: blockCloseModal
   } = useModal();
 
   const { id: userId, following = [], pinnedTweet } = user ?? {};
@@ -147,6 +157,18 @@ export function TweetActions({
       );
     };
 
+  const handleBlockOpen = (closeMenu: () => void) => (): void => {
+    closeMenu();
+    blockOpenModal();
+  };
+
+  const handleBlock = async (): Promise<void> => {
+    if (!userId) return;
+    await manageBlock(blocking ? 'unblock' : 'block', userId, createdBy);
+    toast.success(`You ${blocking ? 'unblocked' : 'blocked'} @${username}`);
+    blockCloseModal();
+  };
+
   const handleLoggedOutAction = (closeMenu: () => void) => (): void => {
     closeMenu();
     void push('/');
@@ -194,6 +216,28 @@ export function TweetActions({
           focusOnMainBtn
           action={handlePin}
           closeModal={pinCloseModal}
+        />
+      </Modal>
+      <Modal
+        modalClassName='max-w-xs bg-main-background w-full p-8 rounded-2xl'
+        open={blockOpen}
+        closeModal={blockCloseModal}
+      >
+        <ActionModal
+          title={`${blocking ? 'Unblock' : 'Block'} @${username}?`}
+          description={
+            blocking
+              ? 'They will be able to follow you and view your Tweets.'
+              : 'They will not be able to follow you or view your Tweets, and you will not see their Tweets in your timeline.'
+          }
+          mainBtnLabel={blocking ? 'Unblock' : 'Block'}
+          mainBtnClassName={
+            blocking
+              ? undefined
+              : 'bg-accent-red hover:bg-accent-red/90 active:bg-accent-red/80'
+          }
+          action={handleBlock}
+          closeModal={blockCloseModal}
         />
       </Modal>
       <Popover>
@@ -285,6 +329,20 @@ export function TweetActions({
                     >
                       <HeroIcon iconName='UserPlusIcon' />
                       Follow @{username}
+                    </Popover.Button>
+                  )}
+                  {signedIn && !isOwner && !blockingByListName && (
+                    <Popover.Button
+                      className={cn(
+                        `accent-tab flex w-full gap-3 rounded-md rounded-t-none p-4
+                         hover:bg-main-sidebar-background`,
+                        !blocking && 'text-accent-red'
+                      )}
+                      as={Button}
+                      onClick={preventBubbling(handleBlockOpen(close))}
+                    >
+                      <HeroIcon iconName='NoSymbolIcon' />
+                      {blocking ? `Unblock @${username}` : `Block @${username}`}
                     </Popover.Button>
                   )}
                 </Popover.Panel>

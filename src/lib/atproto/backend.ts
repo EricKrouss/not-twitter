@@ -267,9 +267,7 @@ type PreparedImageUpload = {
   aspectRatio: AppBskyEmbedImages.Image['aspectRatio'];
 };
 
-type LocalProfileMediaUrls = Partial<
-  Pick<User, 'photoURL' | 'coverPhotoURL'>
->;
+type LocalProfileMediaUrls = Partial<Pick<User, 'photoURL' | 'coverPhotoURL'>>;
 
 type ActorFeedPost = AppBskyFeedDefs.FeedViewPost;
 type AppViewFeedResponse = {
@@ -544,6 +542,11 @@ export type BlueskySettings = {
   };
 };
 
+export type BlockedUsersPage = {
+  users: User[];
+  cursor: string | null;
+};
+
 export class ChatAccessError extends Error {
   constructor(message = 'Authorize messages to continue.') {
     super(message);
@@ -559,6 +562,7 @@ const locallyDeletedTweetIds = new Set<string>();
 const postRefCache = new Map<string, PostRef>();
 const postReplyRefCache = new Map<string, PostReplyRef>();
 const followUriCache = new Map<string, string>();
+const blockUriCache = new Map<string, string>();
 const detailedUserCache = new Set<string>();
 const stagedImages = new Map<string, UploadedImage[]>();
 const listeners = new Set<() => void>();
@@ -920,6 +924,8 @@ function clearActiveAuthState(): void {
   currentUser = null;
   currentFollowing = new Set();
   malformedMediaRepairPromise = null;
+  followUriCache.clear();
+  blockUriCache.clear();
   locallyCreatedTweets.clear();
   locallyDeletedTweetIds.clear();
   serviceAuthTokenCache.clear();
@@ -1069,10 +1075,7 @@ async function createResponseError(response: Response): Promise<
   return error;
 }
 
-function throwServiceError(
-  service: BskyServiceConfig,
-  error: unknown
-): never {
+function throwServiceError(service: BskyServiceConfig, error: unknown): never {
   if (service.chat) throwChatError(error);
 
   const status = getErrorStatus(error);
@@ -1396,11 +1399,15 @@ async function callServiceRawXrpc<T>(
 
   if (data) headers.set('content-type', 'application/json');
 
-  const response = await fetchServiceXrpc(service, buildXrpcPath(method, params), {
-    method: httpMethod,
-    headers,
-    body: data ? JSON.stringify(data) : undefined
-  });
+  const response = await fetchServiceXrpc(
+    service,
+    buildXrpcPath(method, params),
+    {
+      method: httpMethod,
+      headers,
+      body: data ? JSON.stringify(data) : undefined
+    }
+  );
 
   if (!response.ok) {
     throwServiceError(service, await createResponseError(response));
@@ -1481,13 +1488,7 @@ async function callAppXrpc<T>(
   method: string,
   data: Record<string, unknown>
 ): Promise<T> {
-  return callServiceRawXrpc<T>(
-    BSKY_APPVIEW_CONFIG,
-    method,
-    {},
-    data,
-    'POST'
-  );
+  return callServiceRawXrpc<T>(BSKY_APPVIEW_CONFIG, method, {}, data, 'POST');
 }
 
 async function callAppQueryXrpc<T>(
@@ -2062,17 +2063,9 @@ async function prepareImageForBluesky(
   }
 
   const canvas = drawImageToCanvas(image, outputMimeTypes);
-  let blob = await encodeCanvasImage(
-    canvas,
-    targetBytes,
-    outputMimeTypes
-  );
+  let blob = await encodeCanvasImage(canvas, targetBytes, outputMimeTypes);
 
-  while (
-    blob.size > maxBytes &&
-    canvas.width > 640 &&
-    canvas.height > 640
-  ) {
+  while (blob.size > maxBytes && canvas.width > 640 && canvas.height > 640) {
     const nextWidth = Math.max(1, Math.round(canvas.width * 0.82));
     const nextHeight = Math.max(1, Math.round(canvas.height * 0.82));
     const nextCanvas = document.createElement('canvas');
@@ -2098,11 +2091,7 @@ async function prepareImageForBluesky(
 
     resizedContext.drawImage(nextCanvas, 0, 0);
 
-    blob = await encodeCanvasImage(
-      canvas,
-      targetBytes,
-      outputMimeTypes
-    );
+    blob = await encodeCanvasImage(canvas, targetBytes, outputMimeTypes);
   }
 
   if (blob.size > maxBytes) {
@@ -2701,6 +2690,11 @@ export function uriFromPostId(id: string): string {
   return safeAtob(`${padded}${padding}`);
 }
 
+function rkeyFromAtUri(uri: string): string | null {
+  const [, rkey] = uri.match(/^at:\/\/[^/]+\/[^/]+\/([^/]+)$/) ?? [];
+  return rkey ?? null;
+}
+
 function compactArray(count: number, ownerId?: string): string[] {
   const safeCount = Math.max(0, count);
   const placeholders = Array.from({ length: safeCount }, (_, index) =>
@@ -2864,6 +2858,23 @@ function mapProfile(profile: ActorProfileView): User {
   const currentDid = sessionDid ?? '';
   const targetFollowsViewer = !!detailedProfile.viewer?.followedBy;
   const viewerFollowsTarget = !!detailedProfile.viewer?.following;
+  const hasViewerState = !!detailedProfile.viewer;
+  const viewerBlockingUri =
+    typeof detailedProfile.viewer?.blocking === 'string'
+      ? detailedProfile.viewer.blocking
+      : null;
+  const viewerBlockingByListName =
+    detailedProfile.viewer?.blockingByList?.name ?? null;
+  const blockingUri = hasViewerState
+    ? viewerBlockingUri
+    : existing?.blockingUri ?? blockUriCache.get(did) ?? null;
+  const blockingByListName = hasViewerState
+    ? viewerBlockingByListName
+    : existing?.blockingByListName ?? null;
+  const blocking = !!blockingUri || !!blockingByListName;
+  const blockedBy = hasViewerState
+    ? !!detailedProfile.viewer?.blockedBy
+    : existing?.blockedBy ?? false;
   const isCurrentUser = currentUser?.id === did;
   const following = isCurrentUser
     ? Array.from(currentFollowing)
@@ -2877,6 +2888,11 @@ function mapProfile(profile: ActorProfileView): User {
 
   if (detailedProfile.viewer?.following) {
     followUriCache.set(did, detailedProfile.viewer.following);
+  }
+  if (blockingUri) {
+    blockUriCache.set(did, blockingUri);
+  } else if (hasViewerState) {
+    blockUriCache.delete(did);
   }
 
   const profileCreatedAt = Timestamp.fromDate(
@@ -2916,6 +2932,10 @@ function mapProfile(profile: ActorProfileView): User {
       detailedProfile.followersCount ??
       existing?.followersCount ??
       followers.length,
+    blocking,
+    blockedBy,
+    blockingUri,
+    blockingByListName,
     createdAt: profileCreatedAt,
     updatedAt: existing?.updatedAt ?? profileCreatedAt,
     totalTweets: detailedProfile.postsCount ?? existing?.totalTweets ?? 0,
@@ -3952,9 +3972,7 @@ export async function getSubscribedHomeFeeds(): Promise<SubscribedHomeFeed[]> {
   const savedFeeds = getSavedHomeFeedsFromPreferences(
     response.data.preferences
   );
-  const feedUris = Array.from(
-    new Set(savedFeeds.map(({ value }) => value))
-  );
+  const feedUris = Array.from(new Set(savedFeeds.map(({ value }) => value)));
   const generators = await getFeedGeneratorsByUri(feedUris);
 
   return savedFeeds.map((savedFeed) =>
@@ -4527,16 +4545,29 @@ export async function leaveChatConvo(convoId: string): Promise<void> {
 }
 
 export async function blockChatParticipant(actorDid: string): Promise<void> {
+  await blockUser(actorDid);
+}
+
+export async function getBlockedUsersPage(
+  cursor?: string,
+  limit = 50
+): Promise<BlockedUsersPage> {
   if (!sessionDid) throw new Error('Sign in with Bluesky first.');
 
-  await getAgent().app.bsky.graph.block.create(
-    { repo: sessionDid },
-    {
-      subject: actorDid,
-      createdAt: new Date().toISOString()
-    }
-  );
-  notify();
+  const response = await getAppViewAgent().app.bsky.graph.getBlocks({
+    cursor,
+    limit: clampAppViewLimit(limit)
+  });
+  const users = response.data.blocks.map((profile) => {
+    const user = mapProfile(profile);
+    user.blocking = true;
+    user.blockingUri = user.blockingUri ?? blockUriCache.get(user.id) ?? null;
+    userCache.set(user.id, user);
+    userHandleCache.set(user.username, user);
+    return user;
+  });
+
+  return { users, cursor: response.data.cursor ?? null };
 }
 
 export async function reportChatParticipant(actorDid: string): Promise<void> {
@@ -5163,11 +5194,13 @@ async function getLikedFeed(actor: string): Promise<Tweet[]> {
 
   if (!response) return [];
 
-  return filterDeletedTweets(response.data.feed.map((item) => {
-    const tweet = mapFeedItem(item);
-    if (!tweet.userLikes.includes(actor)) tweet.userLikes.unshift(actor);
-    return tweet;
-  }));
+  return filterDeletedTweets(
+    response.data.feed.map((item) => {
+      const tweet = mapFeedItem(item);
+      if (!tweet.userLikes.includes(actor)) tweet.userLikes.unshift(actor);
+      return tweet;
+    })
+  );
 }
 
 async function getThreadReplies(id: string): Promise<Tweet[]> {
@@ -5461,9 +5494,8 @@ async function waitForVideoJob(
     }
 
     await wait(1000);
-    status = (
-      await api.app.bsky.video.getJobStatus({ jobId: status.jobId })
-    ).data.jobStatus;
+    status = (await api.app.bsky.video.getJobStatus({ jobId: status.jobId }))
+      .data.jobStatus;
   }
 
   throw new Error('Bluesky is still processing that video. Try again shortly.');
@@ -5501,10 +5533,7 @@ async function uploadVideoToBlueskyService(
     BSKY_VIDEO_CONFIG,
     'app.bsky.video.uploadVideo'
   );
-  const uploadUrl = new URL(
-    '/xrpc/app.bsky.video.uploadVideo',
-    BSKY_VIDEO_URL
-  );
+  const uploadUrl = new URL('/xrpc/app.bsky.video.uploadVideo', BSKY_VIDEO_URL);
 
   uploadUrl.searchParams.set('did', sessionDid);
   uploadUrl.searchParams.set('name', getVideoUploadName(file));
@@ -5680,9 +5709,9 @@ export async function addTweet(data: AddTweetData): Promise<Tweet> {
   if (mediaEmbeds.length > 1)
     throw new Error('Bluesky allows one media attachment type per Tweet.');
 
-  const mediaEmbed = (imageEmbed ??
-    videoEmbed ??
-    externalEmbed) as PostRecordEmbed | undefined;
+  const mediaEmbed = (imageEmbed ?? videoEmbed ?? externalEmbed) as
+    | PostRecordEmbed
+    | undefined;
   const quoteRef = await getQuoteRef(data.quoteTarget);
   const quoteEmbed = quoteRef
     ? ({
@@ -5978,6 +6007,8 @@ export async function updateProfile(
 
 export async function followUser(targetDid: string): Promise<void> {
   const targetUser = userCache.get(targetDid);
+  if (targetUser?.blocking || targetUser?.blockedBy) return;
+
   const wasFollowing =
     currentFollowing.has(targetDid) ||
     !!(targetUser && sessionDid && targetUser.followers.includes(sessionDid));
@@ -5992,6 +6023,93 @@ export async function followUser(targetDid: string): Promise<void> {
   if (targetUser && sessionDid && !targetUser.followers.includes(sessionDid)) {
     targetUser.followers = [sessionDid, ...targetUser.followers];
     targetUser.followersCount += 1;
+  }
+
+  notify();
+}
+
+function applyLocalFollowRemoval(targetDid: string): void {
+  const targetUser = userCache.get(targetDid);
+  const wasFollowing =
+    currentFollowing.has(targetDid) ||
+    !!(targetUser && sessionDid && targetUser.followers.includes(sessionDid));
+
+  currentFollowing.delete(targetDid);
+  followUriCache.delete(targetDid);
+
+  if (currentUser) {
+    currentUser.following = Array.from(currentFollowing);
+    if (wasFollowing)
+      currentUser.followingCount = Math.max(0, currentUser.followingCount - 1);
+
+    if (currentUser.followers.includes(targetDid)) {
+      currentUser.followers = currentUser.followers.filter(
+        (id) => id !== targetDid
+      );
+      currentUser.followersCount = Math.max(0, currentUser.followersCount - 1);
+    }
+  }
+
+  if (targetUser && sessionDid) {
+    const wasFollower = targetUser.followers.includes(sessionDid);
+    targetUser.followers = targetUser.followers.filter(
+      (id) => id !== sessionDid
+    );
+    if (wasFollower)
+      targetUser.followersCount = Math.max(0, targetUser.followersCount - 1);
+  }
+}
+
+export async function blockUser(targetDid: string): Promise<void> {
+  if (!sessionDid) throw new Error('Sign in with Bluesky first.');
+  if (targetDid === sessionDid) return;
+
+  const targetUser = userCache.get(targetDid);
+  if (targetUser?.blocking && targetUser.blockingUri) return;
+
+  const result = await getAgent().app.bsky.graph.block.create(
+    { repo: sessionDid },
+    {
+      subject: targetDid,
+      createdAt: new Date().toISOString()
+    }
+  );
+
+  blockUriCache.set(targetDid, result.uri);
+  applyLocalFollowRemoval(targetDid);
+
+  if (targetUser) {
+    targetUser.blocking = true;
+    targetUser.blockingUri = result.uri;
+    targetUser.blockingByListName = null;
+  }
+
+  notify();
+}
+
+export async function unblockUser(targetDid: string): Promise<void> {
+  if (!sessionDid) throw new Error('Sign in with Bluesky first.');
+  if (targetDid === sessionDid) return;
+
+  const targetUser = userCache.get(targetDid);
+  const blockUri =
+    blockUriCache.get(targetDid) ??
+    targetUser?.blockingUri ??
+    (await getAppViewAgent().getProfile({ actor: targetDid })).data.viewer
+      ?.blocking ??
+    null;
+
+  if (blockUri) {
+    const rkey = rkeyFromAtUri(blockUri);
+    if (!rkey) throw new Error('Could not resolve block record.');
+    await getAgent().app.bsky.graph.block.delete({ repo: sessionDid, rkey });
+  }
+
+  blockUriCache.delete(targetDid);
+  if (targetUser) {
+    targetUser.blocking = false;
+    targetUser.blockingUri = null;
+    targetUser.blockingByListName = null;
   }
 
   notify();
