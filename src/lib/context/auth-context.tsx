@@ -106,6 +106,8 @@ export function AuthContextProvider({
           id: uid,
           bio: null,
           pronouns: null,
+          birthday: null,
+          messageAllowIncoming: null,
           name: displayName as string,
           theme: null,
           accent: null,

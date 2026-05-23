@@ -108,32 +108,134 @@ const CONTENT_LABELS: Readonly<
 > = [
   {
     label: 'porn',
-    title: 'Adult nudity and sexual activity',
-    description: 'Explicit sexual media and posts.'
+    title: 'Adult Content',
+    description: 'Explicit sexual images.'
   },
   {
     label: 'sexual',
-    title: 'Sexually suggestive content',
-    description: 'Less explicit sexual content.'
+    title: 'Sexually Suggestive',
+    description: 'Does not include nudity.'
   },
   {
     label: 'nudity',
-    title: 'Non-sexual nudity',
-    description: 'Nudity that is not primarily sexual.'
+    title: 'Non-sexual Nudity',
+    description: 'E.g. artistic nudes.'
+  },
+  {
+    label: 'sexual-figurative',
+    title: 'Sexually Suggestive (Cartoon)',
+    description:
+      'Art with explicit or suggestive sexual themes, including provocative imagery or partial nudity.'
   },
   {
     label: 'graphic-media',
-    title: 'Graphic media',
-    description: 'Violence, injury, or disturbing media.'
+    title: 'Graphic Media',
+    description: 'Explicit or potentially disturbing media.'
+  },
+  {
+    label: 'self-harm',
+    title: 'Self-Harm',
+    description:
+      'Promotes self-harm, including graphic images, glorifying discussions, or triggering stories.'
+  },
+  {
+    label: 'sensitive',
+    title: 'Sensitive',
+    description:
+      'May be upsetting, covering topics like substance abuse or mental health issues, cautioning sensitive viewers.'
+  },
+  {
+    label: 'extremist',
+    title: 'Extremist',
+    description:
+      'Radical views advocating violence, hate, or discrimination against individuals or groups.'
+  },
+  {
+    label: 'intolerant',
+    title: 'Intolerance',
+    description: 'Discrimination against protected groups.'
+  },
+  {
+    label: 'threat',
+    title: 'Threats',
+    description:
+      'Promotes violence or harm towards others, including threats, incitement, or advocacy of harm.'
+  },
+  {
+    label: 'rude',
+    title: 'Rude',
+    description:
+      'Rude or impolite, including crude language and disrespectful comments, without constructive purpose.'
+  },
+  {
+    label: 'illicit',
+    title: 'Illicit',
+    description:
+      'Promoting or selling potentially illicit goods, services, or activities.'
+  },
+  {
+    label: 'security',
+    title: 'Security Concerns',
+    description:
+      'May be unsafe and could harm your device, steal your info, or get your account hacked.'
+  },
+  {
+    label: 'unsafe-link',
+    title: 'Unsafe link',
+    description:
+      'Links to harmful sites with malware, phishing, or violating content that risk security and privacy.'
+  },
+  {
+    label: 'impersonation',
+    title: 'Impersonation',
+    description: 'Pretending to be someone else without permission.'
+  },
+  {
+    label: 'misinformation',
+    title: 'Misinformation',
+    description:
+      'Spreading false or misleading info, including unverified claims and harmful conspiracy theories.'
+  },
+  {
+    label: 'scam',
+    title: 'Scam',
+    description: 'Scams, phishing and fraud.'
+  },
+  {
+    label: 'engagement-farming',
+    title: 'Engagement Farming',
+    description:
+      'Insincere content or bulk actions aimed at gaining followers, including frequent follows, posts, and likes.'
+  },
+  {
+    label: 'spam',
+    title: 'Spam',
+    description:
+      'Unwanted, repeated, or unrelated actions that bother users.'
+  },
+  {
+    label: 'rumor',
+    title: 'Unconfirmed',
+    description: 'This claim has not been confirmed by a credible source yet.'
+  },
+  {
+    label: 'misleading',
+    title: 'Misleading',
+    description: 'Altered images/videos, deceptive links, or false statements.'
+  },
+  {
+    label: 'inauthentic',
+    title: 'Inauthentic Account',
+    description: 'Bot or a person pretending to be someone else.'
   }
 ];
 
 const LABEL_OPTIONS: Readonly<
   { value: SettingsLabelPreference; label: string }[]
 > = [
-  { value: 'hide', label: 'Hide' },
+  { value: 'ignore', label: 'Off' },
   { value: 'warn', label: 'Warn' },
-  { value: 'ignore', label: 'Show' }
+  { value: 'hide', label: 'Hide' }
 ];
 
 const REPLY_OPTIONS: Readonly<
@@ -414,6 +516,50 @@ function RadioButtons<T extends string>({
                 ? 'border-main-accent bg-main-accent text-white'
                 : `border-light-border bg-transparent text-main-primary
                    hover:bg-light-primary/10 dark:border-dark-border dark:hover:bg-dark-primary/10`
+            )}
+            disabled={disabled}
+            onClick={(): void => onChange(option.value)}
+            key={option.value}
+          >
+            {saving ? (
+              <CustomIcon className='h-4 w-4' iconName='SpinnerIcon' />
+            ) : (
+              option.label
+            )}
+          </Button>
+        );
+      })}
+    </div>
+  );
+}
+
+function LabelPreferenceButtons({
+  value,
+  disabled,
+  savingValue,
+  onChange
+}: {
+  value: SettingsLabelPreference;
+  disabled?: boolean;
+  savingValue?: string | null;
+  onChange: (value: SettingsLabelPreference) => void;
+}): JSX.Element {
+  return (
+    <div className='grid w-full grid-cols-3 overflow-hidden rounded-md border border-light-border dark:border-dark-border sm:min-w-[310px]'>
+      {LABEL_OPTIONS.map((option) => {
+        const selected = option.value === value;
+        const saving = savingValue === option.value;
+
+        return (
+          <Button
+            className={cn(
+              `flex h-9 items-center justify-center rounded-none border-r border-light-border
+               px-3 py-0 text-center text-sm font-bold last:border-r-0
+               disabled:cursor-wait disabled:opacity-70 dark:border-dark-border`,
+              selected
+                ? 'bg-main-accent text-white'
+                : `bg-transparent text-light-secondary hover:bg-light-primary/10
+                   dark:text-dark-secondary dark:hover:bg-dark-primary/10`
             )}
             disabled={disabled}
             onClick={(): void => onChange(option.value)}
@@ -1271,11 +1417,14 @@ export default function Settings(): JSX.Element {
             }
           />
         </SettingsRow>
+        <SettingsNotice
+          title='Bluesky Moderation Service'
+          description='Control @moderation.bsky.app labels with the same Off, Warn, and Hide rhythm as old Twitter.'
+        />
         {CONTENT_LABELS.map(({ label, title, description }) => (
           <SettingsRow title={title} description={description} key={label}>
-            <RadioButtons
+            <LabelPreferenceButtons
               value={settings.contentLabels[label]}
-              options={LABEL_OPTIONS}
               disabled={!!savingKey}
               savingValue={
                 savingKey?.startsWith(`label-${label}-`)

@@ -142,6 +142,54 @@
     box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
   }
 
+  .twitter-video-volume-slider {
+    @apply h-8 bg-transparent outline-none;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  .twitter-video-volume-slider::-webkit-slider-runnable-track {
+    height: 3px;
+    border-radius: 9999px;
+    background: linear-gradient(
+      to right,
+      #fff var(--twitter-video-volume),
+      rgba(255, 255, 255, 0.45) var(--twitter-video-volume)
+    );
+  }
+
+  .twitter-video-volume-slider::-webkit-slider-thumb {
+    width: 10px;
+    height: 10px;
+    margin-top: -3.5px;
+    border-radius: 9999px;
+    background: #fff;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  .twitter-video-volume-slider::-moz-range-track {
+    height: 3px;
+    border-radius: 9999px;
+    background: rgba(255, 255, 255, 0.45);
+  }
+
+  .twitter-video-volume-slider::-moz-range-progress {
+    height: 3px;
+    border-radius: 9999px;
+    background: #fff;
+  }
+
+  .twitter-video-volume-slider::-moz-range-thumb {
+    width: 10px;
+    height: 10px;
+    border: 0;
+    border-radius: 9999px;
+    background: #fff;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
+  }
+
   .twitter-video-settings-scroll {
     scrollbar-color: #cfd9de transparent;
     scrollbar-width: thin;
@@ -174,5 +222,44 @@
     box-shadow: 0 0 0 2px rgb(var(--main-accent));
     background-color: rgba(var(--main-accent), 0.02);
   }
-}
 
+  .birthday-balloon {
+    position: absolute;
+    bottom: -18vh;
+    display: block;
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: contain;
+    opacity: 0;
+    animation-name: birthday-balloon-float;
+    animation-timing-function: ease-in-out;
+    animation-fill-mode: forwards;
+  }
+
+  @keyframes birthday-balloon-float {
+    0% {
+      opacity: 0;
+      transform: translate3d(0, 16vh, 0) rotate(-5deg);
+    }
+
+    12% {
+      opacity: 0.96;
+    }
+
+    82% {
+      opacity: 0.92;
+    }
+
+    100% {
+      opacity: 0;
+      transform: translate3d(var(--birthday-balloon-sway), -128vh, 0)
+        rotate(7deg);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .birthday-balloons {
+      display: none;
+    }
+  }
+}

@@ -29,6 +29,7 @@ import {
   type ChatMessagesPage,
   type ChatMessage
 } from '@lib/atproto/backend';
+import { useSearchUsers } from '@lib/api/search';
 import { useAuth } from '@lib/context/auth-context';
 import { formatDate } from '@lib/date';
 import { DEFAULT_PROFILE_PHOTO_URL } from '@lib/default-images';
@@ -51,6 +52,7 @@ import type {
   ReactNode,
   UIEvent
 } from 'react';
+import type { User } from '@lib/types/user';
 
 function getRouteParam(value: string | string[] | undefined): string | null {
   if (typeof value === 'string') return value;
@@ -300,6 +302,188 @@ function MessageAvatar({
         />
       )}
     </figure>
+  );
+}
+
+type NewMessageUserRowProps = {
+  user: User;
+  selected: boolean;
+  onSelect: (user: User) => void;
+};
+
+function NewMessageUserRow({
+  user,
+  selected,
+  onSelect
+}: NewMessageUserRowProps): JSX.Element {
+  return (
+    <Button
+      className={cn(
+        `hover-card flex min-h-[72px] w-full items-center justify-between gap-3 rounded-none
+         px-4 text-left font-normal`,
+        selected && 'bg-main-accent/10'
+      )}
+      onClick={(): void => onSelect(user)}
+    >
+      <span className='flex min-w-0 items-center gap-3'>
+        <MessageAvatar src={user.photoURL} alt={user.name} size={48} />
+        <span className='min-w-0'>
+          <span className='flex min-w-0 items-center gap-1'>
+            <span className='truncate font-bold'>{user.name}</span>
+            {user.verified && (
+              <CustomIcon
+                className='h-4 w-4 shrink-0'
+                iconName='TwitterVerifiedIcon'
+              />
+            )}
+          </span>
+          <span className='block truncate text-[15px] text-light-secondary dark:text-dark-secondary'>
+            @{user.username}
+          </span>
+        </span>
+      </span>
+      {selected && (
+        <CustomIcon
+          className='h-5 w-5 shrink-0 text-main-accent'
+          iconName='TwitterCheckIcon'
+        />
+      )}
+    </Button>
+  );
+}
+
+type NewMessageModalProps = {
+  currentUserId: string | undefined;
+  searchValue: string;
+  selectedUser: User | null;
+  starting: boolean;
+  onClose: () => void;
+  onSearchChange: (value: string) => void;
+  onSelectUser: (user: User) => void;
+  onRemoveSelectedUser: () => void;
+  onStart: () => void;
+};
+
+function NewMessageModal({
+  currentUserId,
+  searchValue,
+  selectedUser,
+  starting,
+  onClose,
+  onSearchChange,
+  onSelectUser,
+  onRemoveSelectedUser,
+  onStart
+}: NewMessageModalProps): JSX.Element {
+  const trimmedSearch = searchValue.trim();
+  const { data, error, loading } = useSearchUsers(
+    trimmedSearch,
+    { disabled: !trimmedSearch },
+    { revalidateOnFocus: false }
+  );
+  const users =
+    data?.users.filter(({ id }) => id !== currentUserId).slice(0, 12) ?? [];
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
+    event.preventDefault();
+    if (selectedUser) onStart();
+  };
+
+  const handleSearchChange = ({
+    target: { value }
+  }: ChangeEvent<HTMLInputElement>): void => onSearchChange(value);
+
+  return (
+    <form
+      className='flex h-[650px] max-h-[90vh] flex-col overflow-hidden'
+      onSubmit={handleSubmit}
+    >
+      <header className='flex h-[53px] shrink-0 items-center justify-between border-b border-light-border px-3 dark:border-dark-border'>
+        <div className='flex min-w-0 items-center gap-5'>
+          <Button
+            className='dark-bg-tab p-2 hover:bg-light-primary/10 active:bg-light-primary/20
+                       dark:hover:bg-dark-primary/10 dark:active:bg-dark-primary/20'
+            onClick={onClose}
+            title='Close'
+          >
+            <CustomIcon className='h-5 w-5' iconName='TwitterCloseIcon' />
+          </Button>
+          <h2 className='truncate text-xl font-extrabold'>New message</h2>
+        </div>
+        <Button
+          className='accent-tab accent-bg-tab rounded-full bg-main-accent px-4 py-1.5
+                     text-[15px] font-bold text-white disabled:opacity-50'
+          disabled={!selectedUser}
+          loading={starting}
+          type='submit'
+        >
+          Next
+        </Button>
+      </header>
+
+      <div className='flex min-h-[54px] shrink-0 flex-wrap items-center gap-2 border-b border-light-border px-4 py-2 dark:border-dark-border'>
+        <span className='text-[15px] text-light-primary dark:text-dark-primary'>
+          To:
+        </span>
+        {selectedUser && (
+          <span className='flex min-w-0 max-w-full items-center gap-2 rounded-full border border-main-accent bg-main-accent/10 py-1 pl-2 pr-1 text-main-accent'>
+            <MessageAvatar
+              src={selectedUser.photoURL}
+              alt={selectedUser.name}
+              size={24}
+            />
+            <span className='truncate text-[15px] font-bold'>
+              {selectedUser.name}
+            </span>
+            <Button
+              className='flex h-6 w-6 items-center justify-center rounded-full p-0 hover:bg-main-accent/10'
+              onClick={onRemoveSelectedUser}
+              title='Remove'
+            >
+              <CustomIcon className='h-3.5 w-3.5' iconName='TwitterCloseIcon' />
+            </Button>
+          </span>
+        )}
+        <input
+          className='min-w-[180px] flex-1 bg-transparent text-[15px] outline-none
+                     placeholder:text-light-secondary dark:placeholder:text-dark-secondary'
+          autoFocus
+          placeholder={selectedUser ? '' : 'Search people'}
+          value={searchValue}
+          onChange={handleSearchChange}
+        />
+      </div>
+
+      <div className='min-h-0 flex-1 overflow-y-auto'>
+        {!trimmedSearch ? (
+          <div className='px-8 py-5 text-center text-[15px] text-light-secondary dark:text-dark-secondary'>
+            Search people
+          </div>
+        ) : loading ? (
+          <Loading className='mt-5' />
+        ) : error ? (
+          <div className='px-8 py-5 text-center text-[15px] text-light-secondary dark:text-dark-secondary'>
+            {getErrorMessage(error)}
+          </div>
+        ) : users.length ? (
+          <>
+            <h3 className='px-4 pt-4 pb-2 text-[15px] font-bold'>People</h3>
+            {users.map((user) => (
+              <NewMessageUserRow
+                selected={selectedUser?.id === user.id}
+                user={user}
+                onSelect={onSelectUser}
+                key={user.id}
+              />
+            ))}
+          </>
+        ) : (
+          <div className='px-8 py-5 text-center text-[15px] text-light-secondary dark:text-dark-secondary'>
+            No people found
+          </div>
+        )}
+      </div>
+    </form>
   );
 }
 
@@ -1007,10 +1191,16 @@ export default function Messages(): JSX.Element {
   const [messageCursor, setMessageCursor] = useState<string | null>(null);
   const [inputValue, setInputValue] = useState('');
   const [searchValue, setSearchValue] = useState('');
+  const [newMessageOpen, setNewMessageOpen] = useState(false);
+  const [composeSearchValue, setComposeSearchValue] = useState('');
+  const [selectedComposeUser, setSelectedComposeUser] = useState<User | null>(
+    null
+  );
   const [loadingConvos, setLoadingConvos] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [loadingMoreMessages, setLoadingMoreMessages] = useState(false);
   const [openingActor, setOpeningActor] = useState(false);
+  const [startingConversation, setStartingConversation] = useState(false);
   const [sending, setSending] = useState(false);
   const [authorizingMessages, setAuthorizingMessages] = useState(false);
   const [activeError, setActiveError] = useState<Error | null>(null);
@@ -1073,7 +1263,7 @@ export default function Messages(): JSX.Element {
   useEffect(() => {
     if (!data) return;
 
-    setConvos(data.convos);
+    setConvos((currentConvos) => mergeConvos(currentConvos, data.convos));
     setConvoCursor(data.cursor);
     data.convos.forEach(({ id, unreadCount }) =>
       unreadCountsRef.current.set(id, unreadCount)
@@ -1126,6 +1316,7 @@ export default function Messages(): JSX.Element {
   }, [activeConvoId, loadingMessages, loadingMoreMessages, messages.length]);
 
   const loadThread = useCallback(async (convoId: string): Promise<void> => {
+    activeConvoIdRef.current = convoId;
     setActiveConvoId(convoId);
     setMessages([]);
     setMessageCursor(null);
@@ -1157,6 +1348,25 @@ export default function Messages(): JSX.Element {
     }
   }, []);
 
+  const openConversationShell = useCallback(
+    (convo: ChatConvo): void => {
+      activeConvoIdRef.current = convo.id;
+      setConvos((currentConvos) => mergeConvos(currentConvos, [convo]));
+      setActiveConvoId(convo.id);
+      setMessages([]);
+      setMessageCursor(null);
+      setActiveError(null);
+      setReactionPickerMessageId(null);
+      setShowConversationInfo(false);
+      setShowMessageRequests(false);
+      setShowChatSettings(false);
+      setLoadingMessages(false);
+      setLoadingMoreMessages(false);
+      closeDeleteConversationModal();
+    },
+    [closeDeleteConversationModal]
+  );
+
   useEffect(() => {
     if (
       activeConvoId ||
@@ -1186,9 +1396,10 @@ export default function Messages(): JSX.Element {
       .then(async (convo) => {
         if (canceled) return;
 
-        setConvos((currentConvos) => mergeConvos(currentConvos, [convo]));
-        await loadThread(convo.id);
-        await replace('/messages', undefined, { shallow: true });
+        openConversationShell(convo);
+        setOpeningActor(false);
+        void replace('/messages', undefined, { shallow: true });
+        if (convo.lastMessage) await loadThread(convo.id);
       })
       .catch((error) => {
         if (canceled) return;
@@ -1204,7 +1415,7 @@ export default function Messages(): JSX.Element {
     return () => {
       canceled = true;
     };
-  }, [isReady, loadThread, query.actor, replace]);
+  }, [isReady, loadThread, openConversationShell, query.actor, replace]);
 
   const showNewMessageAlert = useCallback(
     (convo: ChatConvo): void => {
@@ -1313,6 +1524,7 @@ export default function Messages(): JSX.Element {
 
   useEffect(() => {
     if (!activeConvoId) return;
+    if (!activeConvo?.lastMessage && messages.length === 0) return;
 
     const intervalId = window.setInterval(
       () => void refreshActiveMessages().catch(() => undefined),
@@ -1320,7 +1532,12 @@ export default function Messages(): JSX.Element {
     );
 
     return () => window.clearInterval(intervalId);
-  }, [activeConvoId, refreshActiveMessages]);
+  }, [
+    activeConvoId,
+    activeConvo?.lastMessage,
+    messages.length,
+    refreshActiveMessages
+  ]);
 
   const loadMoreConvos = async (): Promise<void> => {
     if (!convoCursor) return;
@@ -1572,6 +1789,52 @@ export default function Messages(): JSX.Element {
     void deleteRequest(convo);
   };
 
+  const openNewMessageModal = (): void => setNewMessageOpen(true);
+
+  const closeNewMessageModal = (): void => {
+    if (startingConversation) return;
+
+    setNewMessageOpen(false);
+    setComposeSearchValue('');
+    setSelectedComposeUser(null);
+  };
+
+  const selectComposeUser = (user: User): void => {
+    setSelectedComposeUser(user);
+    setComposeSearchValue('');
+  };
+
+  const removeSelectedComposeUser = (): void => setSelectedComposeUser(null);
+
+  const startSelectedConversation = async (): Promise<void> => {
+    if (!selectedComposeUser) return;
+
+    setStartingConversation(true);
+    setActiveError(null);
+
+    try {
+      const convo = await getChatConvoForActor(selectedComposeUser.username);
+
+      openConversationShell(convo);
+      setNewMessageOpen(false);
+      setComposeSearchValue('');
+      setSelectedComposeUser(null);
+      if (convo.lastMessage) await loadThread(convo.id);
+      void mutate();
+    } catch (error) {
+      const nextError = toError(error);
+
+      setActiveError(nextError);
+      toast.error(getErrorMessage(error));
+    } finally {
+      setStartingConversation(false);
+    }
+  };
+
+  const startSelectedConversationClick = (): void => {
+    void startSelectedConversation();
+  };
+
   const handleSearchChange = ({
     target: { value }
   }: ChangeEvent<HTMLInputElement>): void => setSearchValue(value);
@@ -1733,6 +1996,23 @@ export default function Messages(): JSX.Element {
   return (
     <>
       <Modal
+        modalClassName='w-full max-w-[600px] overflow-hidden rounded-2xl bg-main-background shadow-xl'
+        open={newMessageOpen}
+        closeModal={closeNewMessageModal}
+      >
+        <NewMessageModal
+          currentUserId={user?.id}
+          searchValue={composeSearchValue}
+          selectedUser={selectedComposeUser}
+          starting={startingConversation}
+          onClose={closeNewMessageModal}
+          onRemoveSelectedUser={removeSelectedComposeUser}
+          onSearchChange={setComposeSearchValue}
+          onSelectUser={selectComposeUser}
+          onStart={startSelectedConversationClick}
+        />
+      </Modal>
+      <Modal
         modalClassName='w-full max-w-xs rounded-2xl bg-main-background p-8'
         open={deleteConversationOpen}
         closeModal={closeDeleteConversationModal}
@@ -1791,6 +2071,7 @@ export default function Messages(): JSX.Element {
                   <IconButton
                     iconName='TwitterNewMessageIcon'
                     label='New message'
+                    onClick={openNewMessageModal}
                   />
                 </header>
                 <MessageRequestsRow
@@ -1820,7 +2101,7 @@ export default function Messages(): JSX.Element {
                   className='min-h-0 flex-1 overflow-y-auto'
                   onScroll={handleConvosScroll}
                 >
-                  {!data && !error ? (
+                  {!data && !error && !convos.length ? (
                     <Loading className='mt-5' />
                   ) : error ? (
                     <MessagesError
@@ -1828,8 +2109,6 @@ export default function Messages(): JSX.Element {
                       authorizingMessages={authorizingMessages}
                       onAuthorizeMessages={handleAuthorizeMessagesClick}
                     />
-                  ) : openingActor ? (
-                    <Loading className='mt-5' />
                   ) : filteredConvos.length ? (
                     <>
                       {filteredConvos.map((convo) => (
@@ -1945,7 +2224,7 @@ export default function Messages(): JSX.Element {
                       onClick={openConversationInfo}
                     />
                   </header>
-                  {loadingMessages || openingActor ? (
+                  {loadingMessages ? (
                     <Loading className='mt-5' />
                   ) : activeError ? (
                     <MessagesError
@@ -2158,6 +2437,8 @@ export default function Messages(): JSX.Element {
                   )}
                 </>
               )
+            ) : openingActor ? (
+              <Loading className='mt-5' />
             ) : (
               <div className='flex flex-1 items-center justify-center px-8'>
                 <div className='max-w-sm'>

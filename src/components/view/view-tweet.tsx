@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { useCallback, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import cn from 'clsx';
 import { useAuth } from '@lib/context/auth-context';
@@ -21,11 +22,12 @@ import { TweetDate } from '@components/tweet/tweet-date';
 import { Input } from '@components/input/input';
 import type { RefObject } from 'react';
 import type { User } from '@lib/types/user';
-import type { Tweet } from '@lib/types/tweet';
+import type { Tweet, TweetWithUser } from '@lib/types/tweet';
 
 type ViewTweetProps = Tweet & {
   user: User;
   viewTweetRef?: RefObject<HTMLElement>;
+  onReplySent?: (tweet: TweetWithUser) => void;
 };
 
 export function ViewTweet(tweet: ViewTweetProps): JSX.Element {
@@ -33,6 +35,7 @@ export function ViewTweet(tweet: ViewTweetProps): JSX.Element {
     id: tweetId,
     text,
     images,
+    mediaWarning,
     card,
     quotedTweet,
     parent,
@@ -44,7 +47,8 @@ export function ViewTweet(tweet: ViewTweetProps): JSX.Element {
     userReplies,
     userQuotes = 0,
     viewTweetRef,
-    user: tweetUserData
+    user: tweetUserData,
+    onReplySent
   } = tweet;
 
   const { id: ownerId, name, username, verified, photoURL } = tweetUserData;
@@ -52,6 +56,9 @@ export function ViewTweet(tweet: ViewTweetProps): JSX.Element {
   const { user } = useAuth();
 
   const { open, openModal, closeModal } = useModal();
+  const [optimisticReplyCount, setOptimisticReplyCount] =
+    useState(userReplies);
+  const [optimisticQuoteCount, setOptimisticQuoteCount] = useState(userQuotes);
 
   const tweetLink = getTweetPath(tweetId, username);
   const displayCard = card ?? createYouTubeCardFromText(text);
@@ -64,6 +71,26 @@ export function ViewTweet(tweet: ViewTweetProps): JSX.Element {
   const reply = !!parent;
 
   const { id: parentId, username: parentUsername = username } = parent ?? {};
+
+  useEffect(() => {
+    setOptimisticReplyCount(userReplies);
+  }, [userReplies]);
+
+  useEffect(() => {
+    setOptimisticQuoteCount(userQuotes);
+  }, [userQuotes]);
+
+  const handleReplySent = useCallback(
+    (replyTweet: TweetWithUser): void => {
+      setOptimisticReplyCount((count) => count + 1);
+      onReplySent?.(replyTweet);
+    },
+    [onReplySent]
+  );
+
+  const handleQuoteTweetSent = useCallback((): void => {
+    setOptimisticQuoteCount((count) => count + 1);
+  }, []);
 
   return (
     <motion.article
@@ -83,7 +110,11 @@ export function ViewTweet(tweet: ViewTweetProps): JSX.Element {
         open={open}
         closeModal={closeModal}
       >
-        <TweetReplyModal tweet={tweet} closeModal={closeModal} />
+        <TweetReplyModal
+          tweet={tweet}
+          closeModal={closeModal}
+          onReplySent={handleReplySent}
+        />
       </Modal>
       <div className='flex flex-col gap-2'>
         {reply && (
@@ -147,6 +178,7 @@ export function ViewTweet(tweet: ViewTweetProps): JSX.Element {
             tweetData={tweet}
             imagesPreview={images}
             previewCount={images.length}
+            moderationWarning={mediaWarning}
           />
         )}
         <TweetEmbed
@@ -169,12 +201,19 @@ export function ViewTweet(tweet: ViewTweetProps): JSX.Element {
             userLikes={userLikes}
             bookmarkCount={bookmarkCount}
             userRetweets={userRetweets}
-            userReplies={userReplies}
-            userQuotes={userQuotes}
+            userReplies={optimisticReplyCount}
+            userQuotes={optimisticQuoteCount}
             openModal={openModal}
+            onQuoteTweetSent={handleQuoteTweetSent}
           />
         </div>
-        {user && <Input reply parent={{ id: tweetId, username: username }} />}
+        {user && (
+          <Input
+            reply
+            parent={{ id: tweetId, username: username }}
+            onTweetSent={handleReplySent}
+          />
+        )}
       </div>
     </motion.article>
   );

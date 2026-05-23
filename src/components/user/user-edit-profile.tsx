@@ -4,6 +4,11 @@ import cn from 'clsx';
 import { useUser } from '@lib/context/user-context';
 import { useModal } from '@lib/hooks/useModal';
 import { updateUserData } from '@lib/atproto/utils';
+import {
+  BIRTHDAY_MONTHS,
+  getBirthdayDayCount,
+  type ProfileBirthday
+} from '@lib/profile-birthday';
 import { sleep } from '@lib/utils';
 import { getImagesData } from '@lib/validation';
 import { Modal } from '@components/modal/modal';
@@ -20,8 +25,13 @@ import type { FilesWithId } from '@lib/types/file';
 import type { User, EditableData, EditableUserData } from '@lib/types/user';
 import type { InputFieldProps } from '@components/input/input-field';
 
+type TextEditableData = Exclude<
+  EditableData,
+  'birthday' | 'photoURL' | 'coverPhotoURL'
+>;
+
 type RequiredInputFieldProps = Omit<InputFieldProps, 'handleChange'> & {
-  inputId: EditableData;
+  inputId: TextEditableData;
 };
 
 type UserImages = Record<
@@ -29,10 +39,7 @@ type UserImages = Record<
   FilesWithId
 >;
 
-type TrimmedTexts = Pick<
-  EditableUserData,
-  Exclude<EditableData, 'photoURL' | 'coverPhotoURL'>
->;
+type TrimmedTexts = Pick<EditableUserData, TextEditableData>;
 
 type UserEditProfileProps = {
   hide?: boolean;
@@ -47,9 +54,86 @@ function getErrorMessage(error: unknown): string | null {
 }
 
 function getEditableUserData(user: User): EditableUserData {
-  const { bio, name, pronouns, website, photoURL, coverPhotoURL } = user;
+  const { bio, name, pronouns, birthday, website, photoURL, coverPhotoURL } =
+    user;
 
-  return { bio, name, pronouns, website, photoURL, coverPhotoURL };
+  return { bio, name, pronouns, birthday, website, photoURL, coverPhotoURL };
+}
+
+type BirthdayFieldProps = {
+  birthday: ProfileBirthday | null;
+  handleMonthChange: (event: ChangeEvent<HTMLSelectElement>) => void;
+  handleDayChange: (event: ChangeEvent<HTMLSelectElement>) => void;
+  clearBirthday: () => void;
+};
+
+function BirthdayField({
+  birthday,
+  handleMonthChange,
+  handleDayChange,
+  clearBirthday
+}: BirthdayFieldProps): JSX.Element {
+  const dayCount = birthday ? getBirthdayDayCount(birthday.month) : 31;
+  const selectClassName =
+    'h-[58px] w-full rounded bg-main-background px-3 pt-5 text-base outline-none ring-1 ring-light-line-reply transition-shadow focus:ring-2 focus:!ring-main-accent dark:ring-dark-border';
+
+  return (
+    <div className='flex flex-col gap-1'>
+      <div className='flex items-center justify-between'>
+        <span className='text-sm text-light-secondary dark:text-dark-secondary'>
+          Birthday
+        </span>
+        {birthday && (
+          <button
+            className='custom-underline text-sm text-main-accent'
+            type='button'
+            onClick={clearBirthday}
+          >
+            Clear
+          </button>
+        )}
+      </div>
+      <div className='grid grid-cols-[minmax(0,1.45fr)_minmax(86px,0.55fr)] gap-3'>
+        <label className='relative'>
+          <span className='absolute left-3 top-1 text-sm text-light-secondary dark:text-dark-secondary'>
+            Month
+          </span>
+          <select
+            className={selectClassName}
+            value={birthday?.month ?? ''}
+            onChange={handleMonthChange}
+          >
+            <option value=''>Month</option>
+            {BIRTHDAY_MONTHS.map((month, index) => (
+              <option value={index + 1} key={month}>
+                {month}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className='relative'>
+          <span className='absolute left-3 top-1 text-sm text-light-secondary dark:text-dark-secondary'>
+            Day
+          </span>
+          <select
+            className={cn(selectClassName, !birthday && 'opacity-70')}
+            value={birthday?.day ?? ''}
+            onChange={handleDayChange}
+            disabled={!birthday}
+          >
+            <option value=''>Day</option>
+            {Array.from({ length: dayCount }, (_, index) => index + 1).map(
+              (day) => (
+                <option value={day} key={day}>
+                  {day}
+                </option>
+              )
+            )}
+          </select>
+        </label>
+      </div>
+    </div>
+  );
 }
 
 export function UserEditProfile({ hide }: UserEditProfileProps): JSX.Element {
@@ -59,7 +143,7 @@ export function UserEditProfile({ hide }: UserEditProfileProps): JSX.Element {
   const [loading, setLoading] = useState(false);
 
   const currentUser = user as User;
-  const { bio, name, pronouns, website, photoURL, coverPhotoURL } =
+  const { bio, name, pronouns, birthday, website, photoURL, coverPhotoURL } =
     currentUser;
 
   const [editUserData, setEditUserData] = useState<EditableUserData>(() =>
@@ -84,11 +168,12 @@ export function UserEditProfile({ hide }: UserEditProfileProps): JSX.Element {
         bio,
         name,
         pronouns,
+        birthday,
         website,
         photoURL,
         coverPhotoURL
       });
-  }, [open, bio, name, pronouns, website, photoURL, coverPhotoURL]);
+  }, [open, bio, name, pronouns, birthday, website, photoURL, coverPhotoURL]);
 
   const inputNameError = !editUserData.name?.trim()
     ? "Name can't be blank"
@@ -110,7 +195,7 @@ export function UserEditProfile({ hide }: UserEditProfileProps): JSX.Element {
         })
       };
 
-      const trimmedKeys: Readonly<EditableData[]> = [
+      const trimmedKeys: Readonly<TextEditableData[]> = [
         'name',
         'bio',
         'pronouns',
@@ -189,7 +274,7 @@ export function UserEditProfile({ hide }: UserEditProfileProps): JSX.Element {
   };
 
   const cleanImage = (): void => {
-    const imagesKey: Readonly<Partial<EditableData>[]> = [
+    const imagesKey: Readonly<Array<keyof UserImages>> = [
       'photoURL',
       'coverPhotoURL'
     ];
@@ -252,11 +337,47 @@ export function UserEditProfile({ hide }: UserEditProfileProps): JSX.Element {
   };
 
   const handleChange =
-    (key: EditableData) =>
+    (key: TextEditableData) =>
     ({
       target: { value }
     }: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
       setEditUserData({ ...editUserData, [key]: value });
+
+  const handleBirthdayMonthChange = ({
+    target: { value }
+  }: ChangeEvent<HTMLSelectElement>): void => {
+    const nextMonth = Number(value);
+
+    setEditUserData((currentData) => {
+      if (!nextMonth) return { ...currentData, birthday: null };
+
+      const dayCount = getBirthdayDayCount(nextMonth);
+      const nextDay = Math.min(currentData.birthday?.day ?? 1, dayCount);
+
+      return {
+        ...currentData,
+        birthday: { month: nextMonth, day: nextDay }
+      };
+    });
+  };
+
+  const handleBirthdayDayChange = ({
+    target: { value }
+  }: ChangeEvent<HTMLSelectElement>): void => {
+    const nextDay = Number(value);
+
+    setEditUserData((currentData) => {
+      if (!currentData.birthday || !nextDay) return currentData;
+
+      return {
+        ...currentData,
+        birthday: { ...currentData.birthday, day: nextDay }
+      };
+    });
+  };
+
+  const clearBirthday = (): void =>
+    setEditUserData((currentData) => ({ ...currentData, birthday: null }));
 
   const handleKeyboardShortcut = ({
     key,
@@ -335,6 +456,12 @@ export function UserEditProfile({ hide }: UserEditProfileProps): JSX.Element {
                 key={inputData.inputId}
               />
             ))}
+            <BirthdayField
+              birthday={editUserData.birthday}
+              handleMonthChange={handleBirthdayMonthChange}
+              handleDayChange={handleBirthdayDayChange}
+              clearBirthday={clearBirthday}
+            />
           </EditProfileModal>
         )}
       </Modal>

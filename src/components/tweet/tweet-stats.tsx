@@ -22,6 +22,7 @@ type TweetStatsProps = Pick<
   quoteTweet?: TweetWithUser;
   viewTweet?: boolean;
   openModal?: () => void;
+  onQuoteTweetSent?: (tweet: TweetWithUser) => void;
 };
 
 export function TweetStats({
@@ -35,7 +36,8 @@ export function TweetStats({
   bookmarkCount,
   userReplies: totalReplies,
   userQuotes: totalQuotes,
-  openModal
+  openModal,
+  onQuoteTweetSent
 }: TweetStatsProps): JSX.Element {
   const { userBookmarks } = useAuth();
   const { push } = useRouter();
@@ -307,6 +309,7 @@ export function TweetStats({
           retweeted={tweetIsRetweeted}
           quoteTweet={userId ? quoteTweet : undefined}
           disabled={updatingRetweet}
+          onQuoteTweetSent={onQuoteTweetSent}
         />
         <TweetOption
           className={cn(

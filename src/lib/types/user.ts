@@ -1,10 +1,15 @@
 import type { Theme, Accent } from './theme';
 import type { Timestamp, DataConverter } from '@lib/atproto/store';
+import type { ProfileBirthday } from '@lib/profile-birthday';
+
+export type UserMessageAllowIncoming = 'all' | 'following' | 'none';
 
 export type User = {
   id: string;
   bio: string | null;
   pronouns: string | null;
+  birthday: ProfileBirthday | null;
+  messageAllowIncoming: UserMessageAllowIncoming | null;
   name: string;
   theme: Theme | null;
   accent: Accent | null;
@@ -32,7 +37,13 @@ export type User = {
 
 export type EditableData = Extract<
   keyof User,
-  'bio' | 'name' | 'pronouns' | 'website' | 'photoURL' | 'coverPhotoURL'
+  | 'bio'
+  | 'name'
+  | 'pronouns'
+  | 'birthday'
+  | 'website'
+  | 'photoURL'
+  | 'coverPhotoURL'
 >;
 
 export type EditableUserData = Pick<User, EditableData>;
@@ -46,6 +57,8 @@ export const userConverter: DataConverter<User> = {
     return {
       ...data,
       muting: data.muting ?? false,
+      birthday: data.birthday ?? null,
+      messageAllowIncoming: data.messageAllowIncoming ?? null,
       mutingByListName: data.mutingByListName ?? null,
       blocking: data.blocking ?? false,
       blockedBy: data.blockedBy ?? false,

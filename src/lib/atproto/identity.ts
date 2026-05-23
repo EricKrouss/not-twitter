@@ -88,3 +88,12 @@ export function normalizeAtprotoLoginIdentifier(value: string): string {
 
   return normalizedIdentifier ?? value.trim();
 }
+
+export function formatAtprotoDisplayIdentifier(
+  value: string | null | undefined
+): string {
+  const identifier = value?.trim();
+  if (!identifier) return '';
+
+  return identifier.startsWith('did:') ? identifier : `@${identifier}`;
+}

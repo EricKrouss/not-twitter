@@ -25,6 +25,7 @@ type TweetRetweetMenuProps = {
   iconSizeClassName?: string;
   statsContainerClassName?: string;
   onRetweet: () => Promise<void> | void;
+  onQuoteTweetSent?: (tweet: TweetWithUser) => void;
 };
 
 export function TweetRetweetMenu({
@@ -39,7 +40,8 @@ export function TweetRetweetMenu({
   iconClassName,
   iconSizeClassName,
   statsContainerClassName,
-  onRetweet
+  onRetweet,
+  onQuoteTweetSent
 }: TweetRetweetMenuProps): JSX.Element {
   const { open: modalOpen, openModal, closeModal } = useModal();
 
@@ -62,7 +64,11 @@ export function TweetRetweetMenu({
         closeModal={closeModal}
       >
         {quoteTweet && (
-          <TweetQuoteModal tweet={quoteTweet} closeModal={closeModal} />
+          <TweetQuoteModal
+            tweet={quoteTweet}
+            closeModal={closeModal}
+            onQuoteTweetSent={onQuoteTweetSent}
+          />
         )}
       </Modal>
       <Popover className='relative'>

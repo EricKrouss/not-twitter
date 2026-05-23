@@ -3,6 +3,8 @@ import { motion } from 'framer-motion';
 import useSWR from 'swr';
 import { useAuth } from '@lib/context/auth-context';
 import { useUser } from '@lib/context/user-context';
+import { formatAtprotoDisplayIdentifier } from '@lib/atproto/identity';
+import { isProfileBirthdayToday } from '@lib/profile-birthday';
 import { getProfileRouteId } from '@lib/static-routes';
 import { checkCanChatWithActor } from '@lib/atproto/backend';
 import { SEO } from '@components/common/seo';
@@ -17,8 +19,23 @@ import { ToolTip } from '@components/ui/tooltip';
 import { FollowButton } from '@components/ui/follow-button';
 import { variants } from '@components/user/user-header';
 import { UserEditProfile } from '@components/user/user-edit-profile';
+import { UserBirthdayBalloons } from '@components/user/user-birthday-balloons';
 import { UserShare } from '@components/user/user-share';
 import type { LayoutProps } from './common-layout';
+import type { User } from '@lib/types/user';
+
+function canViewerMessageUser(
+  targetUser: User,
+  viewerId: string | undefined
+): boolean {
+  if (!viewerId) return false;
+
+  if (targetUser.messageAllowIncoming === 'all') return true;
+  if (targetUser.messageAllowIncoming === 'following')
+    return targetUser.following.includes(viewerId);
+
+  return false;
+}
 
 export function UserHomeLayout({ children }: LayoutProps): JSX.Element {
   const { user, isAdmin } = useAuth();
@@ -30,6 +47,7 @@ export function UserHomeLayout({ children }: LayoutProps): JSX.Element {
     query: { id }
   } = useRouter();
   const routeId = (Array.isArray(id) ? id[0] : id) ?? getProfileRouteId(asPath);
+  const routeLabel = formatAtprotoDisplayIdentifier(routeId);
 
   const coverData = userData?.coverPhotoURL
     ? { src: userData.coverPhotoURL, alt: userData.name }
@@ -47,6 +65,15 @@ export function UserHomeLayout({ children }: LayoutProps): JSX.Element {
   const viewerBlockedByUser = !!userData?.blockedBy;
   const profileIsBlocked =
     !!userData && (viewerBlockedByUser || viewerBlocksUser);
+  const showMessageButton =
+    !!userData &&
+    signedIn &&
+    !profileIsBlocked &&
+    canViewerMessageUser(userData, userId);
+  const showBirthdayBalloons =
+    !!userData &&
+    !profileIsBlocked &&
+    isProfileBirthdayToday(userData.birthday);
 
   const { data: canDM } = useSWR(
     userData && signedIn && !isOwner && !profileIsBlocked ? ['can-dm', userData.id] : null,
@@ -66,7 +93,8 @@ export function UserHomeLayout({ children }: LayoutProps): JSX.Element {
           title={`${`${userData.name} (@${userData.username})`} / Not Twitter`}
         />
       )}
-      <motion.section {...variants} exit={undefined}>
+      {showBirthdayBalloons && <UserBirthdayBalloons />}
+      <motion.section className='relative' {...variants} exit={undefined}>
         {loading ? (
           <Loading className='mt-5' />
         ) : !userData ? (
@@ -75,7 +103,9 @@ export function UserHomeLayout({ children }: LayoutProps): JSX.Element {
             <div className='flex flex-col'>
               <div className='relative flex flex-col gap-3 px-4 py-3 pb-12'>
                 <UserHomeAvatar />
-                <p className='text-xl font-extrabold'>@{routeId}</p>
+                <p className='break-words text-xl font-extrabold'>
+                  {routeLabel}
+                </p>
               </div>
               <div className='mx-auto w-full max-w-[250px] px-8 pt-5 text-left'>
                 <p className='text-[27px] font-extrabold leading-8'>
@@ -105,7 +135,7 @@ export function UserHomeLayout({ children }: LayoutProps): JSX.Element {
                       muting={userData.muting}
                       mutingByListName={userData.mutingByListName}
                     />
-                    {signedIn && !profileIsBlocked && canDM && (
+                    {showMessageButton && canDM && (
                       <Button
                         className='dark-bg-tab group relative border border-light-line-reply p-2
                                    hover:bg-light-primary/10 active:bg-light-primary/20 dark:border-light-secondary

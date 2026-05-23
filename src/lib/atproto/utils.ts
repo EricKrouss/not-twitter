@@ -15,6 +15,7 @@ import {
   unmuteUser,
   unfollowUser,
   updateProfile,
+  type ModerationReportReason,
   type ProfileMediaFiles
 } from '@lib/atproto/backend';
 import type { Query } from '@lib/atproto/store';
@@ -102,12 +103,20 @@ export async function manageMute(
   else await unmuteUser(targetUserId);
 }
 
-export function reportTweet(tweetId: string): Promise<void> {
-  return reportPost(tweetId);
+export function reportTweet(
+  tweetId: string,
+  reasonType: ModerationReportReason,
+  reason?: string
+): Promise<void> {
+  return reportPost(tweetId, reasonType, reason);
 }
 
-export function reportAccount(targetUserId: string): Promise<void> {
-  return reportUser(targetUserId);
+export function reportAccount(
+  targetUserId: string,
+  reasonType: ModerationReportReason,
+  reason?: string
+): Promise<void> {
+  return reportUser(targetUserId, reasonType, reason);
 }
 
 export async function removeTweet(tweetId: string): Promise<void> {

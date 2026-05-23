@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import cn from 'clsx';
 import useSWR from 'swr';
@@ -410,6 +410,22 @@ export default function Home(): JSX.Element {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const handleTweetSent = useCallback(
+    (tweet: TweetWithUser): void => {
+      if (tweet.parent) return;
+
+      setNewTweets((currentNewTweets) =>
+        currentNewTweets.filter(({ id }) => id !== tweet.id)
+      );
+      setFeed((currentFeed) => {
+        const nextFeed = prependTweets(currentFeed, [tweet]);
+        if (activeTab === 'following') clearHomeBadge(nextFeed[0]?.id ?? null);
+        return nextFeed;
+      });
+    },
+    [activeTab, clearHomeBadge]
+  );
+
   return (
     <MainContainer
       className='relative before:pointer-events-none before:absolute before:inset-y-0 before:right-0
@@ -510,7 +526,7 @@ export default function Home(): JSX.Element {
           )}
         </AnimatePresence>
       </header>
-      {!isMobile && <Input />}
+      {!isMobile && <Input onTweetSent={handleTweetSent} />}
       <section className='mt-0.5 xs:mt-0'>
         {loading ? (
           <Loading className='mt-5' />
@@ -524,7 +540,11 @@ export default function Home(): JSX.Element {
           <>
             <AnimatePresence>
               {feed.map((tweet) => (
-                <Tweet {...tweet} key={tweet.id} />
+                <Tweet
+                  {...tweet}
+                  onTweetSent={handleTweetSent}
+                  key={tweet.id}
+                />
               ))}
             </AnimatePresence>
             {cursor && (
