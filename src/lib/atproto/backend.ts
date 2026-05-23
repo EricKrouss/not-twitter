@@ -9,8 +9,6 @@ import {
   AppBskyLabelerDefs,
   Agent,
   AtpAgent,
-  BlobRef,
-  jsonToLex,
   moderateNotification,
   moderatePost,
   RichText,
@@ -28,12 +26,18 @@ import {
   type ChatBskyConvoDefs,
   type ModerationOpts
 } from '@atproto/api';
+import {
+  BlobRef as AtprotoBlobRef,
+  jsonToLex as atprotoJsonToLex
+} from '@atproto/lexicon';
 import { BrowserOAuthClient } from '@atproto/oauth-client-browser';
 import { buildAtprotoLoopbackClientMetadata } from '@atproto/oauth-types';
 import { ensureValidDid, isValidHandle } from '@atproto/syntax';
 import { getYouTubeVideoInfo } from '@lib/youtube';
 
 import { Timestamp } from './timestamp';
+import type { BlobRef as LexiconBlobRef } from '@atproto/lexicon';
+import type { JsonValue } from '@atproto/common-web';
 import type { OAuthSession } from '@atproto/oauth-client';
 import type { Bookmark } from '@lib/types/bookmark';
 import type { ImagesPreview, FilesWithId } from '@lib/types/file';
@@ -254,11 +258,23 @@ type UploadedImage = {
   preview: ImagesPreview[number];
 };
 
-type StrictBlobRef = BlobRef & {
-  ref: BlobRef['ref'];
+type StrictBlobRef = LexiconBlobRef & {
+  ref: LexiconBlobRef['ref'];
   mimeType: string;
   size: number;
 };
+
+type BlobRefConstructor = {
+  new (
+    ref: LexiconBlobRef['ref'],
+    mimeType: string,
+    size: number
+  ): StrictBlobRef;
+  prototype: StrictBlobRef;
+};
+
+const BlobRef = AtprotoBlobRef as unknown as BlobRefConstructor;
+const jsonToLex = atprotoJsonToLex as unknown as (value: JsonValue) => unknown;
 
 export type ProfileMediaFiles = Partial<
   Record<'photoURL' | 'coverPhotoURL', FilesWithId>
@@ -1198,7 +1214,7 @@ async function fetchServiceXrpc(
   if (!oauthSession && !service.direct) {
     headers.set('atproto-proxy', service.proxy);
 
-    return getAgent().sessionManager.fetchHandler(path, { ...init, headers });
+    return getAgent().fetchHandler(path, { ...init, headers });
   }
 
   const token = await getServiceAuthToken(service, method);
@@ -1211,7 +1227,8 @@ async function fetchServiceXrpc(
 function createAuthenticatedServiceAgent(service: BskyServiceConfig): Agent {
   return new Agent({
     did: sessionDid ?? undefined,
-    fetchHandler: (url, init) => fetchServiceXrpc(service, url, init)
+    fetchHandler: (url: string, init: RequestInit) =>
+      fetchServiceXrpc(service, url, init)
   });
 }
 
@@ -1787,15 +1804,13 @@ function normalizeJsonBlobRef(blob: unknown): unknown {
   };
 }
 
-function asStrictBlobRef(blob: BlobRef): StrictBlobRef {
+function asStrictBlobRef(blob: StrictBlobRef): StrictBlobRef {
   return blob as StrictBlobRef;
 }
 
 function parseBlobRef(blob: unknown): StrictBlobRef {
   if (blob instanceof BlobRef) {
-    const normalizedBlob = jsonToLex(
-      normalizeJsonBlobRef(blob) as Parameters<typeof jsonToLex>[0]
-    );
+    const normalizedBlob = jsonToLex(normalizeJsonBlobRef(blob) as JsonValue);
 
     if (normalizedBlob instanceof BlobRef)
       return asStrictBlobRef(normalizedBlob);
@@ -1803,9 +1818,7 @@ function parseBlobRef(blob: unknown): StrictBlobRef {
     return asStrictBlobRef(blob);
   }
 
-  const parsedBlob = jsonToLex(
-    normalizeJsonBlobRef(blob) as Parameters<typeof jsonToLex>[0]
-  );
+  const parsedBlob = jsonToLex(normalizeJsonBlobRef(blob) as JsonValue);
 
   if (parsedBlob instanceof BlobRef) return asStrictBlobRef(parsedBlob);
 
@@ -1831,14 +1844,16 @@ function getResolvedBlobRefSize(
   return size;
 }
 
-function toRepoRecordBlobRef(blob: unknown, sizeOverride?: number): BlobRef {
+function toRepoRecordBlobRef(
+  blob: unknown,
+  sizeOverride?: number
+): StrictBlobRef {
   const parsedBlob = parseBlobRef(blob);
-  getResolvedBlobRefSize(parsedBlob, sizeOverride);
+  const size = getResolvedBlobRefSize(parsedBlob, sizeOverride);
 
-  return {
-    cid: String(parsedBlob.ref),
-    mimeType: parsedBlob.mimeType
-  } as unknown as BlobRef;
+  if (parsedBlob.size === size) return parsedBlob;
+
+  return new BlobRef(parsedBlob.ref, parsedBlob.mimeType, size);
 }
 
 function isSerializedCidObject(value: unknown): boolean {
@@ -1972,7 +1987,7 @@ function getProfileBlobExtension(blob: StrictBlobRef): string {
 function getProfileMediaCdnUrl(
   userId: string,
   type: 'avatar' | 'banner',
-  blob: BlobRef | null | undefined
+  blob: StrictBlobRef | null | undefined
 ): string | undefined {
   if (!blob) return undefined;
 
@@ -4452,7 +4467,8 @@ export async function markNotificationsSeen(): Promise<void> {
 type RawChatMessage =
   | ChatBskyConvoDefs.MessageView
   | ChatBskyConvoDefs.DeletedMessageView
-  | { $type: string; [k: string]: unknown };
+  | ChatBskyConvoDefs.SystemMessageView
+  | { $type: string };
 
 function getActorDid(value: unknown): string | null {
   if (typeof value === 'string') return value;
@@ -6195,7 +6211,7 @@ async function fetchStoredBlobSize(
 async function normalizeProfileBlobForWrite(
   api: Agent,
   blob: unknown
-): Promise<BlobRef | null> {
+): Promise<StrictBlobRef | null> {
   if (!blob) return null;
 
   let parsedBlob: StrictBlobRef;
