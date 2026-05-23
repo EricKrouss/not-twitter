@@ -23,12 +23,14 @@ import {
 import { delayScroll, preventBubbling, sleep } from '@lib/utils';
 import { Modal } from '@components/modal/modal';
 import { ActionModal } from '@components/modal/action-modal';
+import { ReportModal } from '@components/modal/report-modal';
 import { Button } from '@components/ui/button';
 import { ToolTip } from '@components/ui/tooltip';
 import { HeroIcon } from '@components/ui/hero-icon';
 import { CustomIcon } from '@components/ui/custom-icon';
 import type { Variants } from 'framer-motion';
 import type { Tweet } from '@lib/types/tweet';
+import type { ModerationReportReason } from '@lib/atproto/backend';
 
 export const variants: Variants = {
   initial: { opacity: 0 },
@@ -202,10 +204,11 @@ export function TweetActions({
     reportOpenModal();
   };
 
-  const handleReportTweet = async (): Promise<void> => {
-    await reportTweet(tweetId);
-    toast.success('Report submitted');
-    reportCloseModal();
+  const handleReportTweet = (
+    reasonType: ModerationReportReason,
+    reason?: string
+  ): Promise<void> => {
+    return reportTweet(tweetId, reasonType, reason);
   };
 
   const handleLoggedOutAction = (closeMenu: () => void) => (): void => {
@@ -302,15 +305,12 @@ export function TweetActions({
         />
       </Modal>
       <Modal
-        modalClassName='max-w-xs bg-main-background w-full p-8 rounded-2xl'
+        modalClassName='w-full max-w-xl overflow-hidden rounded-2xl bg-main-background'
         open={reportOpen}
         closeModal={reportCloseModal}
       >
-        <ActionModal
-          title='Report Tweet?'
-          description='We’ll send this Tweet to Bluesky moderation for review.'
-          mainBtnLabel='Report'
-          mainBtnClassName='bg-accent-red hover:bg-accent-red/90 active:bg-accent-red/80'
+        <ReportModal
+          target='tweet'
           action={handleReportTweet}
           closeModal={reportCloseModal}
         />

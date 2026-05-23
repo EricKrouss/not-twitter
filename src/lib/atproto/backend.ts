@@ -233,10 +233,24 @@ export type BackendCollection = {
 
 export type ModerationReportReason =
   | 'spam'
+  | 'scam'
   | 'violation'
   | 'misleading'
+  | 'misleading-elections'
+  | 'impersonation'
   | 'sexual'
+  | 'sexual-abuse'
+  | 'child-safety'
   | 'rude'
+  | 'harassment'
+  | 'hate'
+  | 'private-info'
+  | 'violence'
+  | 'graphic-violence'
+  | 'self-harm'
+  | 'prohibited-sales'
+  | 'site-security'
+  | 'ban-evasion'
   | 'other';
 
 type PostRef = {
@@ -4912,14 +4926,17 @@ export async function getBlockedUsersPage(
 }
 
 export async function reportChatParticipant(actorDid: string): Promise<void> {
-  await getAgent().createModerationReport({
-    reasonType: 'com.atproto.moderation.defs#reasonOther',
-    reason: 'Reported from a direct message conversation.',
-    subject: {
-      $type: 'com.atproto.admin.defs#repoRef',
-      did: actorDid
-    }
-  });
+  await getAgent()
+    .withProxy('atproto_labeler', BSKY_MODERATION_DID)
+    .createModerationReport({
+      reasonType: getModerationReportReasonType('other'),
+      reason: 'Reported from a direct message conversation.',
+      subject: {
+        $type: 'com.atproto.admin.defs#repoRef',
+        did: actorDid
+      },
+      modTool: getModerationReportModTool('chat')
+    });
 }
 
 export async function markChatConvoRead(
@@ -5405,19 +5422,70 @@ function getModerationReportReasonType(
 ): ComAtprotoModerationDefs.ReasonType {
   switch (reason) {
     case 'spam':
-      return 'com.atproto.moderation.defs#reasonSpam';
+      return 'tools.ozone.report.defs#reasonMisleadingSpam';
+    case 'scam':
+      return 'tools.ozone.report.defs#reasonMisleadingScam';
+    case 'impersonation':
+      return 'tools.ozone.report.defs#reasonMisleadingImpersonation';
+    case 'misleading-elections':
+      return 'tools.ozone.report.defs#reasonMisleadingElections';
     case 'violation':
-      return 'com.atproto.moderation.defs#reasonViolation';
+      return 'tools.ozone.report.defs#reasonRuleOther';
     case 'misleading':
-      return 'com.atproto.moderation.defs#reasonMisleading';
+      return 'tools.ozone.report.defs#reasonMisleadingOther';
     case 'sexual':
-      return 'com.atproto.moderation.defs#reasonSexual';
+      return 'tools.ozone.report.defs#reasonSexualUnlabeled';
+    case 'sexual-abuse':
+      return 'tools.ozone.report.defs#reasonSexualAbuseContent';
+    case 'child-safety':
+      return 'tools.ozone.report.defs#reasonChildSafetyOther';
     case 'rude':
-      return 'com.atproto.moderation.defs#reasonRude';
+      return 'tools.ozone.report.defs#reasonHarassmentOther';
+    case 'harassment':
+      return 'tools.ozone.report.defs#reasonHarassmentTargeted';
+    case 'hate':
+      return 'tools.ozone.report.defs#reasonHarassmentHateSpeech';
+    case 'private-info':
+      return 'tools.ozone.report.defs#reasonHarassmentDoxxing';
+    case 'violence':
+      return 'tools.ozone.report.defs#reasonViolenceThreats';
+    case 'graphic-violence':
+      return 'tools.ozone.report.defs#reasonViolenceGraphicContent';
+    case 'self-harm':
+      return 'tools.ozone.report.defs#reasonSelfHarmContent';
+    case 'prohibited-sales':
+      return 'tools.ozone.report.defs#reasonRuleProhibitedSales';
+    case 'site-security':
+      return 'tools.ozone.report.defs#reasonRuleSiteSecurity';
+    case 'ban-evasion':
+      return 'tools.ozone.report.defs#reasonRuleBanEvasion';
     case 'other':
     default:
-      return 'com.atproto.moderation.defs#reasonOther';
+      return 'tools.ozone.report.defs#reasonOther';
   }
+}
+
+function getModerationReportReason(reason?: string): string | undefined {
+  const trimmedReason = reason?.trim();
+
+  if (!trimmedReason) return undefined;
+
+  return Array.from(trimmedReason).slice(0, 2000).join('');
+}
+
+function getModerationReportModTool(surface: 'account' | 'chat' | 'post'): {
+  $type: 'com.atproto.moderation.createReport#modTool';
+  name: string;
+  meta: { surface: 'account' | 'chat' | 'post'; client: string };
+} {
+  return {
+    $type: 'com.atproto.moderation.createReport#modTool',
+    name: 'not-twitter/web',
+    meta: {
+      client: 'not-twitter',
+      surface
+    }
+  };
 }
 
 export async function listTweetStatsPage(
@@ -6624,7 +6692,7 @@ export async function unmuteUser(targetDid: string): Promise<void> {
 export async function reportUser(
   targetDid: string,
   reasonType: ModerationReportReason = 'other',
-  reason = 'Reported from Not Twitter.'
+  reason?: string
 ): Promise<void> {
   if (!sessionDid) throw new Error('Sign in with Bluesky first.');
   if (targetDid === sessionDid) return;
@@ -6633,18 +6701,19 @@ export async function reportUser(
     .withProxy('atproto_labeler', BSKY_MODERATION_DID)
     .createModerationReport({
       reasonType: getModerationReportReasonType(reasonType),
-      reason,
+      reason: getModerationReportReason(reason),
       subject: {
         $type: 'com.atproto.admin.defs#repoRef' as const,
         did: targetDid
-      }
+      },
+      modTool: getModerationReportModTool('account')
     });
 }
 
 export async function reportPost(
   tweetId: string,
   reasonType: ModerationReportReason = 'other',
-  reason = 'Reported from Not Twitter.'
+  reason?: string
 ): Promise<void> {
   if (!sessionDid) throw new Error('Sign in with Bluesky first.');
 
@@ -6655,11 +6724,12 @@ export async function reportPost(
     .withProxy('atproto_labeler', BSKY_MODERATION_DID)
     .createModerationReport({
       reasonType: getModerationReportReasonType(reasonType),
-      reason,
+      reason: getModerationReportReason(reason),
       subject: {
         $type: 'com.atproto.repo.strongRef' as const,
         ...ref
-      }
+      },
+      modTool: getModerationReportModTool('post')
     });
 }
 

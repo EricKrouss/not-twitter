@@ -10,10 +10,12 @@ import { useAuth } from '@lib/context/auth-context';
 import { useModal } from '@lib/hooks/useModal';
 import { Modal } from '@components/modal/modal';
 import { ActionModal } from '@components/modal/action-modal';
+import { ReportModal } from '@components/modal/report-modal';
 import { Button } from '@components/ui/button';
 import { HeroIcon } from '@components/ui/hero-icon';
 import { ToolTip } from '@components/ui/tooltip';
 import { variants } from '@components/tweet/tweet-actions';
+import type { ModerationReportReason } from '@lib/atproto/backend';
 
 type UserShareProps = {
   targetId?: string;
@@ -93,11 +95,12 @@ export function UserShare({
     muteCloseModal();
     toast.success(`@${username} has been unmuted`);
   };
-  const handleReport = async (): Promise<void> => {
-    if (!targetId) return;
-    await reportAccount(targetId);
-    reportCloseModal();
-    toast.success('Report submitted');
+  const handleReport = (
+    reasonType: ModerationReportReason,
+    reason?: string
+  ): Promise<void> => {
+    if (!targetId) return Promise.resolve();
+    return reportAccount(targetId, reasonType, reason);
   };
   const actionIsUnblock = !!blocking && !blockIsListOnly;
   const actionIsUnmute = !!muting && !muteIsListOnly;
@@ -151,15 +154,13 @@ export function UserShare({
         />
       </Modal>
       <Modal
-        modalClassName='flex flex-col gap-6 max-w-xs bg-main-background w-full p-8 rounded-2xl'
+        modalClassName='w-full max-w-xl overflow-hidden rounded-2xl bg-main-background'
         open={reportOpen}
         closeModal={reportCloseModal}
       >
-        <ActionModal
-          title={`Report @${username}?`}
-          description='We’ll send this account to Bluesky moderation for review.'
-          mainBtnLabel='Report'
-          mainBtnClassName='bg-accent-red hover:bg-accent-red/90 active:bg-accent-red/80'
+        <ReportModal
+          target='account'
+          username={username}
           action={handleReport}
           closeModal={reportCloseModal}
         />
