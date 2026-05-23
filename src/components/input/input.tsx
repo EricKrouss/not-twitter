@@ -54,6 +54,7 @@ type InputProps = {
   quoteTweet?: TweetWithUser;
   replyModal?: boolean;
   closeModal?: () => void;
+  onTweetSent?: (tweet: TweetWithUser) => void;
 };
 
 type TweetDraft = Omit<Tweet, 'id'> & {
@@ -153,7 +154,8 @@ export function Input({
   children,
   quoteTweet,
   replyModal,
-  closeModal
+  closeModal,
+  onTweetSent
 }: InputProps): JSX.Element {
   const [selectedImages, setSelectedImages] = useState<FilesWithId>([]);
   const [imagesPreview, setImagesPreview] = useState<ImagesPreview>([]);
@@ -245,7 +247,15 @@ export function Input({
         isReplying && manageReply('increment', parent?.id as string)
       ]);
 
-      const { id: tweetId } = await getDoc(tweetRef);
+      const tweetSnapshot = await getDoc(tweetRef);
+      const createdTweet = tweetSnapshot.data();
+      const tweetId = tweetSnapshot.id;
+
+      onTweetSent?.({
+        ...createdTweet,
+        id: tweetId,
+        user: user as User
+      });
 
       if (!modal && !replyModal) discardTweet();
 

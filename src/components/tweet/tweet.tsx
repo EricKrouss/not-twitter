@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { useRouter } from 'next/router';
+import { useCallback, useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import cn from 'clsx';
 import { useAuth } from '@lib/context/auth-context';
@@ -23,7 +24,7 @@ import { TweetText } from './tweet-text';
 import { TweetTranslation } from './tweet-translation';
 import type { Variants } from 'framer-motion';
 import type { KeyboardEvent, MouseEvent } from 'react';
-import type { Tweet } from '@lib/types/tweet';
+import type { Tweet, TweetWithUser } from '@lib/types/tweet';
 import type { User } from '@lib/types/user';
 
 export type TweetProps = Tweet & {
@@ -32,6 +33,8 @@ export type TweetProps = Tweet & {
   pinned?: boolean;
   profile?: User | null;
   parentTweet?: boolean;
+  onReplySent?: (tweet: TweetWithUser) => void;
+  onTweetSent?: (tweet: TweetWithUser) => void;
 };
 
 export const variants: Variants = {
@@ -109,7 +112,9 @@ export function Tweet(tweet: TweetProps): JSX.Element {
     userReplies,
     userQuotes = 0,
     userRetweets,
-    user: tweetUserData
+    user: tweetUserData,
+    onReplySent,
+    onTweetSent
   } = tweet;
 
   const { id: ownerId, name, username, verified, photoURL } = tweetUserData;
@@ -118,6 +123,9 @@ export function Tweet(tweet: TweetProps): JSX.Element {
   const { user } = useAuth();
 
   const { open, openModal, closeModal } = useModal();
+  const [optimisticReplyCount, setOptimisticReplyCount] =
+    useState(userReplies);
+  const [optimisticQuoteCount, setOptimisticQuoteCount] = useState(userQuotes);
 
   const tweetLink = getTweetPath(tweetId, username);
   const displayCard = card ?? createYouTubeCardFromText(text);
@@ -139,6 +147,30 @@ export function Tweet(tweet: TweetProps): JSX.Element {
 
   const reply = !!parent;
   const tweetIsRetweeted = userRetweets.includes(profileId ?? '');
+
+  useEffect(() => {
+    setOptimisticReplyCount(userReplies);
+  }, [userReplies]);
+
+  useEffect(() => {
+    setOptimisticQuoteCount(userQuotes);
+  }, [userQuotes]);
+
+  const handleReplySent = useCallback(
+    (replyTweet: TweetWithUser): void => {
+      setOptimisticReplyCount((count) => count + 1);
+      onReplySent?.(replyTweet);
+    },
+    [onReplySent]
+  );
+
+  const handleQuoteTweetSent = useCallback(
+    (quoteTweet: TweetWithUser): void => {
+      setOptimisticQuoteCount((count) => count + 1);
+      onTweetSent?.(quoteTweet);
+    },
+    [onTweetSent]
+  );
 
   const openTweet = (): void => {
     void router.push(tweetLink, undefined, { scroll: !reply });
@@ -184,7 +216,11 @@ export function Tweet(tweet: TweetProps): JSX.Element {
         open={open}
         closeModal={closeModal}
       >
-        <TweetReplyModal tweet={tweet} closeModal={closeModal} />
+        <TweetReplyModal
+          tweet={tweet}
+          closeModal={closeModal}
+          onReplySent={handleReplySent}
+        />
       </Modal>
       <div
         className={cn(
@@ -305,10 +341,11 @@ export function Tweet(tweet: TweetProps): JSX.Element {
                   quoteTweet={tweet}
                   userLikes={userLikes}
                   bookmarkCount={bookmarkCount}
-                  userReplies={userReplies}
-                  userQuotes={userQuotes}
+                  userReplies={optimisticReplyCount}
+                  userQuotes={optimisticQuoteCount}
                   userRetweets={userRetweets}
                   openModal={openModal}
+                  onQuoteTweetSent={handleQuoteTweetSent}
                 />
               )}
             </div>

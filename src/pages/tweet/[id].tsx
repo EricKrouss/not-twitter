@@ -54,6 +54,10 @@ function mergeParentTweets(
   });
 }
 
+function hasTweet(tweets: TweetWithUser[], tweetId: string): boolean {
+  return tweets.some(({ id }) => id === tweetId);
+}
+
 export default function TweetId(): JSX.Element {
   const { asPath, query: routeQuery, back } = useRouter();
   const tweetId =
@@ -160,6 +164,32 @@ export default function TweetId(): JSX.Element {
     });
   }, [mutate, tweetId]);
 
+  const handleReplySent = useCallback(
+    (replyTweet: TweetWithUser): void => {
+      void mutate((currentData) => {
+        if (!currentData) return currentData;
+
+        const replyAlreadyVisible =
+          hasTweet(currentData.threadReplies, replyTweet.id) ||
+          hasTweet(currentData.replies, replyTweet.id);
+
+        if (replyAlreadyVisible) return currentData;
+
+        return {
+          ...currentData,
+          tweet: currentData.tweet
+            ? {
+                ...currentData.tweet,
+                userReplies: currentData.tweet.userReplies + 1
+              }
+            : currentData.tweet,
+          replies: [...currentData.replies, replyTweet]
+        };
+      }, false);
+    },
+    [mutate]
+  );
+
   return (
     <MainContainer className='!pb-[1280px]'>
       <MainHeader
@@ -204,13 +234,25 @@ export default function TweetId(): JSX.Element {
             {parentTweets.map((parentTweet) => (
               <Tweet parentTweet {...parentTweet} key={parentTweet.id} />
             ))}
-            <ViewTweet viewTweetRef={viewTweetRef} {...tweetData} />
+            <ViewTweet
+              viewTweetRef={viewTweetRef}
+              onReplySent={handleReplySent}
+              {...tweetData}
+            />
             <AnimatePresence>
               {threadReplies.map((tweet) => (
-                <Tweet {...tweet} key={tweet.id} />
+                <Tweet
+                  {...tweet}
+                  onReplySent={handleReplySent}
+                  key={tweet.id}
+                />
               ))}
               {repliesData.map((tweet) => (
-                <Tweet {...tweet} key={tweet.id} />
+                <Tweet
+                  {...tweet}
+                  onReplySent={handleReplySent}
+                  key={tweet.id}
+                />
               ))}
             </AnimatePresence>
           </>

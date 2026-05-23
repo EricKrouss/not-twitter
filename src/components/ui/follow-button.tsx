@@ -1,4 +1,6 @@
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
+import { toast } from 'react-hot-toast';
 import { useAuth } from '@lib/context/auth-context';
 import { useModal } from '@lib/hooks/useModal';
 import { manageBlock, manageFollow } from '@lib/atproto/utils';
@@ -30,33 +32,79 @@ export function FollowButton({
   const { push } = useRouter();
   const { open, openModal, closeModal } = useModal();
 
-  if (user?.id === userTargetId) return null;
-
   const { id: userId, following } = user ?? {};
+  const serverFollowing = useMemo(
+    () =>
+      [
+        following?.includes(userTargetId),
+        userTargetFollowers?.includes(userId ?? '')
+      ].some(Boolean),
+    [following, userId, userTargetFollowers, userTargetId]
+  );
+  const [optimisticFollowing, setOptimisticFollowing] =
+    useState(serverFollowing);
+  const [updatingFollow, setUpdatingFollow] = useState(false);
+
+  useEffect(() => {
+    setOptimisticFollowing(serverFollowing);
+  }, [serverFollowing]);
 
   const handleLoggedOutFollow = (): void => {
     void push('/');
   };
 
-  const handleFollow = (): Promise<void> =>
-    manageFollow('follow', userId as string, userTargetId);
+  const handleFollow = useCallback(async (): Promise<void> => {
+    if (!userId || updatingFollow) return;
 
-  const handleUnfollow = async (): Promise<void> => {
-    await manageFollow('unfollow', userId as string, userTargetId);
+    const previousFollowing = optimisticFollowing;
+
+    setUpdatingFollow(true);
+    setOptimisticFollowing(true);
+
+    try {
+      await manageFollow('follow', userId, userTargetId);
+    } catch {
+      setOptimisticFollowing(previousFollowing);
+      toast.error('Could not follow this account');
+    } finally {
+      setUpdatingFollow(false);
+    }
+  }, [optimisticFollowing, updatingFollow, userId, userTargetId]);
+
+  const handleUnfollow = useCallback(async (): Promise<void> => {
+    if (!userId || updatingFollow) return;
+
+    const previousFollowing = optimisticFollowing;
+
     closeModal();
-  };
+    setUpdatingFollow(true);
+    setOptimisticFollowing(false);
+
+    try {
+      await manageFollow('unfollow', userId, userTargetId);
+    } catch {
+      setOptimisticFollowing(previousFollowing);
+      toast.error('Could not unfollow this account');
+    } finally {
+      setUpdatingFollow(false);
+    }
+  }, [
+    closeModal,
+    optimisticFollowing,
+    updatingFollow,
+    userId,
+    userTargetId
+  ]);
 
   const handleUnblock = async (): Promise<void> => {
     await manageBlock('unblock', userId as string, userTargetId);
     closeModal();
   };
 
-  const userIsFollowed = [
-    following?.includes(userTargetId),
-    userTargetFollowers?.includes(userId ?? '')
-  ].some(Boolean);
   const userFollowsViewer = !!userTargetFollowing?.includes(userId ?? '');
   const followLabel = userFollowsViewer ? 'Follow Back' : 'Follow';
+
+  if (user?.id === userTargetId) return null;
 
   if (!user)
     return (
@@ -122,13 +170,14 @@ export function FollowButton({
           closeModal={closeModal}
         />
       </Modal>
-      {userIsFollowed ? (
+      {optimisticFollowing ? (
         <Button
           className='dark-bg-tab group min-w-[106px] self-start border border-light-line-reply px-4 py-1.5
                      font-bold hover:border-accent-red hover:bg-accent-red/10 hover:text-accent-red
                      focus-visible:border-accent-red focus-visible:bg-accent-red/10 focus-visible:text-accent-red
                      dark:border-light-secondary'
-          onClick={preventBubbling(openModal)}
+          aria-busy={updatingFollow}
+          onClick={preventBubbling(updatingFollow ? null : openModal)}
         >
           <span className='group-hover:hidden group-focus-visible:hidden'>
             Following
@@ -143,6 +192,7 @@ export function FollowButton({
                      focus-visible:bg-light-primary/90 active:bg-light-border/75 dark:bg-light-border 
                      dark:text-light-primary dark:hover:bg-light-border/90 dark:focus-visible:bg-light-border/90 
                      dark:active:bg-light-border/75'
+          aria-busy={updatingFollow}
           onClick={preventBubbling(handleFollow)}
         >
           {followLabel}
