@@ -112,7 +112,7 @@ export function KeyboardShortcutsModal({
                               +
                             </span>
                           )}
-                          <kbd className='inline-flex items-center justify-center min-w-[22px] h-6 px-1.5 text-xs font-bold font-mono text-light-primary bg-light-line-reply border border-light-border/40 rounded shadow-[0_1.5px_0_0_rgba(0,0,0,0.15)] dark:text-dark-primary dark:bg-dark-sidebar-background dark:border-dark-border dark:shadow-[0_1.5px_0_0_rgba(255,255,255,0.1)]'>
+                          <kbd className='inline-flex items-center justify-center min-w-[22px] h-6 px-1.5 text-xs font-bold font-mono text-light-primary bg-white border border-light-line-reply rounded shadow-[0_1.5px_0_0_rgba(0,0,0,0.15)]'>
                             {key}
                           </kbd>
                         </div>
