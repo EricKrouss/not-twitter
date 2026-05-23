@@ -259,6 +259,7 @@ type StrictBlobRef = BlobRef & {
   mimeType: string;
   size: number;
 };
+type BlobRefJson = NonNullable<ConstructorParameters<typeof BlobRef>[3]>;
 
 export type ProfileMediaFiles = Partial<
   Record<'photoURL' | 'coverPhotoURL', FilesWithId>
@@ -1816,19 +1817,29 @@ function getBlobRefSize(blob: StrictBlobRef): number | null {
   return Number.isFinite(blob.size) && blob.size > 0 ? blob.size : null;
 }
 
-function toPdsCompatibleBlobRef(blob: unknown, sizeOverride?: number): BlobRef {
-  const parsedBlob = parseBlobRef(blob);
+function getResolvedBlobRefSize(
+  blob: StrictBlobRef,
+  sizeOverride?: number
+): number {
   const size =
     typeof sizeOverride === 'number' && sizeOverride > 0
       ? sizeOverride
-      : getBlobRefSize(parsedBlob);
+      : getBlobRefSize(blob);
 
   if (!size)
     throw new Error('Bluesky returned a media blob without a valid size.');
 
-  if (parsedBlob.size === size) return parsedBlob;
+  return size;
+}
 
-  return new BlobRef(parsedBlob.ref, parsedBlob.mimeType, size);
+function toRepoRecordBlobRef(blob: unknown, sizeOverride?: number): BlobRef {
+  const parsedBlob = parseBlobRef(blob);
+  const size = getResolvedBlobRefSize(parsedBlob, sizeOverride);
+
+  return new BlobRef(parsedBlob.ref, parsedBlob.mimeType, size, {
+    cid: String(parsedBlob.ref),
+    mimeType: parsedBlob.mimeType
+  } as BlobRefJson);
 }
 
 function isSerializedCidObject(value: unknown): boolean {
@@ -2355,13 +2366,14 @@ async function loadModerationOpts(): Promise<ModerationOpts | null> {
   if (!sessionDid) return null;
 
   const userDid = sessionDid;
-  const api = getAppViewAgent();
-  const prefs = await api.getPreferences();
+  const prefs = await getAgent().getPreferences();
 
   moderationLabelerDids =
     prefs.moderationPrefs.labelers?.map(({ did }) => did) ?? [];
 
-  const labelDefs = await api.getLabelDefinitions(prefs).catch(() => undefined);
+  const labelDefs = await getAppViewAgent()
+    .getLabelDefinitions(prefs)
+    .catch(() => undefined);
 
   return {
     userDid,
@@ -2527,7 +2539,7 @@ async function readBlueskyAccountSession(): Promise<
 }
 
 export async function getBlueskySettings(): Promise<BlueskySettings> {
-  const api = getAppViewAgent();
+  const api = getAgent();
 
   const [account, prefs, chatResult, notificationResult] = await Promise.all([
     readBlueskyAccountSession(),
@@ -2599,7 +2611,7 @@ export async function getBlueskySettings(): Promise<BlueskySettings> {
 export async function setAdultContentSetting(
   enabled: boolean
 ): Promise<BlueskySettings> {
-  await getAppViewAgent().setAdultContentEnabled(enabled);
+  await getAgent().setAdultContentEnabled(enabled);
   clearModerationSettingsCache();
   notify();
 
@@ -2708,7 +2720,7 @@ export async function setContentLabelSetting(
   if (!SETTINGS_CONTENT_LABELS.includes(label))
     throw new Error('Unsupported content label.');
 
-  await getAppViewAgent().setContentLabelPref(label, preference);
+  await getAgent().setContentLabelPref(label, preference);
   clearModerationSettingsCache();
   notify();
 
@@ -2735,7 +2747,7 @@ export async function setFeedViewSetting(
     );
   }
 
-  await getAppViewAgent().setFeedViewPrefs('home', safePref);
+  await getAgent().setFeedViewPrefs('home', safePref);
   notify();
 
   return getBlueskySettings();
@@ -2758,7 +2770,7 @@ export async function setThreadViewSetting(
   if (typeof pref.prioritizeFollowedUsers === 'boolean')
     safePref.prioritizeFollowedUsers = pref.prioritizeFollowedUsers;
 
-  await getAppViewAgent().setThreadViewPrefs(safePref);
+  await getAgent().setThreadViewPrefs(safePref);
   notify();
 
   return getBlueskySettings();
@@ -2767,9 +2779,10 @@ export async function setThreadViewSetting(
 export async function setDefaultReplySetting(
   setting: Exclude<SettingsDefaultReply, 'custom'>
 ): Promise<BlueskySettings> {
-  const prefs = await getAppViewAgent().getPreferences();
+  const api = getAgent();
+  const prefs = await api.getPreferences();
 
-  await getAppViewAgent().setPostInteractionSettings({
+  await api.setPostInteractionSettings({
     threadgateAllowRules: getReplyRulesFromDefault(setting),
     postgateEmbeddingRules: prefs.postInteractionSettings.postgateEmbeddingRules
   });
@@ -2781,9 +2794,10 @@ export async function setDefaultReplySetting(
 export async function setDefaultQuoteSetting(
   setting: Exclude<SettingsDefaultQuote, 'custom'>
 ): Promise<BlueskySettings> {
-  const prefs = await getAppViewAgent().getPreferences();
+  const api = getAgent();
+  const prefs = await api.getPreferences();
 
-  await getAppViewAgent().setPostInteractionSettings({
+  await api.setPostInteractionSettings({
     threadgateAllowRules: prefs.postInteractionSettings.threadgateAllowRules,
     postgateEmbeddingRules: getQuoteRulesFromDefault(setting)
   });
@@ -2803,7 +2817,7 @@ export async function setInterestsSetting(
     )
   ).slice(0, 20);
 
-  await getAppViewAgent().setInterestsPref({ tags: safeTags });
+  await getAgent().setInterestsPref({ tags: safeTags });
   notify();
 
   return getBlueskySettings();
@@ -2834,7 +2848,7 @@ export async function addSettingsMutedWord(
   if (safeExpiresAt && Number.isNaN(safeExpiresAt.getTime()))
     throw new Error('Choose a valid expiration date.');
 
-  await getAppViewAgent().addMutedWord({
+  await getAgent().addMutedWord({
     value: safeValue,
     targets: safeTargets,
     actorTarget: safeActorTarget,
@@ -2849,7 +2863,7 @@ export async function addSettingsMutedWord(
 export async function removeSettingsMutedWord(
   mutedWord: SettingsMutedWord
 ): Promise<BlueskySettings> {
-  await getAppViewAgent().removeMutedWord(mutedWord);
+  await getAgent().removeMutedWord(mutedWord);
   clearModerationSettingsCache();
   notify();
 
@@ -5940,7 +5954,7 @@ async function uploadVideoForBluesky(
 
   return {
     $type: 'app.bsky.embed.video',
-    video: toPdsCompatibleBlobRef(jobStatus.blob),
+    video: toRepoRecordBlobRef(jobStatus.blob),
     alt: preview.alt || undefined,
     aspectRatio: metadata.aspectRatio,
     presentation: 'default'
@@ -5978,7 +5992,7 @@ async function uploadExternalThumbForBluesky(
       encoding: preparedImage.encoding
     });
 
-    return toPdsCompatibleBlobRef(upload.data.blob, preparedImage.file.size);
+    return toRepoRecordBlobRef(upload.data.blob, preparedImage.file.size);
   } catch {
     return undefined;
   }
@@ -6036,7 +6050,7 @@ export async function addTweet(data: AddTweetData): Promise<Tweet> {
             });
 
             return {
-              image: toPdsCompatibleBlobRef(
+              image: toRepoRecordBlobRef(
                 upload.data.blob,
                 preparedImage.file.size
               ),
@@ -6201,7 +6215,7 @@ async function normalizeProfileBlobForWrite(
       'Bluesky did not provide a size for existing profile media.'
     );
 
-  return toPdsCompatibleBlobRef(parsedBlob, size);
+  return toRepoRecordBlobRef(parsedBlob, size);
 }
 
 async function normalizeProfileRecordForWrite(
@@ -6272,7 +6286,7 @@ export async function updateProfile(
             })
             .then(
               ({ data }) =>
-                toPdsCompatibleBlobRef(
+                toRepoRecordBlobRef(
                   data.blob,
                   preparedImage.file.size
                 ) as AppBskyActorProfile.Record['avatar']
@@ -6287,7 +6301,7 @@ export async function updateProfile(
             })
             .then(
               ({ data }) =>
-                toPdsCompatibleBlobRef(
+                toRepoRecordBlobRef(
                   data.blob,
                   preparedImage.file.size
                 ) as AppBskyActorProfile.Record['banner']
