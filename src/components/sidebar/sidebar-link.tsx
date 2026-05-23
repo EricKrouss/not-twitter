@@ -29,8 +29,8 @@ export function SidebarLink({
       : badgeCount.toString()
     : '';
   const compactCountBadgeClassName = cn(
-    `absolute -top-1 -right-1 flex h-4 items-center justify-center rounded-full
-     border border-main-background bg-main-accent text-[10px] font-bold leading-4 text-white`,
+    `absolute -top-1.5 -right-1.5 flex h-4 items-center justify-center rounded-full
+     border border-main-background bg-main-accent text-[9px] font-bold leading-none text-white`,
     badgeLabel.length === 1 ? 'w-4' : 'min-w-[18px] px-1'
   );
 
