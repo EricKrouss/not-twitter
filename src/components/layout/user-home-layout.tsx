@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { useAuth } from '@lib/context/auth-context';
 import { useUser } from '@lib/context/user-context';
 import { formatAtprotoDisplayIdentifier } from '@lib/atproto/identity';
+import { isProfileBirthdayToday } from '@lib/profile-birthday';
 import { getProfileRouteId } from '@lib/static-routes';
 import { SEO } from '@components/common/seo';
 import { UserHomeCover } from '@components/user/user-home-cover';
@@ -16,8 +17,23 @@ import { ToolTip } from '@components/ui/tooltip';
 import { FollowButton } from '@components/ui/follow-button';
 import { variants } from '@components/user/user-header';
 import { UserEditProfile } from '@components/user/user-edit-profile';
+import { UserBirthdayBalloons } from '@components/user/user-birthday-balloons';
 import { UserShare } from '@components/user/user-share';
 import type { LayoutProps } from './common-layout';
+import type { User } from '@lib/types/user';
+
+function canViewerMessageUser(
+  targetUser: User,
+  viewerId: string | undefined
+): boolean {
+  if (!viewerId) return false;
+
+  if (targetUser.messageAllowIncoming === 'all') return true;
+  if (targetUser.messageAllowIncoming === 'following')
+    return targetUser.following.includes(viewerId);
+
+  return false;
+}
 
 export function UserHomeLayout({ children }: LayoutProps): JSX.Element {
   const { user, isAdmin } = useAuth();
@@ -47,6 +63,15 @@ export function UserHomeLayout({ children }: LayoutProps): JSX.Element {
   const viewerBlockedByUser = !!userData?.blockedBy;
   const profileIsBlocked =
     !!userData && (viewerBlockedByUser || viewerBlocksUser);
+  const showMessageButton =
+    !!userData &&
+    signedIn &&
+    !profileIsBlocked &&
+    canViewerMessageUser(userData, userId);
+  const showBirthdayBalloons =
+    !!userData &&
+    !profileIsBlocked &&
+    isProfileBirthdayToday(userData.birthday);
 
   const handleMessageClick = (): void => {
     if (userData)
@@ -60,7 +85,8 @@ export function UserHomeLayout({ children }: LayoutProps): JSX.Element {
           title={`${`${userData.name} (@${userData.username})`} / Not Twitter`}
         />
       )}
-      <motion.section {...variants} exit={undefined}>
+      {showBirthdayBalloons && <UserBirthdayBalloons />}
+      <motion.section className='relative' {...variants} exit={undefined}>
         {loading ? (
           <Loading className='mt-5' />
         ) : !userData ? (
@@ -101,7 +127,7 @@ export function UserHomeLayout({ children }: LayoutProps): JSX.Element {
                       muting={userData.muting}
                       mutingByListName={userData.mutingByListName}
                     />
-                    {signedIn && !profileIsBlocked && (
+                    {showMessageButton && (
                       <Button
                         className='dark-bg-tab group relative border border-light-line-reply p-2
                                    hover:bg-light-primary/10 active:bg-light-primary/20 dark:border-light-secondary

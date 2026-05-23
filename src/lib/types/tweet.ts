@@ -20,6 +20,13 @@ export type TweetCard = {
   domain: string | null;
 };
 
+export type TweetMediaWarning = {
+  title: string;
+  description: string;
+  label: string;
+  noOverride: boolean;
+};
+
 export type EmbeddedTweet = {
   id: string | null;
   authorName: string | null;
@@ -27,8 +34,10 @@ export type EmbeddedTweet = {
   authorAvatar: string | null;
   authorVerified: boolean;
   text: string | null;
+  langs: string[];
   createdAt: Timestamp | null;
   images: ImagesPreview | null;
+  mediaWarning: TweetMediaWarning | null;
   card: TweetCard | null;
   unavailable?: 'not-found' | 'blocked' | 'detached' | 'unknown';
 };
@@ -36,7 +45,9 @@ export type EmbeddedTweet = {
 export type Tweet = {
   id: string;
   text: string | null;
+  langs: string[];
   images: ImagesPreview | null;
+  mediaWarning: TweetMediaWarning | null;
   card: TweetCard | null;
   quotedTweet: EmbeddedTweet | null;
   parent: { id: string; username: string } | null;

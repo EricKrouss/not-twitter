@@ -20,6 +20,7 @@ import { TweetStatus } from './tweet-status';
 import { TweetStats } from './tweet-stats';
 import { TweetDate } from './tweet-date';
 import { TweetText } from './tweet-text';
+import { TweetTranslation } from './tweet-translation';
 import type { Variants } from 'framer-motion';
 import type { KeyboardEvent, MouseEvent } from 'react';
 import type { Tweet } from '@lib/types/tweet';
@@ -91,8 +92,10 @@ export function Tweet(tweet: TweetProps): JSX.Element {
   const {
     id: tweetId,
     text,
+    langs = [],
     modal,
     images,
+    mediaWarning,
     card,
     quotedTweet,
     parent,
@@ -273,7 +276,12 @@ export function Tweet(tweet: TweetProps): JSX.Element {
                 </Link>
               </p>
             )}
-            {text && <TweetText text={text} />}
+            {text && (
+              <>
+                <TweetText text={text} />
+                <TweetTranslation text={text} langs={langs} />
+              </>
+            )}
             <div className='mt-1 flex flex-col gap-2'>
               {images && (
                 <ImagePreview
@@ -281,6 +289,7 @@ export function Tweet(tweet: TweetProps): JSX.Element {
                   tweetData={tweet}
                   imagesPreview={images}
                   previewCount={images.length}
+                  moderationWarning={mediaWarning}
                 />
               )}
               <TweetEmbed

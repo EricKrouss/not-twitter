@@ -34,6 +34,7 @@ import {
 import { BrowserOAuthClient } from '@atproto/oauth-client-browser';
 import { buildAtprotoLoopbackClientMetadata } from '@atproto/oauth-types';
 import { ensureValidDid, isValidHandle } from '@atproto/syntax';
+import { normalizeProfileBirthday } from '@lib/profile-birthday';
 import { getYouTubeVideoInfo } from '@lib/youtube';
 
 import {
@@ -53,6 +54,7 @@ import type {
   EmbeddedTweet,
   Tweet,
   TweetCard,
+  TweetMediaWarning,
   TweetReplySetting,
   TweetWithUser
 } from '@lib/types/tweet';
@@ -103,6 +105,7 @@ const BSKY_PROFILE_IMAGE_ACCEPTED_TYPES = /^image\/(?:jpe?g|png)$/i;
 const BSKY_POST_IMAGE_ACCEPTED_TYPES = /^image\/(?:jpe?g|png|webp)$/i;
 const BSKY_MEDIA_POST_VISIBILITY_RETRIES = 8;
 const BSKY_THREAD_REPLY_DEPTH = 25;
+const BSKY_THREAD_PARENT_PAGE_SIZE = 6;
 const SERVICE_AUTH_TOKEN_TTL_SECONDS = 55;
 const BSKY_CHAT_ACCESS_MESSAGE =
   'Messages need Bluesky DM access. Authorize messages with Bluesky to continue.';
@@ -266,8 +269,14 @@ type PostReplyRef = {
 export type TweetThreadPage = {
   tweet: TweetWithUser;
   parents: TweetWithUser[];
+  parentCursor: string | null;
   threadReplies: TweetWithUser[];
   replies: TweetWithUser[];
+};
+
+export type TweetThreadParentsPage = {
+  parents: TweetWithUser[];
+  cursor: string | null;
 };
 
 type BookmarkView = {
@@ -514,7 +523,25 @@ export type SettingsContentLabel =
   | 'porn'
   | 'sexual'
   | 'nudity'
-  | 'graphic-media';
+  | 'sexual-figurative'
+  | 'graphic-media'
+  | 'self-harm'
+  | 'sensitive'
+  | 'extremist'
+  | 'intolerant'
+  | 'threat'
+  | 'rude'
+  | 'illicit'
+  | 'security'
+  | 'unsafe-link'
+  | 'impersonation'
+  | 'misinformation'
+  | 'scam'
+  | 'engagement-farming'
+  | 'spam'
+  | 'rumor'
+  | 'misleading'
+  | 'inauthentic';
 
 export type SettingsThreadSort = 'oldest' | 'newest' | 'most-likes' | 'hotness';
 
@@ -622,6 +649,9 @@ const postReplyRefCache = new Map<string, PostReplyRef>();
 const followUriCache = new Map<string, string>();
 const blockUriCache = new Map<string, string>();
 const detailedUserCache = new Set<string>();
+const profileRecordHydratedUsers = new Set<string>();
+const chatDeclarationHydratedUsers = new Set<string>();
+const didPdsEndpointCache = new Map<string, string | null>();
 const stagedImages = new Map<string, UploadedImage[]>();
 const listeners = new Set<() => void>();
 const serviceAuthTokenCache = new Map<
@@ -640,6 +670,7 @@ let currentUser: User | null = null;
 let currentFollowing = new Set<string>();
 let malformedMediaRepairPromise: Promise<void> | null = null;
 let moderationOptsPromise: Promise<ModerationOpts | null> | null = null;
+let activeModerationOpts: ModerationOpts | null = null;
 let moderationLabelerDids: string[] = [];
 
 function hasStorage(): boolean {
@@ -972,7 +1003,9 @@ function removeSavedAccount(
 
 function clearModerationSettingsCache(): void {
   moderationOptsPromise = null;
+  activeModerationOpts = null;
   moderationLabelerDids = [];
+  tweetCache.clear();
 }
 
 function deleteCachedTweetsByAuthor(authorDid: string): void {
@@ -1237,10 +1270,13 @@ async function fetchServiceXrpc(
   const method = getXrpcMethod(path);
   const headers = new Headers(init.headers);
 
-  if (!oauthSession && !service.direct) {
+  if (!service.direct) {
     headers.set('atproto-proxy', service.proxy);
+    headers.delete('authorization');
 
-    return getAgent().fetchHandler(path, { ...init, headers });
+    return oauthSession
+      ? oauthSession.fetchHandler(path, { ...init, headers })
+      : getAgent().fetchHandler(path, { ...init, headers });
   }
 
   const token = await getServiceAuthToken(service, method);
@@ -1726,12 +1762,112 @@ function isTemporaryFeedUnavailableError(error: unknown): boolean {
   );
 }
 
-const SETTINGS_CONTENT_LABELS: SettingsContentLabel[] = [
-  'porn',
-  'sexual',
-  'nudity',
-  'graphic-media'
+type SettingsContentLabelConfig = {
+  label: SettingsContentLabel;
+  defaultPreference: SettingsLabelPreference;
+  labelerDid?: string;
+};
+
+const SETTINGS_CONTENT_LABELS: readonly SettingsContentLabelConfig[] = [
+  { label: 'porn', defaultPreference: 'hide' },
+  { label: 'sexual', defaultPreference: 'warn' },
+  { label: 'nudity', defaultPreference: 'ignore' },
+  {
+    label: 'sexual-figurative',
+    defaultPreference: 'ignore',
+    labelerDid: BSKY_MODERATION_DID
+  },
+  { label: 'graphic-media', defaultPreference: 'warn' },
+  {
+    label: 'self-harm',
+    defaultPreference: 'warn',
+    labelerDid: BSKY_MODERATION_DID
+  },
+  {
+    label: 'sensitive',
+    defaultPreference: 'warn',
+    labelerDid: BSKY_MODERATION_DID
+  },
+  {
+    label: 'extremist',
+    defaultPreference: 'hide',
+    labelerDid: BSKY_MODERATION_DID
+  },
+  {
+    label: 'intolerant',
+    defaultPreference: 'warn',
+    labelerDid: BSKY_MODERATION_DID
+  },
+  {
+    label: 'threat',
+    defaultPreference: 'hide',
+    labelerDid: BSKY_MODERATION_DID
+  },
+  {
+    label: 'rude',
+    defaultPreference: 'hide',
+    labelerDid: BSKY_MODERATION_DID
+  },
+  {
+    label: 'illicit',
+    defaultPreference: 'hide',
+    labelerDid: BSKY_MODERATION_DID
+  },
+  {
+    label: 'security',
+    defaultPreference: 'hide',
+    labelerDid: BSKY_MODERATION_DID
+  },
+  {
+    label: 'unsafe-link',
+    defaultPreference: 'hide',
+    labelerDid: BSKY_MODERATION_DID
+  },
+  {
+    label: 'impersonation',
+    defaultPreference: 'hide',
+    labelerDid: BSKY_MODERATION_DID
+  },
+  {
+    label: 'misinformation',
+    defaultPreference: 'warn',
+    labelerDid: BSKY_MODERATION_DID
+  },
+  {
+    label: 'scam',
+    defaultPreference: 'hide',
+    labelerDid: BSKY_MODERATION_DID
+  },
+  {
+    label: 'engagement-farming',
+    defaultPreference: 'hide',
+    labelerDid: BSKY_MODERATION_DID
+  },
+  {
+    label: 'spam',
+    defaultPreference: 'hide',
+    labelerDid: BSKY_MODERATION_DID
+  },
+  {
+    label: 'rumor',
+    defaultPreference: 'warn',
+    labelerDid: BSKY_MODERATION_DID
+  },
+  {
+    label: 'misleading',
+    defaultPreference: 'warn',
+    labelerDid: BSKY_MODERATION_DID
+  },
+  {
+    label: 'inauthentic',
+    defaultPreference: 'hide',
+    labelerDid: BSKY_MODERATION_DID
+  }
 ];
+
+const SETTINGS_CONTENT_LABEL_BY_VALUE = new Map(
+  SETTINGS_CONTENT_LABELS.map((config) => [config.label, config])
+);
 
 const NOTIFICATION_KEYS: SettingsNotificationKey[] = [
   'chat',
@@ -2051,6 +2187,214 @@ async function getLiveProfileRecord(
   }
 }
 
+function getDidWebDocumentUrl(did: string): string | null {
+  if (!did.startsWith('did:web:')) return null;
+
+  const parts = did
+    .slice('did:web:'.length)
+    .split(':')
+    .map((part) => decodeURIComponent(part));
+  const host = parts.shift();
+
+  if (!host) return null;
+
+  const path = parts.length
+    ? `/${parts.join('/')}/did.json`
+    : '/.well-known/did.json';
+
+  return `https://${host}${path}`;
+}
+
+function getAtprotoPdsEndpointFromDidDocument(value: unknown): string | null {
+  if (!isPlainObject(value) || !Array.isArray(value.service)) return null;
+
+  for (const service of value.service) {
+    if (!isPlainObject(service)) continue;
+
+    const type = service.type;
+    const id = service.id;
+    const endpoint = service.serviceEndpoint;
+    const isAtprotoPds =
+      type === 'AtprotoPersonalDataServer' ||
+      (typeof id === 'string' && id.endsWith('#atproto_pds'));
+
+    if (isAtprotoPds && typeof endpoint === 'string')
+      return normalizeAtprotoServiceUrl(endpoint);
+  }
+
+  return null;
+}
+
+async function resolveAtprotoPdsEndpoint(did: string): Promise<string | null> {
+  if (didPdsEndpointCache.has(did)) return didPdsEndpointCache.get(did) ?? null;
+
+  const documentUrl = did.startsWith('did:plc:')
+    ? `https://plc.directory/${encodeURIComponent(did)}`
+    : getDidWebDocumentUrl(did);
+
+  if (!documentUrl) {
+    didPdsEndpointCache.set(did, null);
+    return null;
+  }
+
+  const response = await fetch(documentUrl, {
+    cache: 'force-cache',
+    redirect: 'error'
+  });
+
+  if (!response.ok) {
+    didPdsEndpointCache.set(did, null);
+    return null;
+  }
+
+  const endpoint = getAtprotoPdsEndpointFromDidDocument(
+    await response.json().catch(() => null)
+  );
+
+  didPdsEndpointCache.set(did, endpoint);
+  return endpoint;
+}
+
+async function getPublicProfileRecord(
+  userId: string
+): Promise<Partial<AppBskyActorProfile.Record> | null> {
+  const serviceUrl = await resolveAtprotoPdsEndpoint(userId);
+
+  if (!serviceUrl) return null;
+
+  const url = new URL('/xrpc/com.atproto.repo.getRecord', serviceUrl);
+
+  url.searchParams.set('repo', userId);
+  url.searchParams.set('collection', 'app.bsky.actor.profile');
+  url.searchParams.set('rkey', 'self');
+
+  const response = await fetch(url, { cache: 'no-cache' });
+
+  if (response.status === 404) return null;
+  if (!response.ok) throw await createResponseError(response);
+
+  const body = (await response.json().catch(() => null)) as {
+    value?: unknown;
+  } | null;
+  const value = body?.value;
+
+  return isPlainObject(value)
+    ? (value as Partial<AppBskyActorProfile.Record>)
+    : null;
+}
+
+async function getLiveChatDeclarationRecord(
+  api: Agent,
+  userId: string
+): Promise<Partial<ChatBskyActorDeclaration.Record> | null> {
+  try {
+    const response = await api.com.atproto.repo.getRecord({
+      repo: userId,
+      collection: CHAT_DECLARATION_COLLECTION,
+      rkey: 'self'
+    });
+
+    return isPlainObject(response.data.value)
+      ? (response.data.value as Partial<ChatBskyActorDeclaration.Record>)
+      : null;
+  } catch (error) {
+    if (isRecordNotFoundError(error)) return null;
+    throw error;
+  }
+}
+
+async function getPublicChatDeclarationRecord(
+  userId: string
+): Promise<Partial<ChatBskyActorDeclaration.Record> | null> {
+  const serviceUrl = await resolveAtprotoPdsEndpoint(userId);
+
+  if (!serviceUrl) return null;
+
+  const url = new URL('/xrpc/com.atproto.repo.getRecord', serviceUrl);
+
+  url.searchParams.set('repo', userId);
+  url.searchParams.set('collection', CHAT_DECLARATION_COLLECTION);
+  url.searchParams.set('rkey', 'self');
+
+  const response = await fetch(url, { cache: 'no-cache' });
+
+  if (response.status === 404) return null;
+  if (!response.ok) throw await createResponseError(response);
+
+  const body = (await response.json().catch(() => null)) as {
+    value?: unknown;
+  } | null;
+  const value = body?.value;
+
+  return isPlainObject(value)
+    ? (value as Partial<ChatBskyActorDeclaration.Record>)
+    : null;
+}
+
+async function getReadableProfileRecord(
+  userId: string
+): Promise<Partial<AppBskyActorProfile.Record> | null> {
+  if (agent) {
+    const liveRecord = await getLiveProfileRecord(getAgent(), userId).catch(
+      () => null
+    );
+
+    if (liveRecord) return liveRecord;
+  }
+
+  return getPublicProfileRecord(userId);
+}
+
+async function getReadableChatDeclarationRecord(
+  userId: string
+): Promise<Partial<ChatBskyActorDeclaration.Record> | null> {
+  if (agent) {
+    const liveRecord = await getLiveChatDeclarationRecord(
+      getAgent(),
+      userId
+    ).catch(() => null);
+
+    if (liveRecord) return liveRecord;
+  }
+
+  return getPublicChatDeclarationRecord(userId);
+}
+
+function applyProfileRecordUserData(
+  userId: string,
+  record: Partial<AppBskyActorProfile.Record>
+): void {
+  applyLocalProfileUpdate(userId, getProfileRecordUserData(userId, record));
+  profileRecordHydratedUsers.add(userId);
+}
+
+async function hydrateProfileRecordUserData(userId: string): Promise<void> {
+  if (profileRecordHydratedUsers.has(userId)) return;
+
+  const record = await getReadableProfileRecord(userId);
+
+  if (record) applyProfileRecordUserData(userId, record);
+  else profileRecordHydratedUsers.add(userId);
+}
+
+function applyChatDeclarationUserData(
+  userId: string,
+  record: Partial<ChatBskyActorDeclaration.Record> | null
+): void {
+  applyLocalProfileUpdate(userId, {
+    messageAllowIncoming: normalizeChatAllowIncoming(record?.allowIncoming)
+  });
+  chatDeclarationHydratedUsers.add(userId);
+}
+
+async function hydrateChatDeclarationUserData(userId: string): Promise<void> {
+  if (chatDeclarationHydratedUsers.has(userId)) return;
+
+  const record = await getReadableChatDeclarationRecord(userId);
+
+  applyChatDeclarationUserData(userId, record);
+}
+
 function getProfileRecordUserData(
   userId: string,
   record: Partial<AppBskyActorProfile.Record>
@@ -2073,6 +2417,7 @@ function getProfileRecordUserData(
       typeof record.pronouns === 'string' && record.pronouns
         ? record.pronouns
         : null,
+    birthday: normalizeProfileBirthday(record.birthday),
     website:
       typeof record.website === 'string' && record.website
         ? record.website
@@ -2087,6 +2432,8 @@ function invalidateUserProfileCache(userId: string): void {
 
   userCache.delete(userId);
   detailedUserCache.delete(userId);
+  profileRecordHydratedUsers.delete(userId);
+  chatDeclarationHydratedUsers.delete(userId);
 
   if (cachedUser) {
     userHandleCache.delete(cachedUser.username);
@@ -2111,6 +2458,10 @@ function applyLocalProfileUpdate(
   if ('bio' in data) targetUser.bio = data.bio ? data.bio : null;
   if ('pronouns' in data)
     targetUser.pronouns = data.pronouns ? data.pronouns : null;
+  if ('birthday' in data)
+    targetUser.birthday = normalizeProfileBirthday(data.birthday);
+  if ('messageAllowIncoming' in data)
+    targetUser.messageAllowIncoming = data.messageAllowIncoming ?? null;
   if ('website' in data) targetUser.website = data.website ?? null;
   if ('photoURL' in data) {
     if (mediaUrls.photoURL) targetUser.photoURL = mediaUrls.photoURL;
@@ -2318,6 +2669,30 @@ function normalizeSettingsLabelPreference(
   return 'warn';
 }
 
+function getSettingsContentLabelConfig(
+  label: SettingsContentLabel
+): SettingsContentLabelConfig {
+  const config = SETTINGS_CONTENT_LABEL_BY_VALUE.get(label);
+
+  if (!config) throw new Error('Unsupported content label.');
+
+  return config;
+}
+
+function getSettingsContentLabelPreference(
+  moderationPrefs: ModerationOpts['prefs'],
+  config: SettingsContentLabelConfig
+): SettingsLabelPreference {
+  const sourceLabels = config.labelerDid
+    ? moderationPrefs.labelers.find(({ did }) => did === config.labelerDid)
+        ?.labels
+    : moderationPrefs.labels;
+
+  return normalizeSettingsLabelPreference(
+    sourceLabels?.[config.label] ?? config.defaultPreference
+  );
+}
+
 function normalizeMutedWordTarget(
   value: unknown
 ): SettingsMutedWordTarget | null {
@@ -2415,11 +2790,15 @@ async function loadModerationOpts(): Promise<ModerationOpts | null> {
     .getLabelDefinitions(prefs)
     .catch(() => undefined);
 
-  return {
+  const opts = {
     userDid,
     prefs: prefs.moderationPrefs,
     labelDefs
   };
+
+  activeModerationOpts = opts;
+
+  return opts;
 }
 
 function getModerationOpts(): Promise<ModerationOpts | null> {
@@ -2435,7 +2814,121 @@ function getModerationOpts(): Promise<ModerationOpts | null> {
 
 async function getSafeModerationOpts(): Promise<ModerationOpts | null> {
   try {
-    return await getModerationOpts();
+    const opts = await getModerationOpts();
+    activeModerationOpts = opts;
+    return opts;
+  } catch {
+    activeModerationOpts = null;
+    return null;
+  }
+}
+
+type LabelModerationCause = {
+  type: 'label';
+  label: { val: string };
+  labelDef: {
+    locales?: { lang?: string; name?: string; description?: string }[];
+    behaviors?: { content?: Record<string, string | undefined> };
+  };
+  target?: string;
+  setting?: SettingsLabelPreference;
+  noOverride?: boolean;
+};
+
+const MEDIA_WARNING_LABEL_FALLBACKS: Partial<
+  Record<SettingsContentLabel, string>
+> = {
+  porn: 'Adult content',
+  sexual: 'Sexually suggestive',
+  nudity: 'Non-sexual nudity',
+  'sexual-figurative': 'Sexually suggestive',
+  'graphic-media': 'Graphic media',
+  'self-harm': 'Self-harm',
+  sensitive: 'Sensitive content',
+  extremist: 'Extremist content',
+  intolerant: 'Intolerance',
+  threat: 'Threats',
+  rude: 'Rude content',
+  illicit: 'Illicit content',
+  security: 'Security concerns',
+  'unsafe-link': 'Unsafe link',
+  impersonation: 'Impersonation',
+  misinformation: 'Misinformation',
+  scam: 'Scam',
+  'engagement-farming': 'Engagement farming',
+  spam: 'Spam',
+  rumor: 'Unconfirmed claim',
+  misleading: 'Misleading',
+  inauthentic: 'Inauthentic account'
+};
+
+function isLabelModerationCause(cause: unknown): cause is LabelModerationCause {
+  return (
+    isPlainObject(cause) &&
+    cause.type === 'label' &&
+    isPlainObject(cause.label) &&
+    typeof cause.label.val === 'string' &&
+    isPlainObject(cause.labelDef)
+  );
+}
+
+function getModerationCauseLabelName(cause: LabelModerationCause): string {
+  const labelName = cause.labelDef.locales?.find(
+    ({ lang, name }) => lang === 'en' && !!name
+  )?.name;
+  const fallback =
+    MEDIA_WARNING_LABEL_FALLBACKS[cause.label.val as SettingsContentLabel] ??
+    cause.label.val;
+
+  return labelName ?? fallback;
+}
+
+function getModerationWarningDescription(noOverride: boolean): string {
+  if (noOverride)
+    return 'This media is not available because it includes content limited by Bluesky.';
+
+  return 'The Tweet author flagged this Tweet as showing sensitive content.';
+}
+
+function isMediaOnlyContentLabelCause(cause: unknown): boolean {
+  if (!isLabelModerationCause(cause)) return false;
+  if (cause.target !== 'content') return false;
+
+  const contentBehavior = cause.labelDef.behaviors?.content;
+
+  return (
+    contentBehavior?.contentMedia === 'blur' &&
+    !contentBehavior.contentList &&
+    !contentBehavior.contentView
+  );
+}
+
+function getMediaModerationWarning(
+  post: AppBskyFeedDefs.PostView,
+  opts: ModerationOpts | null = activeModerationOpts,
+  hasMedia = !!mapMedia(post.embed)
+): TweetMediaWarning | null {
+  if (!opts || !hasMedia) return null;
+
+  try {
+    const mediaUi = moderatePost(post, opts).ui('contentMedia');
+
+    if (!mediaUi.blur) return null;
+
+    const labelCause =
+      (mediaUi.blurs.find(isLabelModerationCause) as
+        | LabelModerationCause
+        | undefined) ?? null;
+    const label = labelCause
+      ? getModerationCauseLabelName(labelCause)
+      : 'Sensitive content';
+
+    return {
+      title: label,
+      description: getModerationWarningDescription(mediaUi.noOverride),
+      label,
+      noOverride: mediaUi.noOverride
+    };
   } catch {
     return null;
   }
@@ -2446,7 +2939,13 @@ function isModerationFilteredPost(
   opts: ModerationOpts | null
 ): boolean {
   try {
-    return !!opts && moderatePost(post, opts).ui('contentList').filter;
+    if (!opts) return false;
+
+    const contentUi = moderatePost(post, opts).ui('contentList');
+
+    return contentUi.filters.some(
+      (cause) => !isMediaOnlyContentLabelCause(cause)
+    );
   } catch {
     return false;
   }
@@ -2611,18 +3110,14 @@ export async function getBlueskySettings(): Promise<BlueskySettings> {
   const labels = SETTINGS_CONTENT_LABELS.reduce<
     Record<SettingsContentLabel, SettingsLabelPreference>
   >(
-    (contentLabels, label) => ({
+    (contentLabels, config) => ({
       ...contentLabels,
-      [label]: normalizeSettingsLabelPreference(
-        prefs.moderationPrefs.labels[label]
+      [config.label]: getSettingsContentLabelPreference(
+        prefs.moderationPrefs,
+        config
       )
     }),
-    {
-      porn: 'warn',
-      sexual: 'warn',
-      nudity: 'ignore',
-      'graphic-media': 'warn'
-    }
+    {} as Record<SettingsContentLabel, SettingsLabelPreference>
   );
 
   const postInteractionSettings = prefs.postInteractionSettings;
@@ -2757,10 +3252,9 @@ export async function setContentLabelSetting(
   label: SettingsContentLabel,
   preference: SettingsLabelPreference
 ): Promise<BlueskySettings> {
-  if (!SETTINGS_CONTENT_LABELS.includes(label))
-    throw new Error('Unsupported content label.');
+  const config = getSettingsContentLabelConfig(label);
 
-  await getAgent().setContentLabelPref(label, preference);
+  await getAgent().setContentLabelPref(label, preference, config.labelerDid);
   clearModerationSettingsCache();
   notify();
 
@@ -3141,6 +3635,9 @@ function mapProfile(profile: ActorProfileView): User;
 function mapProfile(profile: ActorProfileView): User {
   const existing = userCache.get(profile.did);
   const detailedProfile = profile as AppBskyActorDefs.ProfileViewDetailed;
+  const profileRecord =
+    detailedProfile as AppBskyActorDefs.ProfileViewDetailed &
+      Record<string, unknown>;
   const isDetailed = hasDetailedProfileData(profile);
   const did = profile.did;
   const currentDid = sessionDid ?? '';
@@ -3211,6 +3708,11 @@ function mapProfile(profile: ActorProfileView): User {
     id: did,
     bio: detailedProfile.description ?? existing?.bio ?? null,
     pronouns: profile.pronouns ?? existing?.pronouns ?? null,
+    birthday:
+      normalizeProfileBirthday(profileRecord.birthday) ??
+      existing?.birthday ??
+      null,
+    messageAllowIncoming: existing?.messageAllowIncoming ?? null,
     name: profile.displayName || existing?.name || profile.handle,
     theme: existing?.theme ?? null,
     accent: existing?.accent ?? null,
@@ -3286,6 +3788,41 @@ function getPostText(record: unknown): string | null {
   if (!record || typeof record !== 'object' || !('text' in record)) return null;
   const text = (record as { text?: unknown }).text;
   return typeof text === 'string' && text ? text : null;
+}
+
+function normalizePostLanguage(
+  value: string | null | undefined
+): string | null {
+  const normalized = value?.trim().toLowerCase().replace(/_/g, '-');
+  if (!normalized) return null;
+
+  const base = normalized.split('-')[0];
+
+  return base && !['mul', 'und', 'zxx'].includes(base) ? base : null;
+}
+
+function getPostLanguages(record: unknown): string[] {
+  if (!record || typeof record !== 'object' || !('langs' in record)) return [];
+
+  const langs = (record as { langs?: unknown }).langs;
+  if (!Array.isArray(langs)) return [];
+
+  return Array.from(
+    new Set(
+      langs.flatMap((lang) =>
+        typeof lang === 'string' ? normalizePostLanguage(lang) ?? [] : []
+      )
+    )
+  );
+}
+
+function getDefaultPostLanguages(): string[] {
+  if (typeof navigator === 'undefined') return [];
+
+  const language = navigator.languages?.[0] ?? navigator.language;
+  const normalized = normalizePostLanguage(language);
+
+  return normalized ? [normalized] : [];
 }
 
 function getPostCreatedAt(record: unknown, fallback: string): Timestamp {
@@ -3570,11 +4107,34 @@ function mapUnavailableEmbeddedTweet(
     authorAvatar: null,
     authorVerified: false,
     text: null,
+    langs: [],
     createdAt: null,
     images: null,
+    mediaWarning: null,
     card: null,
     unavailable
   };
+}
+
+function getEmbeddedRecordMediaWarning(
+  record: AppBskyEmbedRecord.ViewRecord,
+  images: ImagesPreview | null
+): TweetMediaWarning | null {
+  if (!images) return null;
+
+  return getMediaModerationWarning(
+    {
+      uri: record.uri,
+      cid: record.cid,
+      author: record.author,
+      record: record.value,
+      embed: record.embeds?.[0] as AppBskyFeedDefs.PostView['embed'],
+      labels: record.labels,
+      indexedAt: record.indexedAt
+    },
+    activeModerationOpts,
+    true
+  );
 }
 
 function mapEmbeddedRecord(
@@ -3583,6 +4143,7 @@ function mapEmbeddedRecord(
   if (AppBskyEmbedRecord.isViewRecord(record)) {
     const id = postIdFromUri(record.uri);
     const author = mapProfile(record.author);
+    const images = mapFirstEmbeddedMedia(record.embeds);
 
     postRefCache.set(id, { uri: record.uri, cid: record.cid });
     cachePostReplyRef(id, record.value);
@@ -3594,8 +4155,10 @@ function mapEmbeddedRecord(
       authorAvatar: author.photoURL,
       authorVerified: author.verified,
       text: getPostText(record.value),
+      langs: getPostLanguages(record.value),
       createdAt: getPostCreatedAt(record.value, record.indexedAt),
-      images: mapFirstEmbeddedMedia(record.embeds),
+      images,
+      mediaWarning: getEmbeddedRecordMediaWarning(record, images),
       card: mapFirstEmbeddedCard(record.embeds)
     };
   }
@@ -3640,10 +4203,17 @@ function mapPost(
 ): Tweet {
   const id = postIdFromUri(post.uri);
   const currentDid = sessionDid;
+  const images = mapMedia(post.embed);
   const tweet: Tweet = {
     id,
     text: getPostText(post.record),
-    images: mapMedia(post.embed),
+    langs: getPostLanguages(post.record),
+    images,
+    mediaWarning: getMediaModerationWarning(
+      post,
+      activeModerationOpts,
+      !!images
+    ),
     card: mapCard(post.embed),
     quotedTweet: mapQuotedTweet(post.embed),
     parent: parent ?? null,
@@ -3691,20 +4261,46 @@ function mapThreadPost(thread: AppBskyFeedDefs.ThreadViewPost): TweetWithUser {
   };
 }
 
-function mapThreadParents(
-  thread: AppBskyFeedDefs.ThreadViewPost,
-  moderationOpts?: ModerationOpts | null
-): TweetWithUser[] {
-  const parents: TweetWithUser[] = [];
+function getThreadParentPosts(
+  thread: AppBskyFeedDefs.ThreadViewPost
+): AppBskyFeedDefs.ThreadViewPost[] {
+  const parents: AppBskyFeedDefs.ThreadViewPost[] = [];
   let currentParent = thread.parent;
 
   while (AppBskyFeedDefs.isThreadViewPost(currentParent)) {
-    if (isVisibleThreadPost(currentParent, moderationOpts ?? null))
-      parents.unshift(mapThreadPost(currentParent));
+    parents.unshift(currentParent);
     currentParent = currentParent.parent;
   }
 
   return parents;
+}
+
+function mapVisibleThreadParents(
+  parents: AppBskyFeedDefs.ThreadViewPost[],
+  moderationOpts?: ModerationOpts | null
+): TweetWithUser[] {
+  return filterDeletedTweets(
+    parents
+      .filter((parent) => isVisibleThreadPost(parent, moderationOpts ?? null))
+      .map(mapThreadPost)
+  );
+}
+
+function mapThreadParentPage(
+  thread: AppBskyFeedDefs.ThreadViewPost,
+  moderationOpts?: ModerationOpts | null
+): TweetThreadParentsPage {
+  const parentPosts = getThreadParentPosts(thread);
+  const hasMoreParents = parentPosts.length > BSKY_THREAD_PARENT_PAGE_SIZE;
+  const visibleParentPosts = hasMoreParents
+    ? parentPosts.slice(1)
+    : parentPosts;
+  const parents = mapVisibleThreadParents(visibleParentPosts, moderationOpts);
+
+  return {
+    parents,
+    cursor: hasMoreParents ? parents[0]?.id ?? null : null
+  };
 }
 
 function getVisibleThreadReplies(
@@ -4716,6 +5312,7 @@ export async function setChatSettings(
     throwChatError(error);
   }
 
+  applyChatDeclarationUserData(sessionDid, record);
   notify();
   return { allowIncoming: normalizedAllowIncoming };
 }
@@ -4982,12 +5579,8 @@ async function refreshCurrentUser(): Promise<User | null> {
     followsResponse?.data.follows.map((profile) => profile.did) ?? []
   );
   currentUser = mapProfile(profileResponse.data);
-  if (liveProfileRecord) {
-    applyLocalProfileUpdate(
-      sessionDid,
-      getProfileRecordUserData(sessionDid, liveProfileRecord)
-    );
-  }
+  if (liveProfileRecord)
+    applyProfileRecordUserData(sessionDid, liveProfileRecord);
   currentUser = userCache.get(sessionDid) ?? currentUser;
   currentUser.following = Array.from(currentFollowing);
   userCache.set(currentUser.id, currentUser);
@@ -5340,13 +5933,26 @@ export async function getUser(actor: string): Promise<User | null> {
     if (refreshedUser) return refreshedUser;
   }
 
-  if (cachedUser && detailedUserCache.has(cachedUser.id)) return cachedUser;
+  if (cachedUser && detailedUserCache.has(cachedUser.id)) {
+    await Promise.all([
+      hydrateProfileRecordUserData(cachedUser.id).catch(() => undefined),
+      hydrateChatDeclarationUserData(cachedUser.id).catch(() => undefined)
+    ]);
+    return userCache.get(cachedUser.id) ?? cachedUser;
+  }
 
   try {
     const response = await getAppViewAgent().getProfile({
       actor: normalizedActor
     });
-    return mapProfile(response.data);
+    const user = mapProfile(response.data);
+
+    await Promise.all([
+      hydrateProfileRecordUserData(user.id).catch(() => undefined),
+      hydrateChatDeclarationUserData(user.id).catch(() => undefined)
+    ]);
+
+    return userCache.get(user.id) ?? user;
   } catch (error) {
     if (isRecordNotFoundError(error)) return null;
     throw error;
@@ -5383,7 +5989,7 @@ export async function getTweetThread(
     const response = await getAppViewAgent().getPostThread({
       uri,
       depth: BSKY_THREAD_REPLY_DEPTH,
-      parentHeight: 100
+      parentHeight: BSKY_THREAD_PARENT_PAGE_SIZE + 1
     });
     const { thread } = response.data;
 
@@ -5394,10 +6000,12 @@ export async function getTweetThread(
     if (locallyDeletedTweetIds.has(tweet.id)) return null;
 
     const { threadReplies, replies } = mapThreadReplies(thread, moderationOpts);
+    const parentPage = mapThreadParentPage(thread, moderationOpts);
 
     return {
       tweet,
-      parents: filterDeletedTweets(mapThreadParents(thread, moderationOpts)),
+      parents: parentPage.parents,
+      parentCursor: parentPage.cursor,
       threadReplies: filterDeletedTweets(threadReplies),
       replies: mergeLocalCreatedTweetsWithUsers(
         replies,
@@ -5406,6 +6014,36 @@ export async function getTweetThread(
     };
   } catch (error) {
     if (isRecordNotFoundError(error)) return null;
+    throw error;
+  }
+}
+
+export async function getTweetThreadParentsPage(
+  id: string
+): Promise<TweetThreadParentsPage> {
+  if (!agent) return { parents: [], cursor: null };
+  if (!id || id === 'null') return { parents: [], cursor: null };
+  if (locallyDeletedTweetIds.has(id)) return { parents: [], cursor: null };
+
+  const uri = uriFromPostId(id);
+  const moderationOpts = await getSafeModerationOpts();
+
+  try {
+    const response = await getAppViewAgent().getPostThread({
+      uri,
+      depth: 0,
+      parentHeight: BSKY_THREAD_PARENT_PAGE_SIZE + 1
+    });
+    const { thread } = response.data;
+
+    if (!AppBskyFeedDefs.isThreadViewPost(thread))
+      return { parents: [], cursor: null };
+    if (!isVisibleThreadPost(thread, moderationOpts))
+      return { parents: [], cursor: null };
+
+    return mapThreadParentPage(thread, moderationOpts);
+  } catch (error) {
+    if (isRecordNotFoundError(error)) return { parents: [], cursor: null };
     throw error;
   }
 }
@@ -6237,6 +6875,7 @@ export async function addTweet(data: AddTweetData): Promise<Tweet> {
   const postRecord: AppBskyFeedPost.Record = {
     $type: 'app.bsky.feed.post',
     text: richText.text,
+    langs: getDefaultPostLanguages(),
     facets: richText.facets,
     embed,
     reply: replyRef,
@@ -6248,9 +6887,11 @@ export async function addTweet(data: AddTweetData): Promise<Tweet> {
   const localTweet: Tweet = {
     id: postIdFromUri(result.uri),
     text: richText.text || null,
+    langs: getPostLanguages(postRecord),
     images: images.length
       ? images.map(({ preview }) => preview)
       : data.images ?? null,
+    mediaWarning: null,
     card: data.card && isTenorGifUrl(data.card.url) ? null : data.card ?? null,
     quotedTweet: data.quotedTweet ?? null,
     parent: data.parent ?? null,
@@ -6461,6 +7102,7 @@ export async function updateProfile(
     'name' in data ||
     'bio' in data ||
     'pronouns' in data ||
+    'birthday' in data ||
     'website' in data ||
     !!avatarUpload ||
     !!bannerUpload ||
@@ -6477,6 +7119,12 @@ export async function updateProfile(
 
         if (nextPronouns) nextProfile.pronouns = nextPronouns;
         else delete nextProfile.pronouns;
+      }
+      if ('birthday' in data) {
+        const nextBirthday = normalizeProfileBirthday(data.birthday);
+
+        if (nextBirthday) nextProfile.birthday = nextBirthday;
+        else delete nextProfile.birthday;
       }
       if ('website' in data) {
         const nextWebsite = normalizeProfileWebsiteForWrite(data.website);

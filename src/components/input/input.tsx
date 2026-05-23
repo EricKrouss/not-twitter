@@ -69,8 +69,10 @@ function getQuotedTweetPreview(tweet: TweetWithUser): EmbeddedTweet {
     authorAvatar: tweet.user.photoURL,
     authorVerified: tweet.user.verified,
     text: tweet.text,
+    langs: tweet.langs,
     createdAt: tweet.createdAt,
     images: tweet.images,
+    mediaWarning: tweet.mediaWarning,
     card: tweet.card
   };
 }
@@ -211,8 +213,10 @@ export function Input({
 
       const tweetData: WithFieldValue<TweetDraft> = {
         text: inputValue.trim() || null,
+        langs: [],
         parent: isReplying && parent ? parent : null,
         images: uploadedImages,
+        mediaWarning: null,
         card: activeExternalCard,
         quotedTweet,
         userLikes: [],

@@ -8,6 +8,7 @@ import { CustomIcon } from '@components/ui/custom-icon';
 import { HeroIcon } from '@components/ui/hero-icon';
 import { NextImage } from '@components/ui/next-image';
 import { TweetText } from './tweet-text';
+import { TweetTranslation } from './tweet-translation';
 import type { KeyboardEvent, MouseEvent, ReactNode } from 'react';
 import type { EmbeddedTweet, TweetCard } from '@lib/types/tweet';
 import type { YouTubeVideoInfo } from '@lib/youtube';
@@ -337,16 +338,24 @@ function QuotedTweetCard({
           )}
         </div>
         {quotedTweet.text && (
-          <TweetText
-            className='mt-1 text-[15px] text-light-primary dark:text-dark-primary'
-            text={quotedTweet.text}
-          />
+          <>
+            <TweetText
+              className='mt-1 text-[15px] text-light-primary dark:text-dark-primary'
+              text={quotedTweet.text}
+            />
+            <TweetTranslation
+              className='text-[14px] leading-5'
+              text={quotedTweet.text}
+              langs={quotedTweet.langs}
+            />
+          </>
         )}
         {!hideMedia && quotedTweet.images && (
           <ImagePreview
             tweet
             imagesPreview={quotedTweet.images}
             previewCount={quotedTweet.images.length}
+            moderationWarning={quotedTweet.mediaWarning}
           />
         )}
         {quotedTweetCard && <TweetLinkCard card={quotedTweetCard} compact />}

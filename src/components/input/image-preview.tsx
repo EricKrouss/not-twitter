@@ -15,13 +15,14 @@ import { TwitterVideoPlayer } from '@components/ui/twitter-video-player';
 import type { MotionProps } from 'framer-motion';
 import type { CSSProperties, KeyboardEvent } from 'react';
 import type { ImagesPreview, ImageData } from '@lib/types/file';
-import type { TweetWithUser } from '@lib/types/tweet';
+import type { TweetMediaWarning, TweetWithUser } from '@lib/types/tweet';
 
 type ImagePreviewProps = {
   tweet?: boolean;
   viewTweet?: boolean;
   previewCount: number;
   imagesPreview: ImagesPreview;
+  moderationWarning?: TweetMediaWarning | null;
   tweetData?: TweetWithUser;
   removeImage?: (targetId: string) => () => void;
 };
@@ -224,11 +225,13 @@ export function ImagePreview({
   viewTweet,
   previewCount,
   imagesPreview,
+  moderationWarning,
   tweetData,
   removeImage
 }: ImagePreviewProps): JSX.Element {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [selectedImage, setSelectedImage] = useState<ImageData | null>(null);
+  const [warningRevealed, setWarningRevealed] = useState(false);
 
   const { open, openModal, closeModal } = useModal();
 
@@ -237,6 +240,10 @@ export function ImagePreview({
     setSelectedImage(imageData);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedIndex]);
+
+  useEffect(() => {
+    setWarningRevealed(false);
+  }, [moderationWarning?.label, imagesPreview]);
 
   const handleSelectedImage = (index: number) => () => {
     setSelectedImage(imagesPreview[index]);
@@ -275,11 +282,12 @@ export function ImagePreview({
   const singleGif = singleMedia && !!firstMedia && isGifMedia(firstMedia);
   const draftSingleGif = singleGif && !isTweet;
   const currentImage = selectedImage ?? imagesPreview[selectedIndex];
+  const shouldWarnMedia = !!moderationWarning && !warningRevealed;
 
   return (
     <div
       className={cn(
-        'grid rounded-2xl',
+        'relative grid rounded-2xl',
         singleMedia ? 'grid-cols-1 grid-rows-1' : 'grid-cols-2 grid-rows-2',
         isTweet
           ? `dark:bg-dark-hover mt-2 w-full overflow-hidden border border-light-border
@@ -346,6 +354,8 @@ export function ImagePreview({
               className={cn(
                 'accent-tab group relative overflow-hidden transition-shadow',
                 imageRadius,
+                shouldWarnMedia &&
+                  'pointer-events-none scale-[1.02] blur-lg brightness-75',
                 {
                   'col-span-1 row-span-1': visiblePreviewCount === 1,
                   'row-span-2':
@@ -353,8 +363,8 @@ export function ImagePreview({
                     (index === 0 && visiblePreviewCount === 3)
                 }
               )}
-              role={isGif ? undefined : 'button'}
-              tabIndex={isGif ? undefined : 0}
+              role={shouldWarnMedia || isGif ? undefined : 'button'}
+              tabIndex={shouldWarnMedia || isGif ? undefined : 0}
               aria-label={isGif ? undefined : `Open image ${index + 1}`}
               {...variants}
               onClick={isGif ? preventBubbling() : preventBubbling(openPreview)}
@@ -421,6 +431,37 @@ export function ImagePreview({
           );
         })}
       </AnimatePresence>
+      {shouldWarnMedia && (
+        <div
+          className='absolute inset-0 z-20 flex items-center justify-center bg-black/30
+                     px-6 text-center text-white'
+          onClick={preventBubbling(null, true)}
+        >
+          <div className='max-w-[285px]'>
+            <HeroIcon
+              className='mx-auto mb-2 h-6 w-6 text-white/90 drop-shadow-sm'
+              iconName='EyeSlashIcon'
+            />
+            <p className='text-[14px] font-bold leading-5 text-white drop-shadow-sm'>
+              Content warning: Sensitive content
+            </p>
+            <p className='mt-1 text-[13px] leading-5 text-white/80 drop-shadow-sm'>
+              {moderationWarning.description}
+            </p>
+            {!moderationWarning.noOverride && (
+              <button
+                className='mt-2 text-[13px] font-bold leading-5 text-white underline-offset-2
+                           hover:underline focus-visible:outline focus-visible:outline-2
+                           focus-visible:outline-offset-2 focus-visible:outline-white/80'
+                onClick={preventBubbling(() => setWarningRevealed(true))}
+                type='button'
+              >
+                View
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

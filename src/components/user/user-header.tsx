@@ -1,12 +1,13 @@
 import { useRouter } from 'next/router';
 import { AnimatePresence, motion } from 'framer-motion';
-import { useDocument } from '@lib/hooks/useDocument';
+import { useAuth } from '@lib/context/auth-context';
 import { useUser } from '@lib/context/user-context';
+import { useCollection } from '@lib/hooks/useCollection';
 import { isPlural } from '@lib/utils';
-import { userStatsCollection } from '@lib/atproto/collections';
+import { tweetsCollection } from '@lib/atproto/collections';
 import { formatAtprotoDisplayIdentifier } from '@lib/atproto/identity';
 import { getProfileRouteId, getProfileRouteView } from '@lib/static-routes';
-import { doc } from '@lib/atproto/store';
+import { orderBy, query, where } from '@lib/atproto/store';
 import { UserName } from './user-name';
 import type { Variants } from 'framer-motion';
 
@@ -24,25 +25,9 @@ export function UserHeader(): JSX.Element {
   } = useRouter();
 
   const { user, loading } = useUser();
+  const { user: authUser } = useAuth();
 
   const userId = user ? user.id : null;
-
-  const { data: statsData, loading: statsLoading } = useDocument(
-    doc(userStatsCollection(userId ?? 'null'), 'stats'),
-    {
-      allowNull: true,
-      disabled: !userId
-    }
-  );
-
-  const { tweets, likes } = statsData ?? {};
-
-  const [totalTweets, totalPhotos, totalLikes] = [
-    (user?.totalTweets ?? 0) + (tweets?.length ?? 0),
-    user?.totalPhotos,
-    likes?.length
-  ];
-
   const currentView = getProfileRouteView(asPath);
   const routeId = (Array.isArray(id) ? id[0] : id) ?? getProfileRouteId(asPath);
   const routeLabel = formatAtprotoDisplayIdentifier(routeId);
@@ -52,6 +37,42 @@ export function UserHeader(): JSX.Element {
     currentPage
   );
   const isInFollowPage = ['following', 'followers'].includes(currentPage);
+  const isMediaPage = currentPage === 'media';
+  const isLikesPage = currentPage === 'likes';
+  const likesVisible = !!authUser && authUser.id === userId;
+  const profileRestricted = !!user?.blocking || !!user?.blockedBy;
+
+  const { data: mediaTweets, loading: mediaLoading } = useCollection(
+    query(
+      tweetsCollection,
+      where('createdBy', '==', userId ?? ''),
+      where('images', '!=', null)
+    ),
+    {
+      allowNull: true,
+      disabled: !userId || !isMediaPage || profileRestricted
+    }
+  );
+
+  const { data: likedTweets, loading: likesLoading } = useCollection(
+    query(
+      tweetsCollection,
+      where('userLikes', 'array-contains', userId ?? ''),
+      orderBy('createdAt', 'desc')
+    ),
+    {
+      allowNull: true,
+      disabled: !userId || !isLikesPage || !likesVisible
+    }
+  );
+
+  const [totalTweets, totalMedia, totalLikes] = [
+    user?.totalTweets ?? 0,
+    isMediaPage && !profileRestricted ? mediaTweets?.length ?? 0 : 0,
+    isLikesPage && likesVisible ? likedTweets?.length ?? 0 : 0
+  ];
+  const statsLoading =
+    (isMediaPage && mediaLoading) || (isLikesPage && likesLoading);
 
   return (
     <AnimatePresence initial={false} mode='wait'>
@@ -85,10 +106,10 @@ export function UserHeader(): JSX.Element {
               ? totalTweets
                 ? `${totalTweets} ${`Tweet${isPlural(totalTweets)}`}`
                 : 'No Tweet'
-              : currentPage === 'media'
-              ? totalPhotos
-                ? `${totalPhotos} Photo${isPlural(totalPhotos)} & GIF${isPlural(
-                    totalPhotos
+              : isMediaPage
+              ? totalMedia
+                ? `${totalMedia} Photo${isPlural(totalMedia)} & GIF${isPlural(
+                    totalMedia
                   )}`
                 : 'No Photo & GIF'
               : totalLikes

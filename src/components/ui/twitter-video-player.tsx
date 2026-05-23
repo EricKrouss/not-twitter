@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import cn from 'clsx';
 import Hls from 'hls.js';
 import { formatNumber } from '@lib/date';
@@ -34,6 +34,7 @@ const playbackSpeeds: readonly PlaybackSpeed[] = [0.5, 1, 1.5, 2];
 const lowInitialVolume = 0.04;
 const compactSettingsHeight = 390;
 const tightControlsWidth = 430;
+const videoFocusThreshold = 0.5;
 
 function formatVideoTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds <= 0) return '0:00';
@@ -58,6 +59,12 @@ function getQualityLabel(height: number, bandwidth: number): string {
   if (height) return `${height}p`;
 
   return `${Math.max(Math.round(bandwidth / 1000), 1)} kbps`;
+}
+
+function clampVolume(value: number): number {
+  if (!Number.isFinite(value)) return lowInitialVolume;
+
+  return Math.max(0, Math.min(value, 1));
 }
 
 function normalizeQualityOptions(options: QualityOption[]): QualityOption[] {
@@ -144,79 +151,50 @@ function TwitterVideoIcon({
   switch (iconName) {
     case 'check':
       return (
-        <svg {...commonProps} fill='none'>
-          <path
-            d='m5.5 12.5 4.1 4.1 8.9-9.2'
-            stroke='currentColor'
-            strokeLinecap='round'
-            strokeLinejoin='round'
-            strokeWidth='2.1'
-          />
+        <svg {...commonProps} fill='currentColor'>
+          <polygon points='9.64 18.952 4.09 14.091 5.407 12.587 9.358 16.046 17.817 5.098 19.4 6.32 9.64 18.952' />
         </svg>
       );
     case 'fullscreen':
       return (
         <svg {...commonProps} fill='currentColor'>
-          <path d='M14.2 3.5H21v6.8h-2V6.9l-5.1 5.1-1.4-1.4 5.1-5.1h-3.4v-2zM10.1 12l1.4 1.4-5.1 5.1h3.4v2H3v-6.8h2v3.4l5.1-5.1z' />
+          <path d='M3 5.5C3 4.12 4.12 3 5.5 3H10v2H5.5c-.28 0-.5.22-.5.5V10H3V5.5ZM14 3h4.5C19.88 3 21 4.12 21 5.5V10h-2V5.5c0-.28-.22-.5-.5-.5H14V3ZM5 14v4.5c0 .28.22.5.5.5H10v2H5.5C4.12 21 3 19.88 3 18.5V14h2Zm16 0v4.5c0 1.38-1.12 2.5-2.5 2.5H14v-2h4.5c.28 0 .5-.22.5-.5V14h2Z' />
         </svg>
       );
     case 'fullscreen-exit':
       return (
         <svg {...commonProps} fill='currentColor'>
-          <path d='M12.8 5.7h3.4l-5.1 5.1 1.4 1.4 5.1-5.1v3.4h2V3.7h-6.8v2zM11.2 18.3H7.8l5.1-5.1-1.4-1.4-5.1 5.1v-3.4h-2v6.8h6.8v-2z' />
+          <path d='M10 2v5.5C10 8.88 8.88 10 7.5 10H2V8h5.5c.28 0 .5-.22.5-.5V2h2Zm6 0v5.5c0 .28.22.5.5.5H22v2h-5.5C15.12 10 14 8.88 14 7.5V2h2ZM2 14h5.5c1.38 0 2.5 1.12 2.5 2.5V22H8v-5.5c0-.28-.22-.5-.5-.5H2v-2Zm14.5 2c-.28 0-.5.22-.5.5V22h-2v-5.5c0-1.38 1.12-2.5 2.5-2.5H22v2h-5.5Z' />
         </svg>
       );
     case 'pause':
       return (
         <svg {...commonProps} fill='currentColor'>
-          <path d='M7 5.2h3.2v13.6H7V5.2zm6.8 0H17v13.6h-3.2V5.2z' />
+          <path d='M4 2h5v20H4V2Zm11 20h5V2h-5v20Z' />
         </svg>
       );
     case 'play':
       return (
         <svg {...commonProps} fill='currentColor'>
-          <path d='M8 5.1v13.8L18.8 12 8 5.1z' />
+          <path d='M21 12 4 2v20l17-10Z' />
         </svg>
       );
     case 'settings':
       return (
-        <svg {...commonProps} fill='none'>
-          <path
-            d='M12 8.9a3.1 3.1 0 1 1 0 6.2 3.1 3.1 0 0 1 0-6.2z'
-            stroke='currentColor'
-            strokeWidth='1.8'
-          />
-          <path
-            d='m19.1 13.4 1.5 1.1-1.7 3-1.8-.7a7.1 7.1 0 0 1-1.4.8l-.3 1.9H8.6l-.3-1.9a7.1 7.1 0 0 1-1.4-.8l-1.8.7-1.7-3 1.5-1.1a7.6 7.6 0 0 1 0-2.8L3.4 9.5l1.7-3 1.8.7a7.1 7.1 0 0 1 1.4-.8l.3-1.9h6.8l.3 1.9c.5.2 1 .5 1.4.8l1.8-.7 1.7 3-1.5 1.1a7.6 7.6 0 0 1 0 2.8z'
-            stroke='currentColor'
-            strokeLinecap='round'
-            strokeLinejoin='round'
-            strokeWidth='1.8'
-          />
+        <svg {...commonProps} fill='currentColor'>
+          <path d='M10.54 1.75h2.92l1.57 2.36c.11.17.32.25.53.21l2.53-.59 2.17 2.17-.58 2.54c-.05.2.04.41.21.53l2.36 1.57v2.92l-2.36 1.57c-.17.12-.26.33-.21.53l.58 2.54-2.17 2.17-2.53-.59c-.21-.04-.42.04-.53.21l-1.57 2.36h-2.92l-1.58-2.36c-.11-.17-.32-.25-.52-.21l-2.54.59-2.17-2.17.58-2.54c.05-.2-.03-.41-.21-.53l-2.35-1.57v-2.92L4.1 8.97c.18-.12.26-.33.21-.53L3.73 5.9 5.9 3.73l2.54.59c.2.04.41-.04.52-.21l1.58-2.36Zm1.07 2-.98 1.47C10.05 6.08 9 6.5 7.99 6.27l-1.46-.34-.6.6.33 1.46c.24 1.01-.18 2.07-1.05 2.64l-1.46.98v.78l1.46.98c.87.57 1.29 1.63 1.05 2.64l-.33 1.46.6.6 1.46-.34c1.01-.23 2.06.19 2.64 1.05l.98 1.47h.78l.97-1.47c.58-.86 1.63-1.28 2.65-1.05l1.45.34.61-.6-.34-1.46c-.23-1.01.18-2.07 1.05-2.64l1.47-.98v-.78l-1.47-.98c-.87-.57-1.28-1.63-1.05-2.64l.34-1.46-.61-.6-1.45.34c-1.02.23-2.07-.19-2.65-1.05l-.97-1.47h-.78ZM12 10.5c-.83 0-1.5.67-1.5 1.5s.67 1.5 1.5 1.5c.82 0 1.5-.67 1.5-1.5s-.68-1.5-1.5-1.5ZM8.5 12c0-1.93 1.56-3.5 3.5-3.5 1.93 0 3.5 1.57 3.5 3.5s-1.57 3.5-3.5 3.5c-1.94 0-3.5-1.57-3.5-3.5Z' />
         </svg>
       );
     case 'volume':
       return (
-        <svg {...commonProps} fill='none'>
-          <path
-            d='M4 9.2h4.1L13 5v14l-4.9-4.2H4V9.2zM16.2 8.4a5.3 5.3 0 0 1 0 7.2M18.9 5.8a8.9 8.9 0 0 1 0 12.4'
-            stroke='currentColor'
-            strokeLinecap='round'
-            strokeLinejoin='round'
-            strokeWidth='1.9'
-          />
+        <svg {...commonProps} fill='currentColor'>
+          <path d='M15 22.94V1.06L6.68 7H3.5C2.12 7 1 8.12 1 9.5v5C1 15.88 2.12 17 3.5 17h3.18L15 22.94ZM3.5 9H6v6H3.5c-.28 0-.5-.22-.5-.5v-5c0-.28.22-.5.5-.5ZM13 19.06l-5-3.57V8.51l5-3.57v14.12Zm5.95-12.01c-.24-.24-.49-.45-.75-.65l1-1.75c.41.29.8.62 1.16.99 3.52 3.51 3.52 9.21 0 12.72-.36.37-.75.7-1.16.99l-1-1.75c.26-.2.51-.41.75-.65 2.73-2.73 2.73-7.17 0-9.9ZM17 12c0-.8-.31-1.52-.82-2.06l1.02-1.78c1.1.91 1.8 2.29 1.8 3.84s-.7 2.93-1.8 3.84l-1.02-1.78c.51-.54.82-1.26.82-2.06Z' />
         </svg>
       );
     case 'volume-muted':
       return (
-        <svg {...commonProps} fill='none'>
-          <path
-            d='M4 9.2h4.1L13 5v14l-4.9-4.2H4V9.2zM16.6 9.2l4.2 4.2M20.8 9.2l-4.2 4.2'
-            stroke='currentColor'
-            strokeLinecap='round'
-            strokeLinejoin='round'
-            strokeWidth='1.9'
-          />
+        <svg {...commonProps} fill='currentColor'>
+          <path d='M15 1.06v21.88L6.68 17H3.5C2.12 17 1 15.88 1 14.5v-5C1 8.12 2.12 7 3.5 7h3.18L15 1.06ZM6 9H3.5c-.28 0-.5.22-.5.5v5c0 .28.22.5.5.5H6V9Zm2 6.49 5 3.57V4.94L8 8.51v6.98Zm10.5-6.9 2 2 2-2L23.91 10l-2 2 2 2-1.41 1.41-2-2-2 2L17.09 14l2-2-2-2 1.41-1.41Z' />
         </svg>
       );
   }
@@ -229,7 +207,7 @@ function TwitterVideoInitialPlayIcon(): JSX.Element {
       viewBox='0 0 24 24'
       aria-hidden='true'
     >
-      <path fill='currentColor' d='M6.7 2.7v18.6L21 12 6.7 2.7z' />
+      <path fill='currentColor' d='M21 12 4 2v20l17-10Z' />
     </svg>
   );
 }
@@ -254,12 +232,19 @@ export function TwitterVideoPlayer({
   const pendingSeekRef = useRef<number | null>(null);
   const resumeAfterSourceChangeRef = useRef(false);
   const mutedRef = useRef(muted);
+  const playingRef = useRef(!!autoPlay);
+  const focusMutedRef = useRef(false);
+  const viewportFocusedRef = useRef(true);
+  const pageFocusedRef = useRef(true);
   const playbackRateRef = useRef<PlaybackSpeed>(1);
-  const volumeRef = useRef(lowInitialVolume);
+  const initialClampedVolume = clampVolume(initialVolume);
+  const volumeRef = useRef(initialClampedVolume);
+  const previousVolumeRef = useRef(initialClampedVolume || 0.5);
 
   const [playing, setPlaying] = useState(!!autoPlay);
   const [hasStarted, setHasStarted] = useState(!!autoPlay);
   const [isMuted, setIsMuted] = useState(muted);
+  const [volume, setVolume] = useState(initialClampedVolume);
   const [hlsSupported, setHlsSupported] = useState(false);
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
@@ -276,15 +261,20 @@ export function TwitterVideoPlayer({
   const useHlsJs = hlsSupported && isHlsPlaylist(activeSrc);
   const nativeVideoSrc = useHlsJs ? undefined : activeSrc;
   const safeInitialVolume = useMemo(
-    () => Math.max(0, Math.min(initialVolume, 1)),
+    () => clampVolume(initialVolume),
     [initialVolume]
   );
   const progressPercent = useMemo(
     () => (duration ? Math.min((currentTime / duration) * 100, 100) : 0),
     [currentTime, duration]
   );
+  const visibleVolume = isMuted ? 0 : volume;
+  const volumePercent = visibleVolume * 100;
   const scrubberStyle = {
     '--twitter-video-progress': `${progressPercent}%`
+  } as CSSProperties;
+  const volumeSliderStyle = {
+    '--twitter-video-volume': `${volumePercent}%`
   } as CSSProperties;
   const viewCountLabel =
     viewCount !== null && viewCount !== undefined
@@ -297,6 +287,33 @@ export function TwitterVideoPlayer({
     playerSize.width > 0 && playerSize.width < tightControlsWidth;
   const showViewCount = !!viewCountLabel && !tightControls;
   const showVolumeButton = !compact && !tightControls;
+
+  const setMutedState = useCallback((nextMuted: boolean): void => {
+    mutedRef.current = nextMuted;
+
+    const video = videoRef.current;
+    if (video) video.muted = nextMuted;
+
+    setIsMuted(nextMuted);
+  }, []);
+
+  const syncAudioFocus = useCallback((): void => {
+    const focused = viewportFocusedRef.current && pageFocusedRef.current;
+
+    if (focused) {
+      if (focusMutedRef.current && volumeRef.current > 0) {
+        focusMutedRef.current = false;
+        setMutedState(false);
+      }
+
+      return;
+    }
+
+    if (playingRef.current && !mutedRef.current && volumeRef.current > 0) {
+      focusMutedRef.current = true;
+      setMutedState(true);
+    }
+  }, [setMutedState]);
 
   useEffect(() => {
     setHlsSupported(Hls.isSupported());
@@ -321,6 +338,8 @@ export function TwitterVideoPlayer({
 
   useEffect(() => {
     volumeRef.current = safeInitialVolume;
+    setVolume(safeInitialVolume);
+    if (safeInitialVolume > 0) previousVolumeRef.current = safeInitialVolume;
 
     const video = videoRef.current;
     if (!video) return;
@@ -336,6 +355,53 @@ export function TwitterVideoPlayer({
 
     video.muted = isMuted;
   }, [isMuted]);
+
+  useEffect(() => {
+    playingRef.current = playing;
+
+    if (playing) syncAudioFocus();
+  }, [playing, syncAudioFocus]);
+
+  useEffect(() => {
+    const frame = frameRef.current;
+    let observer: IntersectionObserver | null = null;
+
+    const updatePageFocus = (): void => {
+      pageFocusedRef.current =
+        document.visibilityState === 'visible' && document.hasFocus();
+      syncAudioFocus();
+    };
+
+    pageFocusedRef.current =
+      document.visibilityState === 'visible' && document.hasFocus();
+
+    if (frame && 'IntersectionObserver' in window) {
+      observer = new IntersectionObserver(
+        ([entry]) => {
+          viewportFocusedRef.current =
+            entry.isIntersecting &&
+            entry.intersectionRatio >= videoFocusThreshold;
+          syncAudioFocus();
+        },
+        {
+          threshold: [0, 0.25, videoFocusThreshold, 0.75, 1]
+        }
+      );
+
+      observer.observe(frame);
+    }
+
+    document.addEventListener('visibilitychange', updatePageFocus);
+    window.addEventListener('focus', updatePageFocus);
+    window.addEventListener('blur', updatePageFocus);
+
+    return () => {
+      observer?.disconnect();
+      document.removeEventListener('visibilitychange', updatePageFocus);
+      window.removeEventListener('focus', updatePageFocus);
+      window.removeEventListener('blur', updatePageFocus);
+    };
+  }, [syncAudioFocus]);
 
   useEffect(() => {
     playbackRateRef.current = playbackRate;
@@ -377,10 +443,15 @@ export function TwitterVideoPlayer({
         void video
           .play()
           .then(() => {
+            playingRef.current = true;
             setHasStarted(true);
             setPlaying(true);
+            syncAudioFocus();
           })
-          .catch(() => setPlaying(false));
+          .catch(() => {
+            playingRef.current = false;
+            setPlaying(false);
+          });
     });
 
     hls.on(Hls.Events.ERROR, (eventName, data) => {
@@ -403,13 +474,16 @@ export function TwitterVideoPlayer({
       hls.destroy();
       if (hlsRef.current === hls) hlsRef.current = null;
     };
-  }, [activeSrc, autoPlay, useHlsJs]);
+  }, [activeSrc, autoPlay, syncAudioFocus, useHlsJs]);
 
   useEffect(() => {
     const controller = new AbortController();
 
     setQualities([]);
     setSelectedQualitySrc(null);
+    focusMutedRef.current = false;
+    playingRef.current = !!autoPlay;
+    setMutedState(muted);
     setPlaying(!!autoPlay);
     setHasStarted(!!autoPlay);
 
@@ -424,7 +498,7 @@ export function TwitterVideoPlayer({
       .catch(() => undefined);
 
     return () => controller.abort();
-  }, [src, autoPlay]);
+  }, [src, autoPlay, muted, setMutedState]);
 
   useEffect(() => {
     const handleFullscreenChange = (): void => {
@@ -453,10 +527,15 @@ export function TwitterVideoPlayer({
       void video
         .play()
         .then(() => {
+          playingRef.current = true;
           setHasStarted(true);
           setPlaying(true);
+          syncAudioFocus();
         })
-        .catch(() => setPlaying(false));
+        .catch(() => {
+          playingRef.current = false;
+          setPlaying(false);
+        });
     }
 
     setCurrentTime(video.currentTime || 0);
@@ -473,9 +552,12 @@ export function TwitterVideoPlayer({
 
     try {
       await video.play();
+      playingRef.current = true;
       setHasStarted(true);
       setPlaying(true);
+      syncAudioFocus();
     } catch {
+      playingRef.current = false;
       setPlaying(false);
     }
   };
@@ -485,6 +567,7 @@ export function TwitterVideoPlayer({
     if (!video) return;
 
     video.pause();
+    playingRef.current = false;
     setPlaying(false);
   };
 
@@ -503,6 +586,45 @@ export function TwitterVideoPlayer({
     const nextTime = Number(value);
     video.currentTime = nextTime;
     setCurrentTime(nextTime);
+  };
+
+  const handleVolumeChange = (value: string): void => {
+    const nextVolume = clampVolume(Number(value));
+    const video = videoRef.current;
+
+    volumeRef.current = nextVolume;
+    setVolume(nextVolume);
+
+    if (video) video.volume = nextVolume;
+
+    if (nextVolume > 0) {
+      previousVolumeRef.current = nextVolume;
+      focusMutedRef.current = false;
+      setMutedState(false);
+      return;
+    }
+
+    focusMutedRef.current = false;
+    setMutedState(true);
+  };
+
+  const toggleMute = (): void => {
+    const video = videoRef.current;
+
+    focusMutedRef.current = false;
+
+    if (isMuted || volume === 0) {
+      const nextVolume = previousVolumeRef.current || 0.5;
+
+      volumeRef.current = nextVolume;
+      setVolume(nextVolume);
+      if (video) video.volume = nextVolume;
+      setMutedState(false);
+      return;
+    }
+
+    previousVolumeRef.current = volume;
+    setMutedState(true);
   };
 
   const handlePlaybackRate = (speed: PlaybackSpeed): void => {
@@ -566,10 +688,15 @@ export function TwitterVideoPlayer({
         onLoadedMetadata={syncMetadata}
         onTimeUpdate={syncTime}
         onPlay={(): void => {
+          playingRef.current = true;
           setHasStarted(true);
           setPlaying(true);
+          syncAudioFocus();
         }}
-        onPause={(): void => setPlaying(false)}
+        onPause={(): void => {
+          playingRef.current = false;
+          setPlaying(false);
+        }}
       >
         {nativeVideoSrc && <source src={nativeVideoSrc} type='video/*' />}
       </video>
@@ -633,17 +760,38 @@ export function TwitterVideoPlayer({
             {formatVideoTime(currentTime)} / {formatVideoTime(duration)}
           </span>
           {showVolumeButton && (
-            <Button
-              className='flex h-8 w-8 shrink-0 items-center justify-center rounded-full p-0 text-white
-                         hover:bg-white/10 focus-visible:ring-white/70 active:bg-white/20'
-              aria-label={isMuted ? 'Unmute' : 'Mute'}
-              onClick={preventBubbling(() => setIsMuted(!isMuted))}
-            >
-              <TwitterVideoIcon
-                className='h-[23px] w-[23px]'
-                iconName={isMuted ? 'volume-muted' : 'volume'}
-              />
-            </Button>
+            <div className='group/volume flex h-8 shrink-0 items-center'>
+              <Button
+                className='flex h-8 w-8 shrink-0 items-center justify-center rounded-full p-0 text-white
+                           hover:bg-white/10 focus-visible:ring-white/70 active:bg-white/20'
+                aria-label={isMuted ? 'Unmute' : 'Mute'}
+                onClick={preventBubbling(toggleMute)}
+              >
+                <TwitterVideoIcon
+                  className='h-[23px] w-[23px]'
+                  iconName={isMuted ? 'volume-muted' : 'volume'}
+                />
+              </Button>
+              <span
+                className='grid w-0 overflow-hidden transition-[width] duration-150 ease-out
+                           group-focus-within/volume:w-[76px] group-hover/volume:w-[76px]'
+              >
+                <input
+                  className='twitter-video-volume-slider ml-1 w-[72px] cursor-pointer'
+                  type='range'
+                  min={0}
+                  max={1}
+                  step='0.01'
+                  value={visibleVolume}
+                  aria-label='Volume'
+                  aria-valuetext={`${Math.round(volumePercent)}%`}
+                  onChange={({ target: { value } }): void =>
+                    handleVolumeChange(value)
+                  }
+                  style={volumeSliderStyle}
+                />
+              </span>
+            </div>
           )}
           <div className='relative'>
             <Button

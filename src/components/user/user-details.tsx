@@ -1,6 +1,12 @@
 import { formatDate } from '@lib/date';
+import {
+  formatProfileBirthday,
+  isProfileBirthdayToday
+} from '@lib/profile-birthday';
+import { useAuth } from '@lib/context/auth-context';
 import { TweetText } from '@components/tweet/tweet-text';
 import { HeroIcon } from '@components/ui/hero-icon';
+import { CustomIcon } from '@components/ui/custom-icon';
 import { ToolTip } from '@components/ui/tooltip';
 import { UserName } from './user-name';
 import { UserFollowing } from './user-following';
@@ -13,6 +19,7 @@ type UserDetailsProps = Pick<
   | 'id'
   | 'bio'
   | 'pronouns'
+  | 'birthday'
   | 'name'
   | 'website'
   | 'username'
@@ -23,11 +30,11 @@ type UserDetailsProps = Pick<
   | 'followersCount'
 >;
 
-type DetailType = 'website' | 'joined';
+type DetailType = 'website' | 'birthday' | 'joined';
 
 type DetailIcon = {
   detail: string | null;
-  icon: IconName;
+  icon: IconName | 'TwitterBirthdayIcon';
   type: DetailType;
 };
 
@@ -39,6 +46,7 @@ export function UserDetails({
   id,
   bio,
   pronouns,
+  birthday,
   name,
   website,
   username,
@@ -48,8 +56,21 @@ export function UserDetails({
   followingCount,
   followersCount
 }: UserDetailsProps): JSX.Element {
+  const { user: authUser } = useAuth();
+  const isBirthdayToday = isProfileBirthdayToday(birthday);
+  const birthdayLabel = birthday ? formatProfileBirthday(birthday) : null;
+  const birthdayCelebration = isBirthdayToday
+    ? authUser?.id === id
+      ? 'Today is your birthday!'
+      : 'Today is their birthday!'
+    : null;
   const detailIcons: Readonly<DetailIcon[]> = [
     { detail: website, icon: 'LinkIcon', type: 'website' },
+    {
+      detail: birthdayLabel,
+      icon: 'TwitterBirthdayIcon',
+      type: 'birthday'
+    },
     {
       detail: `Joined ${formatDate(createdAt, 'joined')}`,
       icon: 'CalendarDaysIcon',
@@ -77,9 +98,20 @@ export function UserDetails({
         <div className='flex flex-wrap gap-x-3 gap-y-1 text-light-secondary dark:text-dark-secondary'>
           {detailIcons.map(({ detail, icon, type }) =>
             detail ? (
-              <div className='flex items-center gap-1' key={type}>
+              <div
+                className={
+                  type === 'website'
+                    ? 'flex items-center gap-1'
+                    : 'flex basis-full items-center gap-1'
+                }
+                key={type}
+              >
                 <i>
-                  <HeroIcon className='h-5 w-5' iconName={icon} />
+                  {icon === 'TwitterBirthdayIcon' ? (
+                    <CustomIcon className='h-5 w-5' iconName={icon} />
+                  ) : (
+                    <HeroIcon className='h-5 w-5' iconName={icon} />
+                  )}
                 </i>
                 {type === 'website' ? (
                   <a
@@ -90,7 +122,7 @@ export function UserDetails({
                   >
                     {detail}
                   </a>
-                ) : (
+                ) : type === 'joined' ? (
                   <button className='custom-underline group relative'>
                     {detail}
                     <ToolTip
@@ -98,6 +130,16 @@ export function UserDetails({
                       tip={formatDate(createdAt, 'full')}
                     />
                   </button>
+                ) : (
+                  <span>
+                    {detail}
+                    {birthdayCelebration && (
+                      <span className='font-medium text-main-accent'>
+                        {' '}
+                        · {birthdayCelebration}
+                      </span>
+                    )}
+                  </span>
                 )}
               </div>
             ) : null

@@ -33,6 +33,7 @@ export function ViewTweet(tweet: ViewTweetProps): JSX.Element {
     id: tweetId,
     text,
     images,
+    mediaWarning,
     card,
     quotedTweet,
     parent,
@@ -147,6 +148,7 @@ export function ViewTweet(tweet: ViewTweetProps): JSX.Element {
             tweetData={tweet}
             imagesPreview={images}
             previewCount={images.length}
+            moderationWarning={mediaWarning}
           />
         )}
         <TweetEmbed
