@@ -47,10 +47,12 @@ const CREDENTIAL_SESSION_KEY = 'twitter-clone:bsky-credential-session';
 const BSKY_APPVIEW_DID = 'did:web:api.bsky.app';
 const BSKY_APPVIEW_SERVICE = 'bsky_appview';
 const BSKY_APPVIEW_PROXY = `${BSKY_APPVIEW_DID}#${BSKY_APPVIEW_SERVICE}`;
+const BSKY_APPVIEW_URL = 'https://api.bsky.app';
 const PUBLIC_BSKY_APPVIEW_URL = 'https://public.api.bsky.app';
 const BSKY_CHAT_DID = 'did:web:api.bsky.chat';
 const BSKY_CHAT_SERVICE = 'bsky_chat';
 const BSKY_CHAT_PROXY = `${BSKY_CHAT_DID}#${BSKY_CHAT_SERVICE}`;
+const BSKY_CHAT_URL = 'https://api.bsky.chat';
 const OAUTH_SCOPES = [
   'atproto',
   `rpc:*?aud=${BSKY_APPVIEW_DID}%23${BSKY_APPVIEW_SERVICE}`,
@@ -78,12 +80,39 @@ const BSKY_PROFILE_IMAGE_MIME_TYPE = 'image/jpeg';
 const BSKY_PROFILE_IMAGE_ACCEPTED_TYPES = /^image\/(?:jpe?g|png)$/i;
 const BSKY_MEDIA_POST_VISIBILITY_RETRIES = 8;
 const BSKY_THREAD_REPLY_DEPTH = 25;
+const SERVICE_AUTH_TOKEN_TTL_SECONDS = 55;
+const BSKY_CHAT_ACCESS_MESSAGE =
+  'Messages need Bluesky DM access. Authorize messages with Bluesky to continue.';
 const REFRESH_BSKY_LOGIN_MESSAGE =
-  'Refresh your Bluesky login to load notifications. Sign out and sign back in once so Bluesky grants Not Twitter AppView access.';
+  'Refresh your Bluesky login to load Bluesky data. Sign out and sign back in once so Bluesky grants Not Twitter AppView access.';
 const THEME_KEY = 'twitter-clone:bsky-theme';
 const DEFAULT_PROFILE_PHOTO_URL = '/assets/twitter-default-egg.png';
 const DEFAULT_PROFILE_COVER_URL = '/assets/twitter-default-cover.png';
 const CHAT_DECLARATION_COLLECTION = 'chat.bsky.actor.declaration';
+
+type BskyServiceConfig = {
+  did: string;
+  service: string;
+  proxy: string;
+  url: string;
+  chat: boolean;
+};
+
+const BSKY_APPVIEW_CONFIG: BskyServiceConfig = {
+  did: BSKY_APPVIEW_DID,
+  service: BSKY_APPVIEW_SERVICE,
+  proxy: BSKY_APPVIEW_PROXY,
+  url: BSKY_APPVIEW_URL,
+  chat: false
+};
+
+const BSKY_CHAT_CONFIG: BskyServiceConfig = {
+  did: BSKY_CHAT_DID,
+  service: BSKY_CHAT_SERVICE,
+  proxy: BSKY_CHAT_PROXY,
+  url: BSKY_CHAT_URL,
+  chat: true
+};
 
 type AuthUser = {
   uid: string;
@@ -466,6 +495,10 @@ const followUriCache = new Map<string, string>();
 const detailedUserCache = new Set<string>();
 const stagedImages = new Map<string, UploadedImage[]>();
 const listeners = new Set<() => void>();
+const serviceAuthTokenCache = new Map<
+  string,
+  { token: string; expiresAt: number }
+>();
 
 let agent: Agent | null = null;
 let credentialAgent: AtpAgent | null = null;
@@ -616,6 +649,7 @@ function clearActiveAuthState(): void {
   currentUser = null;
   currentFollowing = new Set();
   malformedMediaRepairPromise = null;
+  serviceAuthTokenCache.clear();
 
   if (hasStorage()) window.localStorage.removeItem(OAUTH_SUB_KEY);
   writeCredentialSession();
@@ -692,11 +726,143 @@ function getAgent(): Agent {
   return agent;
 }
 
+function getXrpcPath(url: string): string {
+  const path = url.startsWith('http')
+    ? `${new URL(url).pathname}${new URL(url).search}`
+    : url;
+  const index = path.indexOf('/xrpc/');
+
+  if (index < 0) throw new Error(`Unsupported Bluesky service request: ${url}`);
+
+  return path.slice(index);
+}
+
+function getXrpcMethod(url: string): string {
+  const path = getXrpcPath(url).split('?')[0];
+
+  return decodeURIComponent(path.slice('/xrpc/'.length));
+}
+
+async function createResponseError(response: Response): Promise<
+  Error & {
+    status?: number;
+  }
+> {
+  const fallbackMessage = response.statusText || `HTTP ${response.status}`;
+  const message = (await readXrpcError(response)) || fallbackMessage;
+  const error = new Error(message) as Error & { status?: number };
+
+  error.status = response.status;
+  return error;
+}
+
+function throwServiceError(
+  service: BskyServiceConfig,
+  error: unknown
+): never {
+  if (service.chat) throwChatError(error);
+
+  const status = getErrorStatus(error);
+  const message = getUnknownErrorMessage(error);
+
+  if (
+    status === 401 ||
+    status === 403 ||
+    /auth|scope|permission|access/i.test(message)
+  ) {
+    throw new Error(REFRESH_BSKY_LOGIN_MESSAGE);
+  }
+
+  throw error instanceof Error ? error : new Error(message);
+}
+
+async function getServiceAuthToken(
+  service: BskyServiceConfig,
+  method: string
+): Promise<string> {
+  if (!oauthSession) throwServiceError(service, new Error('Not signed in'));
+
+  const now = Math.floor(Date.now() / 1000);
+  const cacheKey = `${service.proxy}:${method}`;
+  const cached = serviceAuthTokenCache.get(cacheKey);
+
+  if (cached && cached.expiresAt > now + 5) return cached.token;
+
+  const expiresAt = now + SERVICE_AUTH_TOKEN_TTL_SECONDS;
+  const audiences =
+    service.proxy === service.did ? [service.did] : [service.did, service.proxy];
+  let lastError: unknown = null;
+
+  for (const aud of audiences) {
+    const query = new URLSearchParams({
+      aud,
+      exp: String(expiresAt),
+      lxm: method
+    });
+
+    const response = await oauthSession.fetchHandler(
+      `/xrpc/com.atproto.server.getServiceAuth?${query.toString()}`,
+      { method: 'GET' }
+    );
+
+    if (!response.ok) {
+      lastError = await createResponseError(response);
+      continue;
+    }
+
+    const body = (await response.json().catch(() => null)) as {
+      token?: unknown;
+    } | null;
+
+    if (typeof body?.token !== 'string') {
+      lastError = new Error('Missing Bluesky service token');
+      continue;
+    }
+
+    serviceAuthTokenCache.set(cacheKey, { token: body.token, expiresAt });
+    return body.token;
+  }
+
+  throwServiceError(service, lastError ?? new Error('Missing service token'));
+}
+
+async function fetchServiceXrpc(
+  service: BskyServiceConfig,
+  url: string,
+  init: RequestInit = {}
+): Promise<Response> {
+  const path = getXrpcPath(url);
+  const headers = new Headers(init.headers);
+
+  if (!oauthSession) {
+    headers.set('atproto-proxy', service.proxy);
+
+    return getAgent().sessionManager.fetchHandler(path, { ...init, headers });
+  }
+
+  const token = await getServiceAuthToken(service, getXrpcMethod(path));
+  headers.set('authorization', `Bearer ${token}`);
+  headers.delete('atproto-proxy');
+
+  return fetch(new URL(path, service.url), { ...init, headers });
+}
+
+function createAuthenticatedServiceAgent(service: BskyServiceConfig): Agent {
+  return new Agent({
+    did: sessionDid ?? undefined,
+    fetchHandler: (url, init) => fetchServiceXrpc(service, url, init)
+  });
+}
+
 function getAppViewAgent(): Agent {
+  if (oauthSession) return createAuthenticatedServiceAgent(BSKY_APPVIEW_CONFIG);
+
   return getAgent().withProxy(BSKY_APPVIEW_SERVICE, BSKY_APPVIEW_DID);
 }
 
 function getChatAgent(): Agent {
+  if (oauthSession) return createAuthenticatedServiceAgent(BSKY_CHAT_CONFIG);
+
   return getAgent().withProxy(BSKY_CHAT_SERVICE, BSKY_CHAT_DID);
 }
 
@@ -729,9 +895,7 @@ function throwChatError(error: unknown): never {
     status === 403 ||
     /auth|scope|permission|access/i.test(message)
   ) {
-    throw new ChatAccessError(
-      'Messages need Bluesky DM access. Authorize messages with Bluesky to continue.'
-    );
+    throw new ChatAccessError(BSKY_CHAT_ACCESS_MESSAGE);
   }
 
   throw new Error(`Bluesky messages failed: ${message}`);
@@ -802,9 +966,7 @@ async function ensureChatAccessScope(): Promise<void> {
     throwChatError(error);
   }
 
-  throw new ChatAccessError(
-    'Messages need Bluesky DM access. Authorize messages with Bluesky to continue.'
-  );
+  throw new ChatAccessError(BSKY_CHAT_ACCESS_MESSAGE);
 }
 
 async function callChat<T>(request: () => Promise<T>): Promise<T> {
@@ -824,43 +986,61 @@ function normalizeChatAllowIncoming(value: unknown): ChatAllowIncoming {
   return 'all';
 }
 
+function buildXrpcPath(
+  method: string,
+  params: Record<string, unknown> = {}
+): string {
+  const query = new URLSearchParams();
+
+  Object.entries(params).forEach(([key, value]) => {
+    appendXrpcQueryParam(query, key, value);
+  });
+
+  const queryString = query.toString();
+
+  return `/xrpc/${method}${queryString ? `?${queryString}` : ''}`;
+}
+
+async function callServiceRawXrpc<T>(
+  service: BskyServiceConfig,
+  method: string,
+  params: Record<string, unknown>,
+  data: Record<string, unknown> | undefined,
+  httpMethod: 'GET' | 'POST'
+): Promise<T> {
+  const headers = new Headers();
+
+  if (data) headers.set('content-type', 'application/json');
+
+  const response = await fetchServiceXrpc(service, buildXrpcPath(method, params), {
+    method: httpMethod,
+    headers,
+    body: data ? JSON.stringify(data) : undefined
+  });
+
+  if (!response.ok) {
+    throwServiceError(service, await createResponseError(response));
+  }
+
+  if (response.status === 204) return undefined as unknown as T;
+
+  return response.json().catch(() => undefined) as Promise<T>;
+}
+
 async function callChatXrpc<T>(
   method: string,
   data: Record<string, unknown>
 ): Promise<T> {
   await ensureChatAccessScope();
 
-  if (!oauthSession) throw new ChatAccessError();
-
   try {
-    const response = await oauthSession.fetchHandler(`/xrpc/${method}`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'atproto-proxy': BSKY_CHAT_PROXY
-      },
-      body: JSON.stringify(data)
-    });
-
-    if (!response.ok) {
-      const fallbackMessage = response.statusText || `HTTP ${response.status}`;
-      const errorMessage = await response
-        .json()
-        .then((body: { error?: unknown; message?: unknown }) =>
-          [body.error, body.message]
-            .filter((value): value is string => typeof value === 'string')
-            .join(': ')
-        )
-        .catch(() => fallbackMessage);
-      const error = new Error(errorMessage || fallbackMessage) as Error & {
-        status?: number;
-      };
-
-      error.status = response.status;
-      throw error;
-    }
-
-    return (await response.json()) as T;
+    return await callServiceRawXrpc<T>(
+      BSKY_CHAT_CONFIG,
+      method,
+      {},
+      data,
+      'POST'
+    );
   } catch (error) {
     throwChatError(error);
   }
@@ -872,45 +1052,14 @@ async function callChatQueryXrpc<T>(
 ): Promise<T> {
   await ensureChatAccessScope();
 
-  if (!oauthSession) throw new ChatAccessError();
-
   try {
-    const query = new URLSearchParams();
-
-    Object.entries(params).forEach(([key, value]) => {
-      if (value !== undefined && value !== null) query.set(key, String(value));
-    });
-
-    const queryString = query.toString();
-    const response = await oauthSession.fetchHandler(
-      `/xrpc/${method}${queryString ? `?${queryString}` : ''}`,
-      {
-        method: 'GET',
-        headers: {
-          'atproto-proxy': BSKY_CHAT_PROXY
-        }
-      }
+    return await callServiceRawXrpc<T>(
+      BSKY_CHAT_CONFIG,
+      method,
+      params,
+      undefined,
+      'GET'
     );
-
-    if (!response.ok) {
-      const fallbackMessage = response.statusText || `HTTP ${response.status}`;
-      const errorMessage = await response
-        .json()
-        .then((body: { error?: unknown; message?: unknown }) =>
-          [body.error, body.message]
-            .filter((value): value is string => typeof value === 'string')
-            .join(': ')
-        )
-        .catch(() => fallbackMessage);
-      const error = new Error(errorMessage || fallbackMessage) as Error & {
-        status?: number;
-      };
-
-      error.status = response.status;
-      throw error;
-    }
-
-    return (await response.json()) as T;
   } catch (error) {
     throwChatError(error);
   }
@@ -948,58 +1097,26 @@ async function callAppXrpc<T>(
   method: string,
   data: Record<string, unknown>
 ): Promise<T> {
-  if (!oauthSession)
-    throw new Error('Sign in with Bluesky before changing settings.');
-
-  const response = await oauthSession.fetchHandler(`/xrpc/${method}`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'atproto-proxy': BSKY_APPVIEW_PROXY
-    },
-    body: JSON.stringify(data)
-  });
-
-  if (!response.ok) {
-    const fallbackMessage = response.statusText || `HTTP ${response.status}`;
-    throw new Error((await readXrpcError(response)) || fallbackMessage);
-  }
-
-  if (response.status === 204) return undefined as unknown as T;
-
-  return response.json().catch(() => undefined) as Promise<T>;
+  return callServiceRawXrpc<T>(
+    BSKY_APPVIEW_CONFIG,
+    method,
+    {},
+    data,
+    'POST'
+  );
 }
 
 async function callAppQueryXrpc<T>(
   method: string,
   params: Record<string, unknown>
 ): Promise<T> {
-  if (!oauthSession)
-    throw new Error('Sign in with Bluesky before loading this view.');
-
-  const query = new URLSearchParams();
-
-  Object.entries(params).forEach(([key, value]) => {
-    appendXrpcQueryParam(query, key, value);
-  });
-
-  const queryString = query.toString();
-  const response = await oauthSession.fetchHandler(
-    `/xrpc/${method}${queryString ? `?${queryString}` : ''}`,
-    {
-      method: 'GET',
-      headers: {
-        'atproto-proxy': BSKY_APPVIEW_PROXY
-      }
-    }
+  return callServiceRawXrpc<T>(
+    BSKY_APPVIEW_CONFIG,
+    method,
+    params,
+    undefined,
+    'GET'
   );
-
-  if (!response.ok) {
-    const fallbackMessage = response.statusText || `HTTP ${response.status}`;
-    throw new Error((await readXrpcError(response)) || fallbackMessage);
-  }
-
-  return (await response.json()) as T;
 }
 
 async function callPublicAppQueryXrpc<T>(
