@@ -1,7 +1,24 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-const OAUTH_SCOPE = 'atproto transition:generic transition:chat.bsky';
+const OAUTH_SCOPES = [
+  'atproto',
+  'rpc:*?aud=did:web:api.bsky.app%23bsky_appview',
+  'rpc:*?aud=did:web:api.bsky.chat%23bsky_chat',
+  'repo:app.bsky.actor.profile',
+  'repo:app.bsky.feed.like',
+  'repo:app.bsky.feed.post',
+  'repo:app.bsky.feed.postgate',
+  'repo:app.bsky.feed.repost',
+  'repo:app.bsky.feed.threadgate',
+  'repo:app.bsky.graph.block',
+  'repo:app.bsky.graph.follow',
+  'repo:chat.bsky.actor.declaration',
+  'blob:image/*',
+  'account:email?action=manage',
+  'identity:handle'
+];
+const OAUTH_SCOPE = OAUTH_SCOPES.join(' ');
 
 function normalizeSiteUrl(value) {
   if (!value) return '';

@@ -4,11 +4,11 @@ import type { Timestamp, DataConverter } from '@lib/atproto/store';
 export type User = {
   id: string;
   bio: string | null;
+  pronouns: string | null;
   name: string;
   theme: Theme | null;
   accent: Accent | null;
   website: string | null;
-  location: string | null;
   username: string;
   photoURL: string;
   verified: boolean;
@@ -26,7 +26,7 @@ export type User = {
 
 export type EditableData = Extract<
   keyof User,
-  'bio' | 'name' | 'website' | 'photoURL' | 'location' | 'coverPhotoURL'
+  'bio' | 'name' | 'pronouns' | 'website' | 'photoURL' | 'coverPhotoURL'
 >;
 
 export type EditableUserData = Pick<User, EditableData>;

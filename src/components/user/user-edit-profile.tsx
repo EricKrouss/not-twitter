@@ -52,15 +52,15 @@ export function UserEditProfile({ hide }: UserEditProfileProps): JSX.Element {
 
   const [loading, setLoading] = useState(false);
 
-  const { bio, name, website, location, photoURL, coverPhotoURL } =
+  const { bio, name, pronouns, website, photoURL, coverPhotoURL } =
     user as User;
 
   const [editUserData, setEditUserData] = useState<EditableUserData>({
     bio,
     name,
+    pronouns,
     website,
     photoURL,
-    location,
     coverPhotoURL
   });
 
@@ -99,7 +99,7 @@ export function UserEditProfile({ hide }: UserEditProfileProps): JSX.Element {
       const trimmedKeys: Readonly<EditableData[]> = [
         'name',
         'bio',
-        'location',
+        'pronouns',
         'website'
       ];
 
@@ -225,9 +225,9 @@ export function UserEditProfile({ hide }: UserEditProfileProps): JSX.Element {
     setEditUserData({
       bio,
       name,
+      pronouns,
       website,
       photoURL,
-      location,
       coverPhotoURL
     });
   };
@@ -271,10 +271,10 @@ export function UserEditProfile({ hide }: UserEditProfileProps): JSX.Element {
       useTextArea: true
     },
     {
-      label: 'Location',
-      inputId: 'location',
-      inputValue: editUserData.location,
-      inputLimit: 30
+      label: 'Pronouns',
+      inputId: 'pronouns',
+      inputValue: editUserData.pronouns,
+      inputLimit: 20
     },
     {
       label: 'Website',

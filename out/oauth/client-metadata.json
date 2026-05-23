@@ -5,7 +5,7 @@
   "redirect_uris": [
     "https://erickrouss.github.io/not-twitter/"
   ],
-  "scope": "atproto transition:generic transition:chat.bsky",
+  "scope": "atproto rpc:*?aud=did:web:api.bsky.app%23bsky_appview rpc:*?aud=did:web:api.bsky.chat%23bsky_chat repo:app.bsky.actor.profile repo:app.bsky.feed.like repo:app.bsky.feed.post repo:app.bsky.feed.postgate repo:app.bsky.feed.repost repo:app.bsky.feed.threadgate repo:app.bsky.graph.block repo:app.bsky.graph.follow repo:chat.bsky.actor.declaration blob:image/* account:email?action=manage identity:handle",
   "grant_types": [
     "authorization_code",
     "refresh_token"

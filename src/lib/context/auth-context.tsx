@@ -99,11 +99,11 @@ export function AuthContextProvider({
         const userData: WithFieldValue<User> = {
           id: uid,
           bio: null,
+          pronouns: null,
           name: displayName as string,
           theme: null,
           accent: null,
           website: null,
-          location: null,
           photoURL: photoURL ?? DEFAULT_PROFILE_PHOTO_URL,
           username: randomUsername,
           verified: false,

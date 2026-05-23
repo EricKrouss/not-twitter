@@ -44,7 +44,30 @@ import type { User } from '@lib/types/user';
 const OAUTH_SUB_KEY = 'twitter-clone:bsky-oauth-sub';
 const OAUTH_ACCOUNTS_KEY = 'twitter-clone:bsky-oauth-accounts';
 const CREDENTIAL_SESSION_KEY = 'twitter-clone:bsky-credential-session';
-const OAUTH_SCOPE = 'atproto transition:generic transition:chat.bsky';
+const BSKY_APPVIEW_DID = 'did:web:api.bsky.app';
+const BSKY_APPVIEW_SERVICE = 'bsky_appview';
+const BSKY_APPVIEW_PROXY = `${BSKY_APPVIEW_DID}#${BSKY_APPVIEW_SERVICE}`;
+const BSKY_CHAT_DID = 'did:web:api.bsky.chat';
+const BSKY_CHAT_SERVICE = 'bsky_chat';
+const BSKY_CHAT_PROXY = `${BSKY_CHAT_DID}#${BSKY_CHAT_SERVICE}`;
+const OAUTH_SCOPES = [
+  'atproto',
+  `rpc:*?aud=${BSKY_APPVIEW_DID}%23${BSKY_APPVIEW_SERVICE}`,
+  `rpc:*?aud=${BSKY_CHAT_DID}%23${BSKY_CHAT_SERVICE}`,
+  'repo:app.bsky.actor.profile',
+  'repo:app.bsky.feed.like',
+  'repo:app.bsky.feed.post',
+  'repo:app.bsky.feed.postgate',
+  'repo:app.bsky.feed.repost',
+  'repo:app.bsky.feed.threadgate',
+  'repo:app.bsky.graph.block',
+  'repo:app.bsky.graph.follow',
+  'repo:chat.bsky.actor.declaration',
+  'blob:image/*',
+  'account:email?action=manage',
+  'identity:handle'
+];
+const OAUTH_SCOPE = OAUTH_SCOPES.join(' ');
 const CHAT_SCOPE = 'transition:chat.bsky';
 const GENERIC_SCOPE = 'transition:generic';
 const BSKY_IMAGE_MAX_BYTES = 1_000_000;
@@ -55,7 +78,6 @@ const BSKY_THREAD_REPLY_DEPTH = 25;
 const THEME_KEY = 'twitter-clone:bsky-theme';
 const DEFAULT_PROFILE_PHOTO_URL = '/assets/twitter-default-egg.png';
 const DEFAULT_PROFILE_COVER_URL = '/assets/twitter-default-cover.png';
-const BSKY_CHAT_DID = 'did:web:api.bsky.chat';
 const CHAT_DECLARATION_COLLECTION = 'chat.bsky.actor.declaration';
 
 type AuthUser = {
@@ -639,8 +661,12 @@ function getAgent(): Agent {
   return agent;
 }
 
+function getAppViewAgent(): Agent {
+  return getAgent().withProxy(BSKY_APPVIEW_SERVICE, BSKY_APPVIEW_DID);
+}
+
 function getChatAgent(): Agent {
-  return getAgent().withProxy('bsky_chat', BSKY_CHAT_DID);
+  return getAgent().withProxy(BSKY_CHAT_SERVICE, BSKY_CHAT_DID);
 }
 
 function getErrorStatus(error: unknown): number | null {
@@ -692,8 +718,17 @@ async function hasChatAccessScope(): Promise<boolean> {
 
   const tokenInfo = await oauthSession.getTokenInfo('auto');
   const scopes = new Set(tokenInfo.scope.split(/\s+/).filter(Boolean));
+  const hasChatRpcScope = Array.from(scopes).some(
+    (scope) =>
+      scope.startsWith('rpc:') &&
+      (scope.includes(`aud=${BSKY_CHAT_PROXY}`) ||
+        scope.includes(`aud=${BSKY_CHAT_DID}%23${BSKY_CHAT_SERVICE}`) ||
+        scope.includes('aud=*'))
+  );
 
-  return scopes.has(GENERIC_SCOPE) && scopes.has(CHAT_SCOPE);
+  return (
+    (scopes.has(GENERIC_SCOPE) && scopes.has(CHAT_SCOPE)) || hasChatRpcScope
+  );
 }
 
 async function ensureChatAccessScope(): Promise<void> {
@@ -738,7 +773,7 @@ async function callChatXrpc<T>(
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'atproto-proxy': `${BSKY_CHAT_DID}#bsky_chat`
+        'atproto-proxy': BSKY_CHAT_PROXY
       },
       body: JSON.stringify(data)
     });
@@ -788,7 +823,7 @@ async function callChatQueryXrpc<T>(
       {
         method: 'GET',
         headers: {
-          'atproto-proxy': `${BSKY_CHAT_DID}#bsky_chat`
+          'atproto-proxy': BSKY_CHAT_PROXY
         }
       }
     );
@@ -839,7 +874,10 @@ async function callAppXrpc<T>(
 
   const response = await oauthSession.fetchHandler(`/xrpc/${method}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      'atproto-proxy': BSKY_APPVIEW_PROXY
+    },
     body: JSON.stringify(data)
   });
 
@@ -869,7 +907,12 @@ async function callAppQueryXrpc<T>(
   const queryString = query.toString();
   const response = await oauthSession.fetchHandler(
     `/xrpc/${method}${queryString ? `?${queryString}` : ''}`,
-    { method: 'GET' }
+    {
+      method: 'GET',
+      headers: {
+        'atproto-proxy': BSKY_APPVIEW_PROXY
+      }
+    }
   );
 
   if (!response.ok) {
@@ -955,10 +998,7 @@ function getBlobRefSize(blob: BlobRef): number | null {
   return Number.isFinite(blob.size) && blob.size > 0 ? blob.size : null;
 }
 
-function toPdsCompatibleBlobRef(
-  blob: unknown,
-  sizeOverride?: number
-): BlobRef {
+function toPdsCompatibleBlobRef(blob: unknown, sizeOverride?: number): BlobRef {
   const parsedBlob = parseBlobRef(blob);
   const size =
     typeof sizeOverride === 'number' && sizeOverride > 0
@@ -1082,8 +1122,6 @@ function getLocalProfileOverride(data: Partial<User>): Partial<User> {
 
   if ('theme' in data) override.theme = data.theme ?? null;
   if ('accent' in data) override.accent = data.accent ?? null;
-  if ('website' in data) override.website = data.website ?? null;
-  if ('location' in data) override.location = data.location ?? null;
 
   return override;
 }
@@ -1096,8 +1134,9 @@ function applyLocalProfileUpdate(userId: string, data: Partial<User>): void {
 
   if ('name' in data) targetUser.name = data.name ?? '';
   if ('bio' in data) targetUser.bio = data.bio ? data.bio : null;
+  if ('pronouns' in data)
+    targetUser.pronouns = data.pronouns ? data.pronouns : null;
   if ('website' in data) targetUser.website = data.website ?? null;
-  if ('location' in data) targetUser.location = data.location ?? null;
   if ('coverPhotoURL' in data && data.coverPhotoURL === null)
     targetUser.coverPhotoURL = DEFAULT_PROFILE_COVER_URL;
 
@@ -1430,7 +1469,7 @@ async function readBlueskyAccountSession(): Promise<
 }
 
 export async function getBlueskySettings(): Promise<BlueskySettings> {
-  const api = getAgent();
+  const api = getAppViewAgent();
 
   const [account, prefs, chatResult, notificationResult] = await Promise.all([
     readBlueskyAccountSession(),
@@ -1502,7 +1541,7 @@ export async function getBlueskySettings(): Promise<BlueskySettings> {
 export async function setAdultContentSetting(
   enabled: boolean
 ): Promise<BlueskySettings> {
-  await getAgent().setAdultContentEnabled(enabled);
+  await getAppViewAgent().setAdultContentEnabled(enabled);
   notify();
 
   return getBlueskySettings();
@@ -1610,7 +1649,7 @@ export async function setContentLabelSetting(
   if (!SETTINGS_CONTENT_LABELS.includes(label))
     throw new Error('Unsupported content label.');
 
-  await getAgent().setContentLabelPref(label, preference);
+  await getAppViewAgent().setContentLabelPref(label, preference);
   notify();
 
   return getBlueskySettings();
@@ -1636,7 +1675,7 @@ export async function setFeedViewSetting(
     );
   }
 
-  await getAgent().setFeedViewPrefs('home', safePref);
+  await getAppViewAgent().setFeedViewPrefs('home', safePref);
   notify();
 
   return getBlueskySettings();
@@ -1659,7 +1698,7 @@ export async function setThreadViewSetting(
   if (typeof pref.prioritizeFollowedUsers === 'boolean')
     safePref.prioritizeFollowedUsers = pref.prioritizeFollowedUsers;
 
-  await getAgent().setThreadViewPrefs(safePref);
+  await getAppViewAgent().setThreadViewPrefs(safePref);
   notify();
 
   return getBlueskySettings();
@@ -1668,9 +1707,9 @@ export async function setThreadViewSetting(
 export async function setDefaultReplySetting(
   setting: Exclude<SettingsDefaultReply, 'custom'>
 ): Promise<BlueskySettings> {
-  const prefs = await getAgent().getPreferences();
+  const prefs = await getAppViewAgent().getPreferences();
 
-  await getAgent().setPostInteractionSettings({
+  await getAppViewAgent().setPostInteractionSettings({
     threadgateAllowRules: getReplyRulesFromDefault(setting),
     postgateEmbeddingRules: prefs.postInteractionSettings.postgateEmbeddingRules
   });
@@ -1682,9 +1721,9 @@ export async function setDefaultReplySetting(
 export async function setDefaultQuoteSetting(
   setting: Exclude<SettingsDefaultQuote, 'custom'>
 ): Promise<BlueskySettings> {
-  const prefs = await getAgent().getPreferences();
+  const prefs = await getAppViewAgent().getPreferences();
 
-  await getAgent().setPostInteractionSettings({
+  await getAppViewAgent().setPostInteractionSettings({
     threadgateAllowRules: prefs.postInteractionSettings.threadgateAllowRules,
     postgateEmbeddingRules: getQuoteRulesFromDefault(setting)
   });
@@ -1704,7 +1743,7 @@ export async function setInterestsSetting(
     )
   ).slice(0, 20);
 
-  await getAgent().setInterestsPref({ tags: safeTags });
+  await getAppViewAgent().setInterestsPref({ tags: safeTags });
   notify();
 
   return getBlueskySettings();
@@ -1735,7 +1774,7 @@ export async function addSettingsMutedWord(
   if (safeExpiresAt && Number.isNaN(safeExpiresAt.getTime()))
     throw new Error('Choose a valid expiration date.');
 
-  await getAgent().addMutedWord({
+  await getAppViewAgent().addMutedWord({
     value: safeValue,
     targets: safeTargets,
     actorTarget: safeActorTarget,
@@ -1749,7 +1788,7 @@ export async function addSettingsMutedWord(
 export async function removeSettingsMutedWord(
   mutedWord: SettingsMutedWord
 ): Promise<BlueskySettings> {
-  await getAgent().removeMutedWord(mutedWord);
+  await getAppViewAgent().removeMutedWord(mutedWord);
   notify();
 
   return getBlueskySettings();
@@ -1839,8 +1878,12 @@ function getThemeOverride(did: string): Partial<User> {
     const themes = JSON.parse(
       window.localStorage.getItem(THEME_KEY) ?? '{}'
     ) as Record<string, Partial<User>>;
+    const { theme, accent } = themes[did] ?? {};
 
-    return themes[did] ?? {};
+    return {
+      ...(theme !== undefined && { theme }),
+      ...(accent !== undefined && { accent })
+    };
   } catch {
     return {};
   }
@@ -2016,11 +2059,11 @@ function mapProfile(profile: ActorProfileView): User {
   const user: User = {
     id: did,
     bio: detailedProfile.description ?? existing?.bio ?? null,
+    pronouns: profile.pronouns ?? existing?.pronouns ?? null,
     name: profile.displayName || existing?.name || profile.handle,
     theme: existing?.theme ?? null,
     accent: existing?.accent ?? null,
-    website: existing?.website ?? null,
-    location: existing?.location ?? null,
+    website: detailedProfile.website ?? existing?.website ?? null,
     username: profile.handle,
     photoURL: getProfilePhotoURL(profile, existing, isDetailed),
     verified: (existing?.verified ?? false) || hasProfileVerification(profile),
@@ -2066,7 +2109,7 @@ async function hydrateProfiles(profiles: ActorProfileView[]): Promise<User[]> {
   if (missingDetailedDids.length) {
     try {
       for (let index = 0; index < missingDetailedDids.length; index += 25) {
-        const response = await getAgent().getProfiles({
+        const response = await getAppViewAgent().getProfiles({
           actors: missingDetailedDids.slice(index, index + 25)
         });
 
@@ -2497,7 +2540,6 @@ function postHasVisibleMedia(post: AppBskyFeedDefs.PostView): boolean {
 }
 
 async function waitForPublishedPost(
-  api: Agent,
   uri: string,
   requireMedia: boolean
 ): Promise<Tweet> {
@@ -2509,7 +2551,8 @@ async function waitForPublishedPost(
     attempt += 1
   ) {
     try {
-      const post = (await api.getPosts({ uris: [uri] })).data.posts[0];
+      const post = (await getAppViewAgent().getPosts({ uris: [uri] })).data
+        .posts[0];
 
       if (post && (!requireMedia || postHasVisibleMedia(post)))
         return mapPost(post);
@@ -2597,7 +2640,7 @@ export async function searchTweets(
 
   const filter = options?.filter ?? 'top';
   const apiLimit = Math.min(Math.max(options?.limit ?? 50, 1), 100);
-  const response = await getAgent().app.bsky.feed.searchPosts({
+  const response = await getAppViewAgent().app.bsky.feed.searchPosts({
     q: trimmedQuery,
     sort: filter === 'latest' ? 'latest' : 'top',
     cursor: options?.cursor,
@@ -2645,7 +2688,7 @@ export async function searchUsers(
 
   if (!trimmedQuery) return { users: [], cursor: null };
 
-  const response = await getAgent().searchActors({
+  const response = await getAppViewAgent().searchActors({
     q: trimmedQuery,
     cursor: options?.cursor,
     limit: Math.min(Math.max(options?.limit ?? 30, 1), 100)
@@ -2713,7 +2756,7 @@ function mergeUserLists(lists: UserList[]): UserList[] {
 export async function getUserLists(tab: UserListTab): Promise<UserListsPage> {
   if (!sessionDid) throw new Error('Sign in with Bluesky first.');
 
-  const api = getAgent();
+  const api = getAppViewAgent();
   const ownedListsResponse = await api.app.bsky.graph.getLists({
     actor: sessionDid,
     limit: 100
@@ -2754,7 +2797,7 @@ export async function getFeedGeneratorPage(
   cursor?: string,
   limit = 25
 ): Promise<FeedGeneratorPage> {
-  const api = getAgent();
+  const api = getAppViewAgent();
   const profileResponse = await api.getProfile({ actor });
   const feedUri = `at://${profileResponse.data.did}/app.bsky.feed.generator/${rkey}`;
 
@@ -2833,7 +2876,7 @@ function isDefaultDiscoverFeed(feed: SubscribedHomeFeed): boolean {
 async function getFeedGeneratorsByUri(
   feedUris: string[]
 ): Promise<Map<string, AppBskyFeedDefs.GeneratorView>> {
-  const api = getAgent();
+  const api = getAppViewAgent();
   const generators = new Map<string, AppBskyFeedDefs.GeneratorView>();
 
   for (let index = 0; index < feedUris.length; index += 25) {
@@ -2853,7 +2896,7 @@ async function getFeedGeneratorsByUri(
 }
 
 export async function getSubscribedHomeFeeds(): Promise<SubscribedHomeFeed[]> {
-  const prefs = await getAgent().getPreferences();
+  const prefs = await getAppViewAgent().getPreferences();
   const savedFeeds = prefs.savedFeeds.filter(
     (feed) => feed.type === 'feed' && isFeedGeneratorUri(feed.value)
   );
@@ -2872,7 +2915,7 @@ export async function getSubscribedHomeFeedPage(
   cursor?: string,
   limit = 30
 ): Promise<HomeFeedPage> {
-  const response = await getAgent().app.bsky.feed.getFeed({
+  const response = await getAppViewAgent().app.bsky.feed.getFeed({
     feed: feedUri,
     cursor,
     limit: Math.min(Math.max(limit, 1), 100)
@@ -2888,7 +2931,7 @@ export async function getFollowingHomeFeedPage(
   cursor?: string,
   limit = 30
 ): Promise<HomeFeedPage> {
-  const response = await getAgent().getTimeline({
+  const response = await getAppViewAgent().getTimeline({
     cursor,
     limit: Math.min(Math.max(limit, 1), 100)
   });
@@ -2947,7 +2990,7 @@ async function getNotificationTweetByUri(
 
   for (let index = 0; index < uris.length; index += 25) {
     try {
-      const response = await getAgent().getPosts({
+      const response = await getAppViewAgent().getPosts({
         uris: uris.slice(index, index + 25)
       });
 
@@ -2999,7 +3042,7 @@ export async function listNotificationsPage(
   cursor?: string,
   options?: { mentionsOnly?: boolean; limit?: number }
 ): Promise<NotificationsPage> {
-  const response = await getAgent().listNotifications({
+  const response = await getAppViewAgent().listNotifications({
     cursor,
     limit: Math.min(Math.max(options?.limit ?? 30, 1), 100),
     reasons: options?.mentionsOnly ? ['mention', 'reply', 'quote'] : undefined
@@ -3018,10 +3061,8 @@ export async function listNotificationsPage(
 }
 
 export async function markNotificationsSeen(): Promise<void> {
-  await getAgent().updateSeenNotifications(
-    new Date().toISOString() as Parameters<
-      Agent['updateSeenNotifications']
-    >[0]
+  await getAppViewAgent().updateSeenNotifications(
+    new Date().toISOString() as Parameters<Agent['updateSeenNotifications']>[0]
   );
   notify();
 }
@@ -3469,9 +3510,10 @@ async function refreshCurrentUser(): Promise<User | null> {
   if (!sessionDid) return null;
 
   const api = getAgent();
+  const appView = getAppViewAgent();
   const [profileResponse, followsResponse] = await Promise.all([
-    api.getProfile({ actor: sessionDid }),
-    api.getFollows({ actor: sessionDid, limit: 100 }).catch(() => null)
+    appView.getProfile({ actor: sessionDid }),
+    appView.getFollows({ actor: sessionDid, limit: 100 }).catch(() => null)
   ]);
 
   currentFollowing = new Set(
@@ -3817,7 +3859,9 @@ export async function getUser(actor: string): Promise<User | null> {
   if (cachedUser && detailedUserCache.has(cachedUser.id)) return cachedUser;
 
   try {
-    const response = await getAgent().getProfile({ actor: normalizedActor });
+    const response = await getAppViewAgent().getProfile({
+      actor: normalizedActor
+    });
     return mapProfile(response.data);
   } catch (error) {
     if (isRecordNotFoundError(error)) return null;
@@ -3830,7 +3874,7 @@ export async function getTweet(id: string): Promise<Tweet | null> {
   if (tweetCache.has(id)) return tweetCache.get(id) as Tweet;
 
   const uri = uriFromPostId(id);
-  const response = await getAgent().getPosts({ uris: [uri] });
+  const response = await getAppViewAgent().getPosts({ uris: [uri] });
   const post = response.data.posts[0];
 
   return post ? mapPost(post) : null;
@@ -3845,7 +3889,7 @@ export async function getTweetThread(
   const uri = uriFromPostId(id);
 
   try {
-    const response = await getAgent().getPostThread({
+    const response = await getAppViewAgent().getPostThread({
       uri,
       depth: BSKY_THREAD_REPLY_DEPTH,
       parentHeight: 100
@@ -3890,7 +3934,7 @@ export async function listTweetStatsPage(
   if (!ref) return { users: [], tweets: [], cursor: null };
 
   if (type === 'likes') {
-    const response = await getAgent().getLikes({
+    const response = await getAppViewAgent().getLikes({
       uri: ref.uri,
       cid: ref.cid,
       cursor,
@@ -3907,7 +3951,7 @@ export async function listTweetStatsPage(
   }
 
   if (type === 'retweets') {
-    const response = await getAgent().getRepostedBy({
+    const response = await getAppViewAgent().getRepostedBy({
       uri: ref.uri,
       cid: ref.cid,
       cursor,
@@ -3921,7 +3965,7 @@ export async function listTweetStatsPage(
     };
   }
 
-  const response = await getAgent().app.bsky.feed.getQuotes({
+  const response = await getAppViewAgent().app.bsky.feed.getQuotes({
     uri: ref.uri,
     cid: ref.cid,
     cursor,
@@ -3947,7 +3991,9 @@ export async function listTweetStatsPage(
 }
 
 async function getTimeline(limitCount?: number): Promise<Tweet[]> {
-  const response = await getAgent().getTimeline({ limit: limitCount ?? 30 });
+  const response = await getAppViewAgent().getTimeline({
+    limit: limitCount ?? 30
+  });
   return response.data.feed.map(mapFeedItem);
 }
 
@@ -3955,7 +4001,7 @@ async function getAuthorFeed(
   actor: string,
   options?: { includeReplies?: boolean; onlyMedia?: boolean }
 ): Promise<Tweet[]> {
-  const response = await getAgent().getAuthorFeed({
+  const response = await getAppViewAgent().getAuthorFeed({
     actor,
     limit: 50,
     filter: options?.includeReplies ? 'posts_with_replies' : 'posts_no_replies'
@@ -3967,7 +4013,7 @@ async function getAuthorFeed(
 }
 
 async function getRepostedFeed(actor: string): Promise<Tweet[]> {
-  const response = await getAgent().getAuthorFeed({
+  const response = await getAppViewAgent().getAuthorFeed({
     actor,
     limit: 50,
     filter: 'posts_no_replies'
@@ -3985,7 +4031,7 @@ async function getRepostedFeed(actor: string): Promise<Tweet[]> {
 }
 
 async function getLikedFeed(actor: string): Promise<Tweet[]> {
-  const response = await getAgent()
+  const response = await getAppViewAgent()
     .getActorLikes({ actor, limit: 50 })
     .catch((error) => {
       if (isRecordNotFoundError(error)) return null;
@@ -4003,7 +4049,7 @@ async function getLikedFeed(actor: string): Promise<Tweet[]> {
 
 async function getThreadReplies(id: string): Promise<Tweet[]> {
   const uri = uriFromPostId(id);
-  const response = await getAgent().getPostThread({ uri, depth: 2 });
+  const response = await getAppViewAgent().getPostThread({ uri, depth: 2 });
   const thread = response.data.thread;
 
   if (!AppBskyFeedDefs.isThreadViewPost(thread)) return [];
@@ -4026,7 +4072,7 @@ async function queryUsers(constraints: BackendConstraint[]): Promise<User[]> {
 
   const followingFilter = getWhere(constraints, 'followers', 'array-contains');
   if (typeof followingFilter?.value === 'string') {
-    const response = await getAgent().getFollows({
+    const response = await getAppViewAgent().getFollows({
       actor: followingFilter.value,
       limit: getLimit(constraints) ?? 50
     });
@@ -4035,14 +4081,14 @@ async function queryUsers(constraints: BackendConstraint[]): Promise<User[]> {
 
   const followersFilter = getWhere(constraints, 'following', 'array-contains');
   if (typeof followersFilter?.value === 'string') {
-    const response = await getAgent().getFollowers({
+    const response = await getAppViewAgent().getFollowers({
       actor: followersFilter.value,
       limit: getLimit(constraints) ?? 50
     });
     return hydrateProfiles(response.data.followers);
   }
 
-  const response = await getAgent().getSuggestions({
+  const response = await getAppViewAgent().getSuggestions({
     limit: getLimit(constraints) ?? 20
   });
   const excludeId = getWhere(constraints, 'id', '!=')?.value;
@@ -4176,7 +4222,8 @@ async function getQuoteRef(
   if (!quoteTarget.createdBy) return undefined;
 
   const uri = `at://${quoteTarget.createdBy}/app.bsky.feed.post/${quoteTarget.id}`;
-  const post = (await getAgent().getPosts({ uris: [uri] })).data.posts[0];
+  const post = (await getAppViewAgent().getPosts({ uris: [uri] })).data
+    .posts[0];
   if (!post) return undefined;
 
   const ref = { uri: post.uri, cid: post.cid };
@@ -4327,7 +4374,7 @@ export async function addTweet(data: AddTweetData): Promise<Tweet> {
   if (mediaEmbed) {
     try {
       visibleTweet = {
-        ...(await waitForPublishedPost(api, result.uri, true)),
+        ...(await waitForPublishedPost(result.uri, true)),
         parent: localTweet.parent
       };
     } catch (error) {
@@ -4440,6 +4487,18 @@ async function upsertProfileRecord(
   });
 }
 
+function normalizeProfileWebsiteForWrite(
+  value: string | null | undefined
+): string | null {
+  const trimmedValue = value?.trim();
+
+  if (!trimmedValue) return null;
+
+  return /^[a-z][a-z0-9+.-]*:/i.test(trimmedValue)
+    ? trimmedValue
+    : `https://${trimmedValue}`;
+}
+
 export async function updateProfile(
   userId: string,
   data: Partial<User>,
@@ -4485,6 +4544,8 @@ export async function updateProfile(
   const shouldUpdateProfile =
     'name' in data ||
     'bio' in data ||
+    'pronouns' in data ||
+    'website' in data ||
     !!avatarUpload ||
     !!bannerUpload ||
     ('coverPhotoURL' in data && data.coverPhotoURL === null);
@@ -4495,6 +4556,18 @@ export async function updateProfile(
 
       if ('name' in data) nextProfile.displayName = data.name ?? '';
       if ('bio' in data) nextProfile.description = data.bio ?? '';
+      if ('pronouns' in data) {
+        const nextPronouns = data.pronouns?.trim();
+
+        if (nextPronouns) nextProfile.pronouns = nextPronouns;
+        else delete nextProfile.pronouns;
+      }
+      if ('website' in data) {
+        const nextWebsite = normalizeProfileWebsiteForWrite(data.website);
+
+        if (nextWebsite) nextProfile.website = nextWebsite;
+        else delete nextProfile.website;
+      }
       if (avatarUpload) nextProfile.avatar = avatarUpload;
       if (bannerUpload) nextProfile.banner = bannerUpload;
       else if ('coverPhotoURL' in data && data.coverPhotoURL === null)
@@ -4537,7 +4610,8 @@ export async function unfollowUser(targetDid: string): Promise<void> {
     !!(targetUser && sessionDid && targetUser.followers.includes(sessionDid));
   const followUri =
     followUriCache.get(targetDid) ??
-    (await getAgent().getProfile({ actor: targetDid })).data.viewer?.following;
+    (await getAppViewAgent().getProfile({ actor: targetDid })).data.viewer
+      ?.following;
 
   if (followUri) await getAgent().deleteFollow(followUri);
   currentFollowing.delete(targetDid);
@@ -4575,7 +4649,8 @@ export async function likePost(
   if (shouldLike === liked) return;
 
   if (!shouldLike) {
-    const post = (await getAgent().getPosts({ uris: [ref.uri] })).data.posts[0];
+    const post = (await getAppViewAgent().getPosts({ uris: [ref.uri] })).data
+      .posts[0];
     if (post?.viewer?.like) await getAgent().deleteLike(post.viewer.like);
     tweet.userLikes = tweet.userLikes.filter((id) => id !== sessionDid);
   } else {
@@ -4599,7 +4674,8 @@ export async function repostPost(
   if (shouldRepost === reposted) return;
 
   if (!shouldRepost) {
-    const post = (await getAgent().getPosts({ uris: [ref.uri] })).data.posts[0];
+    const post = (await getAppViewAgent().getPosts({ uris: [ref.uri] })).data
+      .posts[0];
     if (post?.viewer?.repost) await getAgent().deleteRepost(post.viewer.repost);
     tweet.userRetweets = tweet.userRetweets.filter((id) => id !== sessionDid);
   } else {
