@@ -157,9 +157,7 @@ export function Tweet(tweet: TweetProps): JSX.Element {
           <div className='grid grid-cols-[auto,1fr] gap-x-3 gap-y-1'>
             <AnimatePresence initial={false}>
               {modal ? null : pinned ? (
-                <TweetStatus type='pin'>
-                  <p className='text-sm font-bold'>Pinned Tweet</p>
-                </TweetStatus>
+                <TweetStatus type='pin'>Pinned Tweet</TweetStatus>
               ) : (
                 tweetIsRetweeted && (
                   <TweetStatus type='tweet'>
@@ -168,7 +166,7 @@ export function Tweet(tweet: TweetProps): JSX.Element {
                         profileUsername ? getUserPath(profileUsername) : '#'
                       }
                     >
-                      <a className='custom-underline truncate text-sm font-bold'>
+                      <a className='custom-underline truncate'>
                         {userId === profileId ? 'You' : profileName} Retweeted
                       </a>
                     </Link>

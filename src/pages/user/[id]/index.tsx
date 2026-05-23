@@ -19,7 +19,7 @@ export default function UserTweets(): JSX.Element {
   const { id, username, pinnedTweet } = user ?? {};
   const profileRestricted = !!user?.blocking || !!user?.blockedBy;
 
-  const { data: pinnedData } = useDocument(
+  const { data: pinnedData, loading: pinnedLoading } = useDocument(
     doc(tweetsCollection, pinnedTweet ?? 'null'),
     {
       disabled: !pinnedTweet || profileRestricted,
@@ -47,12 +47,19 @@ export default function UserTweets(): JSX.Element {
   );
 
   const mergedTweets = mergeData(true, ownerTweets, peopleTweets);
+  const timelineTweets = pinnedTweet
+    ? mergedTweets?.filter(({ id }) => id !== pinnedTweet) ?? null
+    : mergedTweets;
+
+  const timelineLoading =
+    ownerLoading || peopleLoading || (!!pinnedTweet && pinnedLoading);
+  const hasProfileTweets = !!pinnedData || !!timelineTweets?.length;
 
   return (
     <section>
-      {ownerLoading || peopleLoading ? (
+      {timelineLoading ? (
         <Loading className='mt-5' />
-      ) : !mergedTweets ? (
+      ) : !hasProfileTweets ? (
         <StatsEmpty
           title={`@${username as string} hasn't tweeted`}
           description='When they do, their Tweets will show up here.'
@@ -62,7 +69,7 @@ export default function UserTweets(): JSX.Element {
           {pinnedData && (
             <Tweet pinned {...pinnedData} key={`pinned-${pinnedData.id}`} />
           )}
-          {mergedTweets.map((tweet) => (
+          {timelineTweets?.map((tweet) => (
             <Tweet {...tweet} profile={user} key={tweet.id} />
           ))}
         </AnimatePresence>

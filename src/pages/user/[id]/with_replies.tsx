@@ -20,7 +20,7 @@ export default function UserWithReplies(): JSX.Element {
   const { id, name, username, pinnedTweet } = user ?? {};
   const profileRestricted = !!user?.blocking || !!user?.blockedBy;
 
-  const { data: pinnedData } = useDocument(
+  const { data: pinnedData, loading: pinnedLoading } = useDocument(
     doc(tweetsCollection, pinnedTweet ?? 'null'),
     {
       disabled: !pinnedTweet || profileRestricted,
@@ -38,6 +38,13 @@ export default function UserWithReplies(): JSX.Element {
     { includeUser: true, allowNull: true, disabled: profileRestricted }
   );
 
+  const timelineTweets = pinnedTweet
+    ? data?.filter(({ id }) => id !== pinnedTweet) ?? null
+    : data;
+
+  const timelineLoading = loading || (!!pinnedTweet && pinnedLoading);
+  const hasProfileTweets = !!pinnedData || !!timelineTweets?.length;
+
   return (
     <section>
       <SEO
@@ -45,9 +52,9 @@ export default function UserWithReplies(): JSX.Element {
           username as string
         }) / Not Twitter`}
       />
-      {loading ? (
+      {timelineLoading ? (
         <Loading className='mt-5' />
-      ) : !data ? (
+      ) : !hasProfileTweets ? (
         <StatsEmpty
           title={`@${username as string} hasn't tweeted`}
           description='When they do, their Tweets will show up here.'
@@ -57,7 +64,7 @@ export default function UserWithReplies(): JSX.Element {
           {pinnedData && (
             <Tweet pinned {...pinnedData} key={`pinned-${pinnedData.id}`} />
           )}
-          <TweetWithParent data={data} />
+          {timelineTweets && <TweetWithParent data={timelineTweets} />}
         </AnimatePresence>
       )}
     </section>
