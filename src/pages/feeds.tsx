@@ -20,6 +20,7 @@ import { MainContainer } from '@components/home/main-container';
 import { MobileSidebar } from '@components/sidebar/mobile-sidebar';
 import { Button } from '@components/ui/button';
 import { Error as ErrorMessage } from '@components/ui/error';
+import { CustomIcon } from '@components/ui/custom-icon';
 import { HeroIcon, type IconName } from '@components/ui/hero-icon';
 import { Loading } from '@components/ui/loading';
 import { NextImage } from '@components/ui/next-image';
@@ -563,7 +564,7 @@ export default function Feeds(): JSX.Element {
             className='flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-main-accent/10 text-main-accent'
             aria-hidden='true'
           >
-            <HeroIcon className='h-6 w-6' iconName='ListBulletIcon' />
+            <CustomIcon className='h-7 w-7' iconName='TwitterListsIcon' />
           </span>
           <div className='min-w-0'>
             <h1 className='text-2xl font-extrabold'>My Feeds</h1>
@@ -624,7 +625,7 @@ export default function Feeds(): JSX.Element {
                 className='flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-main-accent/10 text-main-accent'
                 aria-hidden='true'
               >
-                <HeroIcon className='h-6 w-6' iconName='MagnifyingGlassIcon' />
+                <CustomIcon className='h-7 w-7' iconName='TwitterSearchIcon' />
               </span>
               <div className='min-w-0'>
                 <h2 className='text-xl font-extrabold'>Discover New Feeds</h2>
