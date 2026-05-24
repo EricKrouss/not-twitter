@@ -15,12 +15,18 @@ type TweetShareProps = {
   tweetId: string;
   username?: string | null;
   viewTweet?: boolean;
+  isBookmarked: boolean;
+  onBookmark: () => Promise<void>;
+  disabled: boolean;
 };
 
 export function TweetShare({
   tweetId,
   username,
-  viewTweet
+  viewTweet,
+  isBookmarked,
+  onBookmark,
+  disabled
 }: TweetShareProps): JSX.Element {
   const handleCopy = (closeMenu: () => void) => async (): Promise<void> => {
     closeMenu();
@@ -29,7 +35,12 @@ export function TweetShare({
       `${siteURL}${getTweetPath(tweetId, username)}`;
 
     await navigator.clipboard.writeText(url);
-    toast.success('Copied to clipboard');
+    toast.success('Copied link to Bluesky');
+  };
+
+  const handleBookmarkToggle = (closeMenu: () => void) => async (): Promise<void> => {
+    closeMenu();
+    await onBookmark();
   };
 
   return (
@@ -43,6 +54,7 @@ export function TweetShare({
                focus-visible:text-accent-blue`,
               open && 'text-accent-blue inner:bg-accent-blue/10'
             )}
+            aria-label='Share'
           >
             <i
               className='relative rounded-full p-2 not-italic duration-200 group-hover:bg-accent-blue/10 
@@ -75,6 +87,22 @@ export function TweetShare({
                 >
                   <HeroIcon iconName='LinkIcon' />
                   Copy link to Tweet
+                </Popover.Button>
+                <Popover.Button
+                  className='accent-tab flex w-full gap-3 rounded-md p-4 hover:bg-main-sidebar-background'
+                  as={Button}
+                  disabled={disabled}
+                  onClick={preventBubbling(handleBookmarkToggle(close))}
+                >
+                  <CustomIcon
+                    iconName={
+                      isBookmarked
+                        ? 'TwitterBookmarksFilledIcon'
+                        : 'TwitterBookmarksIcon'
+                    }
+                    className='h-5 w-5'
+                  />
+                  {isBookmarked ? 'Remove from Bookmarks' : 'Bookmark'}
                 </Popover.Button>
               </Popover.Panel>
             )}

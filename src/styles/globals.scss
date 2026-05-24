@@ -226,6 +226,13 @@
     display: none;
   }
 
+  .selected-tweet {
+    position: relative;
+    z-index: 10;
+    box-shadow: 0 0 0 2px rgb(var(--main-accent));
+    background-color: rgba(var(--main-accent), 0.02);
+  }
+
   .birthday-balloon {
     position: absolute;
     bottom: -18vh;

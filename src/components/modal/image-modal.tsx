@@ -886,24 +886,19 @@ function ConversationActionBar({
         />
       ) : (
         <>
-          <ConversationActionButton
-            tip={optimisticBookmarked ? 'Remove from Bookmarks' : 'Bookmark'}
-            iconName={
-              optimisticBookmarked
-                ? 'TwitterBookmarksFilledIcon'
-                : 'TwitterBookmarksIcon'
-            }
-            count={optimisticBookmarkCount}
-            active={optimisticBookmarked}
-            root={root}
-            className='hover:text-main-accent focus-visible:text-main-accent'
-            iconClassName='group-hover:bg-main-accent/10 group-active:bg-main-accent/20 group-focus-visible:bg-main-accent/10'
+          <button
+            className='sr-only'
+            aria-label={optimisticBookmarked ? 'Remove from Bookmarks' : 'Bookmark'}
             onClick={!updatingBookmark ? handleBookmark : undefined}
+            disabled={updatingBookmark}
           />
           <TweetShare
             tweetId={tweet.id}
             username={tweet.user.username}
             viewTweet={root}
+            isBookmarked={optimisticBookmarked}
+            onBookmark={handleBookmark}
+            disabled={updatingBookmark}
           />
         </>
       )}

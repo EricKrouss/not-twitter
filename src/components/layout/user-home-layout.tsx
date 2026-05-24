@@ -1,11 +1,13 @@
 import { useRouter } from 'next/router';
 import { motion } from 'framer-motion';
+import useSWR from 'swr';
 import { useAuth } from '@lib/context/auth-context';
 import { useTheme } from '@lib/context/theme-context';
 import { useUser } from '@lib/context/user-context';
 import { formatAtprotoDisplayIdentifier } from '@lib/atproto/identity';
 import { isProfileBirthdayToday } from '@lib/profile-birthday';
 import { getProfileRouteId } from '@lib/static-routes';
+import { checkCanChatWithActor } from '@lib/atproto/backend';
 import { SEO } from '@components/common/seo';
 import { UserHomeCover } from '@components/user/user-home-cover';
 import { UserHomeAvatar } from '@components/user/user-home-avatar';
@@ -81,6 +83,12 @@ export function UserHomeLayout({ children }: LayoutProps): JSX.Element {
     !profileIsBlocked &&
     isProfileBirthdayToday(userData.birthday);
 
+  const { data: canDM } = useSWR(
+    userData && signedIn && !isOwner && !profileIsBlocked ? ['can-dm', userData.id] : null,
+    () => checkCanChatWithActor(userData!.id),
+    { revalidateOnFocus: false }
+  );
+
   const handleMessageClick = (): void => {
     if (userData)
       void push(`/messages?actor=${encodeURIComponent(userData.username)}`);
@@ -135,7 +143,7 @@ export function UserHomeLayout({ children }: LayoutProps): JSX.Element {
                       muting={userData.muting}
                       mutingByListName={userData.mutingByListName}
                     />
-                    {showMessageButton && (
+                    {showMessageButton && canDM && (
                       <Button
                         className='dark-bg-tab group relative border border-light-line-reply p-2
                                    hover:bg-light-primary/10 active:bg-light-primary/20 dark:border-light-secondary

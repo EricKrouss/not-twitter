@@ -31,10 +31,20 @@ export function SidebarLink({
       : badgeCount.toString()
     : '';
   const compactCountBadgeClassName = cn(
-    `absolute -top-1 -right-1 flex h-4 items-center justify-center rounded-full
-     border border-main-background bg-main-accent text-[10px] font-bold leading-4 text-white`,
-    badgeLabel.length === 1 ? 'w-4' : 'min-w-[18px] px-1'
+    `absolute -top-1 -right-1 flex h-[18px] items-center justify-center rounded-full
+     border-2 border-main-background bg-main-accent text-[11px] font-bold leading-none text-white`,
+    badgeLabel.length === 1 ? 'w-[18px]' : 'min-w-[18px] px-1'
   );
+
+  const handleClick = (e: React.MouseEvent<HTMLAnchorElement>): void => {
+    if (disabled) {
+      preventBubbling()(e);
+      return;
+    }
+    if (href === '/home' && asPath === '/home') {
+      window.dispatchEvent(new CustomEvent('refresh-home-feed'));
+    }
+  };
 
   return (
     <Link href={href}>
@@ -44,7 +54,7 @@ export function SidebarLink({
           canBeHidden && isMobile ? 'hidden' : 'flex',
           disabled && 'cursor-not-allowed'
         )}
-        onClick={disabled ? preventBubbling() : undefined}
+        onClick={handleClick}
       >
         <div
           className={cn(

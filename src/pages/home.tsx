@@ -273,13 +273,13 @@ function HomeTabs({
   );
 }
 
+let lastActiveTab: HomeFeedTab | null = null;
+
 export default function Home(): JSX.Element {
   const { isMobile } = useWindow();
   const { push } = useRouter();
   const { clearHomeBadge } = useLiveUpdates();
-  const [activeTab, setActiveTab] = useState<HomeFeedTab>(
-    FOR_YOU_HOME_FEED_TAB
-  );
+  const [activeTab, setActiveTabState] = useState<HomeFeedTab>(lastActiveTab ?? FOR_YOU_HOME_FEED_TAB);
   const [feed, setFeed] = useState<TweetWithUser[]>([]);
   const [newTweets, setNewTweets] = useState<TweetWithUser[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -287,8 +287,14 @@ export default function Home(): JSX.Element {
   const [timelineSettingsOpen, setTimelineSettingsOpen] = useState(false);
   const feedRef = useRef<TweetWithUser[]>([]);
   const newTweetsRef = useRef<TweetWithUser[]>([]);
-  const adoptedInitialTabRef = useRef(false);
-  const { data: subscribedFeeds } = useSWR<SubscribedHomeFeed[], Error>(
+  const adoptedInitialTabRef = useRef(!!lastActiveTab);
+
+  const setActiveTab = (tab: HomeFeedTab): void => {
+    lastActiveTab = tab;
+    setActiveTabState(tab);
+  };
+
+  const { data: subscribedFeeds, error: errorSubscribedFeeds } = useSWR<SubscribedHomeFeed[], Error>(
     'home-subscribed-feeds',
     getSubscribedHomeFeeds,
     { revalidateOnFocus: false }
@@ -298,10 +304,14 @@ export default function Home(): JSX.Element {
     [subscribedFeeds]
   );
 
-  const { data, error } = useSWR<HomeFeedPage, Error>(
-    ['home-feed', activeTab],
+  const { data, error, mutate } = useSWR<HomeFeedPage, Error>(
+    (subscribedFeeds || errorSubscribedFeeds) && activeTab ? ['home-feed', activeTab] : null,
     () => getHomeFeedPage(activeTab),
-    { revalidateOnFocus: false, shouldRetryOnError: false }
+    {
+      revalidateOnFocus: false,
+      shouldRetryOnError: false,
+      revalidateIfStale: false
+    }
   );
 
   useEffect(() => {
@@ -339,75 +349,25 @@ export default function Home(): JSX.Element {
     if (activeTab === 'following') clearHomeBadge(data.tweets[0]?.id ?? null);
   }, [activeTab, clearHomeBadge, data]);
 
+  const handleRefresh = async (): Promise<void> => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    try {
+      await mutate();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   useEffect(() => {
-    if (!data) return;
-
-    let canceled = false;
-
-    const refreshHomeFeed = async (
-      mode: HomeFeedRefreshMode = 'banner'
-    ): Promise<void> => {
-      try {
-        const nextPage = await getHomeFeedPage(activeTab);
-
-        if (canceled) return;
-
-        if (mode === 'replace') {
-          setFeed(nextPage.tweets);
-          setNewTweets([]);
-          setCursor(nextPage.cursor);
-          if (activeTab === 'following')
-            clearHomeBadge(nextPage.tweets[0]?.id ?? null);
-          return;
-        }
-
-        const currentFeed = feedRef.current;
-
-        if (!currentFeed.length) {
-          setFeed(nextPage.tweets);
-          setCursor(nextPage.cursor);
-          if (activeTab === 'following')
-            clearHomeBadge(nextPage.tweets[0]?.id ?? null);
-          return;
-        }
-
-        const freshTweets = getNewTweetsBeforeCurrentTop(
-          nextPage.tweets,
-          currentFeed,
-          newTweetsRef.current
-        );
-
-        if (freshTweets.length)
-          setNewTweets((currentNewTweets) =>
-            prependTweets(currentNewTweets, freshTweets)
-          );
-      } catch {
-        // Home can keep its current timeline if a background refresh fails.
-      }
+    const handleRefreshEvent = (): void => {
+      void handleRefresh();
     };
 
-    const refreshSoon = (): void => {
-      void refreshHomeFeed();
-    };
-    const refreshImmediately = (): void => {
-      void refreshHomeFeed('replace');
-    };
-
-    const intervalId = window.setInterval(
-      refreshSoon,
-      HOME_FEED_REFRESH_INTERVAL_MS
-    );
-    const unsubscribe = subscribeBackend(refreshImmediately, ['content']);
-
-    window.addEventListener('focus', refreshSoon);
-
+    window.addEventListener('refresh-home-feed', handleRefreshEvent);
     return () => {
-      canceled = true;
-      window.clearInterval(intervalId);
-      window.removeEventListener('focus', refreshSoon);
-      unsubscribe();
+      window.removeEventListener('refresh-home-feed', handleRefreshEvent);
     };
-  }, [activeTab, clearHomeBadge, data]);
+  }, [mutate]);
 
   const handleLoadMore = async (): Promise<void> => {
     if (!cursor || loadingMore) return;
@@ -489,7 +449,12 @@ export default function Home(): JSX.Element {
         <div className='flex h-[53px] items-center justify-between px-4'>
           <div className='flex min-w-0 items-center gap-8'>
             <MobileSidebar />
-            <h2 className='truncate text-xl font-bold'>Home</h2>
+            <h2
+              className='truncate text-xl font-bold cursor-pointer select-none transition hover:opacity-80 active:opacity-70'
+              onClick={handleRefresh}
+            >
+              Home
+            </h2>
           </div>
           <div className='relative flex items-center gap-1'>
             <Button
