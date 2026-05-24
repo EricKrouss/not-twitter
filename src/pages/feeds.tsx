@@ -24,7 +24,7 @@ import { HeroIcon, type IconName } from '@components/ui/hero-icon';
 import { Loading } from '@components/ui/loading';
 import { NextImage } from '@components/ui/next-image';
 import { ToolTip } from '@components/ui/tooltip';
-import type { ChangeEvent, ReactElement, ReactNode } from 'react';
+import type { ChangeEvent, DragEvent, ReactElement, ReactNode } from 'react';
 
 type FixedFeed = {
   id: string;
@@ -54,6 +54,31 @@ function mergeFeeds(
   const newFeeds = nextFeeds.filter(({ uri }) => !seenUris.has(uri));
 
   return [...currentFeeds, ...newFeeds];
+}
+
+function getFeedOrderKey(feeds: FeedBrowserFeed[]): string {
+  return feeds.map(({ id }) => id).join('\u0000');
+}
+
+function reorderFeeds(
+  feeds: FeedBrowserFeed[],
+  fromIndex: number,
+  toIndex: number
+): FeedBrowserFeed[] {
+  if (
+    fromIndex === toIndex ||
+    fromIndex < 0 ||
+    toIndex < 0 ||
+    fromIndex >= feeds.length ||
+    toIndex >= feeds.length
+  )
+    return feeds;
+
+  const nextFeeds = [...feeds];
+  const [feed] = nextFeeds.splice(fromIndex, 1);
+  nextFeeds.splice(toIndex, 0, feed);
+
+  return nextFeeds;
 }
 
 function FeedAvatar({
@@ -142,19 +167,42 @@ function SavedFeedRow({
   last,
   saving,
   removing,
+  dragging,
   onMove,
-  onRemove
+  onRemove,
+  onDragStart,
+  onDragEnter,
+  onDragOver,
+  onDrop,
+  onDragEnd
 }: {
   feed: FeedBrowserFeed;
   first: boolean;
   last: boolean;
   saving: boolean;
   removing: boolean;
+  dragging: boolean;
   onMove: (direction: -1 | 1) => void;
   onRemove: () => void;
+  onDragStart: (event: DragEvent<HTMLDivElement>) => void;
+  onDragEnter: (event: DragEvent<HTMLDivElement>) => void;
+  onDragOver: (event: DragEvent<HTMLDivElement>) => void;
+  onDrop: (event: DragEvent<HTMLDivElement>) => void;
+  onDragEnd: () => void;
 }): JSX.Element {
   return (
-    <div className='hover-card flex min-h-[76px] items-center gap-3 border-b border-light-border px-4 py-3 dark:border-dark-border'>
+    <div
+      className={cn(
+        'hover-card flex min-h-[76px] cursor-grab items-center gap-3 border-b border-light-border px-4 py-3 active:cursor-grabbing dark:border-dark-border',
+        dragging && 'bg-main-accent/5 opacity-60 dark:bg-main-accent/10'
+      )}
+      draggable={!saving && !removing}
+      onDragStart={onDragStart}
+      onDragEnter={onDragEnter}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      onDragEnd={onDragEnd}
+    >
       <FeedAvatar avatar={feed.avatar} name={feed.displayName} />
       <div className='min-w-0 flex-1'>
         <Link href={feed.href}>
@@ -173,7 +221,7 @@ function SavedFeedRow({
       </div>
       <div className='flex shrink-0 items-center gap-1'>
         <Button
-          className='dark-bg-tab group relative h-9 w-9 p-0 hover:bg-light-primary/10 disabled:cursor-default disabled:opacity-40 dark:hover:bg-dark-primary/10'
+          className='dark-bg-tab group relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full !p-0 hover:bg-light-primary/10 disabled:cursor-default disabled:opacity-40 dark:hover:bg-dark-primary/10'
           aria-label={`Move ${feed.displayName} up`}
           disabled={first || saving || removing}
           onClick={(): void => onMove(-1)}
@@ -182,7 +230,7 @@ function SavedFeedRow({
           <ToolTip tip='Move up' />
         </Button>
         <Button
-          className='dark-bg-tab group relative h-9 w-9 p-0 hover:bg-light-primary/10 disabled:cursor-default disabled:opacity-40 dark:hover:bg-dark-primary/10'
+          className='dark-bg-tab group relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full !p-0 hover:bg-light-primary/10 disabled:cursor-default disabled:opacity-40 dark:hover:bg-dark-primary/10'
           aria-label={`Move ${feed.displayName} down`}
           disabled={last || saving || removing}
           onClick={(): void => onMove(1)}
@@ -191,7 +239,7 @@ function SavedFeedRow({
           <ToolTip tip='Move down' />
         </Button>
         <Button
-          className='dark-bg-tab group relative h-9 w-9 p-0 text-accent-red hover:bg-accent-red/10 disabled:cursor-wait disabled:opacity-60'
+          className='dark-bg-tab group relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full !p-0 text-accent-red hover:bg-accent-red/10 disabled:cursor-wait disabled:opacity-60'
           aria-label={`Remove ${feed.displayName}`}
           loading={removing}
           disabled={saving}
@@ -199,6 +247,40 @@ function SavedFeedRow({
         >
           <HeroIcon className='h-5 w-5' iconName='TrashIcon' />
           <ToolTip tip='Remove' />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function FeedOrderSaveBar({
+  saving,
+  onSave,
+  onReset
+}: {
+  saving: boolean;
+  onSave: () => void;
+  onReset: () => void;
+}): JSX.Element {
+  return (
+    <div className='pointer-events-none sticky bottom-4 z-20 -mt-2 mb-3 flex justify-end px-4'>
+      <div
+        className='pointer-events-auto flex items-center gap-2 rounded-full border border-light-border
+                   bg-main-background/95 p-2 shadow-lg backdrop-blur-md dark:border-dark-border'
+      >
+        <Button
+          className='accent-tab inline-flex h-9 items-center justify-center rounded-full px-4 py-0 text-sm font-bold'
+          disabled={saving}
+          onClick={onReset}
+        >
+          Reset
+        </Button>
+        <Button
+          className='accent-tab inline-flex h-9 items-center justify-center rounded-full bg-main-accent px-4 py-0 text-sm font-bold text-white hover:bg-main-accent/90'
+          loading={saving}
+          onClick={onSave}
+        >
+          Save order
         </Button>
       </div>
     </div>
@@ -262,6 +344,7 @@ export default function Feeds(): JSX.Element {
   const [removingFeedId, setRemovingFeedId] = useState<string | null>(null);
   const [addingFeedUri, setAddingFeedUri] = useState<string | null>(null);
   const [loadingMoreSearch, setLoadingMoreSearch] = useState(false);
+  const [draggedFeedId, setDraggedFeedId] = useState<string | null>(null);
   const {
     data: savedFeeds,
     error: savedError,
@@ -304,6 +387,16 @@ export default function Feeds(): JSX.Element {
   ];
   const savedLoading = !savedFeeds && !savedError;
   const searchLoading = !searchPage && !searchError;
+  const savedOrderKey = useMemo(
+    () => getFeedOrderKey(editableFeeds),
+    [editableFeeds]
+  );
+  const orderedOrderKey = useMemo(
+    () => getFeedOrderKey(orderedFeeds),
+    [orderedFeeds]
+  );
+  const hasOrderChanges =
+    orderedFeeds.length > 0 && orderedOrderKey !== savedOrderKey;
 
   useEffect(() => {
     const timeout = window.setTimeout(
@@ -329,11 +422,15 @@ export default function Feeds(): JSX.Element {
     target: { value }
   }: ChangeEvent<HTMLInputElement>): void => setSearchInput(value);
 
-  const saveFeedOrder = async (feeds: FeedBrowserFeed[]): Promise<void> => {
+  const saveFeedOrder = async (): Promise<void> => {
+    if (!hasOrderChanges || savingOrder) return;
+
     setSavingOrder(true);
 
     try {
-      const nextFeeds = await reorderSavedHomeFeeds(feeds.map(({ id }) => id));
+      const nextFeeds = await reorderSavedHomeFeeds(
+        orderedFeeds.map(({ id }) => id)
+      );
 
       await mutateSavedFeeds(nextFeeds, false);
       toast.success('Feed order saved');
@@ -347,13 +444,51 @@ export default function Feeds(): JSX.Element {
 
   const moveFeed = (index: number, direction: -1 | 1): void => {
     const nextIndex = index + direction;
-    if (nextIndex < 0 || nextIndex >= orderedFeeds.length) return;
+    setOrderedFeeds((feeds) => reorderFeeds(feeds, index, nextIndex));
+  };
 
-    const nextFeeds = [...orderedFeeds];
-    const [feed] = nextFeeds.splice(index, 1);
-    nextFeeds.splice(nextIndex, 0, feed);
-    setOrderedFeeds(nextFeeds);
-    void saveFeedOrder(nextFeeds);
+  const resetFeedOrder = (): void => setOrderedFeeds(editableFeeds);
+
+  const clearFeedDrag = (): void => setDraggedFeedId(null);
+
+  const handleFeedDragStart =
+    (feedId: string) =>
+    (event: DragEvent<HTMLDivElement>): void => {
+      if (savingOrder || removingFeedId) {
+        event.preventDefault();
+        return;
+      }
+
+      setDraggedFeedId(feedId);
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', feedId);
+    };
+
+  const handleFeedDragEnter =
+    (feedId: string) =>
+    (event: DragEvent<HTMLDivElement>): void => {
+      event.preventDefault();
+      const activeFeedId =
+        draggedFeedId ?? event.dataTransfer.getData('text/plain');
+
+      if (!activeFeedId || activeFeedId === feedId) return;
+
+      setOrderedFeeds((feeds) => {
+        const fromIndex = feeds.findIndex(({ id }) => id === activeFeedId);
+        const toIndex = feeds.findIndex(({ id }) => id === feedId);
+
+        return reorderFeeds(feeds, fromIndex, toIndex);
+      });
+    };
+
+  const handleFeedDragOver = (event: DragEvent<HTMLDivElement>): void => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleFeedDrop = (event: DragEvent<HTMLDivElement>): void => {
+    event.preventDefault();
+    clearFeedDrag();
   };
 
   const removeFeed = (feed: FeedBrowserFeed): void => {
@@ -456,8 +591,14 @@ export default function Feeds(): JSX.Element {
                   last={index === orderedFeeds.length - 1}
                   saving={savingOrder}
                   removing={removingFeedId === feed.id}
+                  dragging={draggedFeedId === feed.id}
                   onMove={(direction): void => moveFeed(index, direction)}
                   onRemove={(): void => removeFeed(feed)}
+                  onDragStart={handleFeedDragStart(feed.id)}
+                  onDragEnter={handleFeedDragEnter(feed.id)}
+                  onDragOver={handleFeedDragOver}
+                  onDrop={handleFeedDrop}
+                  onDragEnd={clearFeedDrag}
                   key={feed.id}
                 />
               ))
@@ -468,6 +609,13 @@ export default function Feeds(): JSX.Element {
                   Community feeds can give Home a few more timelines.
                 </p>
               </div>
+            )}
+            {hasOrderChanges && (
+              <FeedOrderSaveBar
+                saving={savingOrder}
+                onSave={(): void => void saveFeedOrder()}
+                onReset={resetFeedOrder}
+              />
             )}
           </section>
           <section className='border-b border-light-border px-4 py-5 dark:border-dark-border'>
