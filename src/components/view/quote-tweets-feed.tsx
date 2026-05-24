@@ -86,9 +86,12 @@ export function QuoteTweetsFeed({
     };
 
     void fetchQuotes(true);
-    const unsubscribe = subscribeBackend(() => {
-      void fetchQuotes(false);
-    });
+    const unsubscribe = subscribeBackend(
+      () => {
+        void fetchQuotes(false);
+      },
+      ['content']
+    );
 
     return () => {
       active = false;

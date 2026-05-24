@@ -159,9 +159,12 @@ export default function TweetId(): JSX.Element {
   useEffect(() => {
     if (!tweetId) return undefined;
 
-    return subscribeBackend(() => {
-      void mutate();
-    });
+    return subscribeBackend(
+      () => {
+        void mutate();
+      },
+      ['content']
+    );
   }, [mutate, tweetId]);
 
   const handleReplySent = useCallback(

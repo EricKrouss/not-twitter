@@ -647,13 +647,18 @@ const locallyDeletedTweetIds = new Set<string>();
 const postRefCache = new Map<string, PostRef>();
 const postReplyRefCache = new Map<string, PostReplyRef>();
 const followUriCache = new Map<string, string>();
+const localViewerFollowOverrides = new Map<string, boolean>();
 const blockUriCache = new Map<string, string>();
 const detailedUserCache = new Set<string>();
 const profileRecordHydratedUsers = new Set<string>();
 const chatDeclarationHydratedUsers = new Set<string>();
 const didPdsEndpointCache = new Map<string, string | null>();
 const stagedImages = new Map<string, UploadedImage[]>();
-const listeners = new Set<() => void>();
+export type BackendChangeType = 'auth' | 'content' | 'relationship';
+
+type BackendListener = (changeType: BackendChangeType) => void;
+
+const listeners = new Map<BackendListener, Set<BackendChangeType> | null>();
 const serviceAuthTokenCache = new Map<
   string,
   { token: string; expiresAt: number }
@@ -1026,6 +1031,7 @@ function clearActiveAuthState(): void {
   malformedMediaRepairPromise = null;
   clearModerationSettingsCache();
   followUriCache.clear();
+  localViewerFollowOverrides.clear();
   blockUriCache.clear();
   locallyCreatedTweets.clear();
   localQuoteTargetIds.clear();
@@ -3437,13 +3443,21 @@ export async function setSettingsNotificationPreference(
   return getBlueskySettings();
 }
 
-function notify(): void {
-  listeners.forEach((listener) => listener());
+function notify(changeType: BackendChangeType = 'content'): void {
+  listeners.forEach((changeTypes, listener) => {
+    if (!changeTypes || changeTypes.has(changeType)) listener(changeType);
+  });
 }
 
-export function subscribeBackend(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
+export function subscribeBackend(
+  listener: () => void,
+  changeTypes?: BackendChangeType[]
+): () => void {
+  const backendListener: BackendListener = () => listener();
+  listeners.set(backendListener, changeTypes ? new Set(changeTypes) : null);
+  return () => {
+    listeners.delete(backendListener);
+  };
 }
 
 function safeAtob(value: string): string {
@@ -3643,6 +3657,9 @@ function mapProfile(profile: ActorProfileView): User {
   const currentDid = sessionDid ?? '';
   const targetFollowsViewer = !!detailedProfile.viewer?.followedBy;
   const viewerFollowsTarget = !!detailedProfile.viewer?.following;
+  const localViewerFollowsTarget = localViewerFollowOverrides.get(did);
+  const effectiveViewerFollowsTarget =
+    localViewerFollowsTarget ?? viewerFollowsTarget;
   const hasViewerState = !!detailedProfile.viewer;
   const viewerBlockingUri =
     typeof detailedProfile.viewer?.blocking === 'string'
@@ -3667,18 +3684,26 @@ function mapProfile(profile: ActorProfileView): User {
     ? detailedProfile.viewer?.mutedByList?.name ?? null
     : existing?.mutingByListName ?? null;
   const isCurrentUser = currentUser?.id === did;
+  const existingFollowing = existing?.following ?? [];
+  const existingFollowers = existing?.followers ?? [];
   const following = isCurrentUser
     ? Array.from(currentFollowing)
     : targetFollowsViewer && currentDid
-    ? [currentDid]
-    : existing?.following ?? [];
+    ? [currentDid, ...existingFollowing.filter((id) => id !== currentDid)]
+    : hasViewerState && currentDid
+    ? existingFollowing.filter((id) => id !== currentDid)
+    : existingFollowing;
   const followers =
-    viewerFollowsTarget && currentDid
-      ? [currentDid]
-      : existing?.followers ?? [];
+    effectiveViewerFollowsTarget && currentDid
+      ? [currentDid, ...existingFollowers.filter((id) => id !== currentDid)]
+      : hasViewerState && currentDid
+      ? existingFollowers.filter((id) => id !== currentDid)
+      : existingFollowers;
 
   if (detailedProfile.viewer?.following) {
     followUriCache.set(did, detailedProfile.viewer.following);
+  } else if (hasViewerState && !effectiveViewerFollowsTarget) {
+    followUriCache.delete(did);
   }
   if (blockingUri) {
     blockUriCache.set(did, blockingUri);
@@ -3723,13 +3748,17 @@ function mapProfile(profile: ActorProfileView): User {
     following,
     followers,
     followingCount:
-      detailedProfile.followsCount ??
-      existing?.followingCount ??
-      following.length,
+      isCurrentUser
+        ? existing?.followingCount ?? detailedProfile.followsCount ?? following.length
+        : detailedProfile.followsCount ??
+          existing?.followingCount ??
+          following.length,
     followersCount:
-      detailedProfile.followersCount ??
-      existing?.followersCount ??
-      followers.length,
+      localViewerFollowsTarget !== undefined && existing
+        ? existing.followersCount
+        : detailedProfile.followersCount ??
+          existing?.followersCount ??
+          followers.length,
     muting,
     mutingByListName,
     blocking,
@@ -5620,6 +5649,7 @@ async function activateOAuthSession(
       locallyCreatedTweets.clear();
       localQuoteTargetIds.clear();
       locallyDeletedTweetIds.clear();
+      localViewerFollowOverrides.clear();
     }
     agent = new Agent(nextSession);
 
@@ -5628,7 +5658,7 @@ async function activateOAuthSession(
 
     if (hasStorage()) window.localStorage.setItem(OAUTH_SUB_KEY, did);
     writeCredentialSession();
-    notify();
+    notify('auth');
 
     return user
       ? { uid: user.id, displayName: user.name, photoURL: user.photoURL }
@@ -5672,6 +5702,7 @@ async function activateCredentialAgent(
       locallyCreatedTweets.clear();
       localQuoteTargetIds.clear();
       locallyDeletedTweetIds.clear();
+      localViewerFollowOverrides.clear();
     }
 
     const user = await refreshCurrentUser();
@@ -5681,7 +5712,7 @@ async function activateCredentialAgent(
       nextAgent.session,
       getCredentialAgentServiceUrl(nextAgent, getPrimaryAtprotoServiceUrl())
     );
-    if (shouldNotify) notify();
+    if (shouldNotify) notify('auth');
 
     return user
       ? { uid: user.id, displayName: user.name, photoURL: user.photoURL }
@@ -5808,7 +5839,7 @@ export async function switchBlueskyAccount(id: string): Promise<AuthUser> {
     return user;
   } catch (error) {
     removeSavedAccount(accountId);
-    notify();
+    notify('auth');
 
     throw new Error(
       error instanceof Error ? error.message : 'Unable to switch accounts.'
@@ -5833,7 +5864,7 @@ export async function removeBlueskyAccount(id: string): Promise<void> {
   }
 
   removeSavedAccount(accountId);
-  notify();
+  notify('auth');
 }
 
 export async function signOut(): Promise<void> {
@@ -5857,7 +5888,7 @@ export async function signOut(): Promise<void> {
   const restoredUser = await restoreFirstSavedAccount();
   if (restoredUser) return;
 
-  notify();
+  notify('auth');
 }
 
 export function getCurrentUser(): User | null {
@@ -5927,6 +5958,8 @@ export async function getUser(actor: string): Promise<User | null> {
     normalizedActor === sessionDid ||
     cachedUser?.id === sessionDid ||
     currentUser?.username === normalizedActor;
+
+  if (isCurrentUserProfile && currentUser) return currentUser;
 
   if (isCurrentUserProfile) {
     const refreshedUser = await refreshCurrentUser().catch(() => null);
@@ -7191,11 +7224,24 @@ export async function followUser(targetDid: string): Promise<void> {
   const targetUser = userCache.get(targetDid);
   if (targetUser?.blocking || targetUser?.blockedBy) return;
 
+  const previousOverride = localViewerFollowOverrides.get(targetDid);
   const wasFollowing =
     currentFollowing.has(targetDid) ||
     !!(targetUser && sessionDid && targetUser.followers.includes(sessionDid));
 
-  await getAgent().follow(targetDid);
+  try {
+    const followRef = await getAgent().follow(targetDid);
+    if (followRef.uri) followUriCache.set(targetDid, followRef.uri);
+  } catch (error) {
+    if (previousOverride === undefined) {
+      localViewerFollowOverrides.delete(targetDid);
+    } else {
+      localViewerFollowOverrides.set(targetDid, previousOverride);
+    }
+    throw error;
+  }
+
+  localViewerFollowOverrides.set(targetDid, true);
   currentFollowing.add(targetDid);
   if (currentUser) {
     currentUser.following = Array.from(currentFollowing);
@@ -7207,7 +7253,7 @@ export async function followUser(targetDid: string): Promise<void> {
     targetUser.followersCount += 1;
   }
 
-  notify();
+  notify('relationship');
 }
 
 function applyLocalFollowRemoval(targetDid: string): void {
@@ -7218,6 +7264,7 @@ function applyLocalFollowRemoval(targetDid: string): void {
 
   currentFollowing.delete(targetDid);
   followUriCache.delete(targetDid);
+  localViewerFollowOverrides.set(targetDid, false);
 
   if (currentUser) {
     currentUser.following = Array.from(currentFollowing);
@@ -7381,17 +7428,68 @@ export async function reportPost(
     });
 }
 
+async function resolveFollowUri(targetDid: string): Promise<string | null> {
+  const cachedFollowUri = followUriCache.get(targetDid);
+  if (cachedFollowUri) return cachedFollowUri;
+
+  const viewerFollowUri =
+    (await getAppViewAgent().getProfile({ actor: targetDid }).catch(() => null))
+      ?.data.viewer?.following ?? null;
+
+  if (viewerFollowUri) {
+    followUriCache.set(targetDid, viewerFollowUri);
+    return viewerFollowUri;
+  }
+
+  if (!sessionDid) return null;
+
+  let cursor: string | undefined;
+
+  do {
+    const response = await getAgent().com.atproto.repo.listRecords({
+      repo: sessionDid,
+      collection: 'app.bsky.graph.follow',
+      limit: 100,
+      cursor
+    });
+
+    for (const record of response.data.records) {
+      if (
+        isPlainObject(record.value) &&
+        record.value.subject === targetDid
+      ) {
+        followUriCache.set(targetDid, record.uri);
+        return record.uri;
+      }
+    }
+
+    cursor = response.data.cursor;
+  } while (cursor);
+
+  return null;
+}
+
 export async function unfollowUser(targetDid: string): Promise<void> {
   const targetUser = userCache.get(targetDid);
+  const previousOverride = localViewerFollowOverrides.get(targetDid);
   const wasFollowing =
     currentFollowing.has(targetDid) ||
     !!(targetUser && sessionDid && targetUser.followers.includes(sessionDid));
-  const followUri =
-    followUriCache.get(targetDid) ??
-    (await getAppViewAgent().getProfile({ actor: targetDid })).data.viewer
-      ?.following;
 
-  if (followUri) await getAgent().deleteFollow(followUri);
+  localViewerFollowOverrides.set(targetDid, false);
+
+  try {
+    const followUri = await resolveFollowUri(targetDid);
+    if (followUri) await getAgent().deleteFollow(followUri);
+  } catch (error) {
+    if (previousOverride === undefined) {
+      localViewerFollowOverrides.delete(targetDid);
+    } else {
+      localViewerFollowOverrides.set(targetDid, previousOverride);
+    }
+    throw error;
+  }
+
   currentFollowing.delete(targetDid);
   followUriCache.delete(targetDid);
   if (currentUser) {
@@ -7411,7 +7509,7 @@ export async function unfollowUser(targetDid: string): Promise<void> {
     }
   }
 
-  notify();
+  notify('relationship');
 }
 
 export async function likePost(

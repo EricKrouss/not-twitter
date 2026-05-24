@@ -392,7 +392,7 @@ export default function Home(): JSX.Element {
       refreshSoon,
       HOME_FEED_REFRESH_INTERVAL_MS
     );
-    const unsubscribe = subscribeBackend(refreshImmediately);
+    const unsubscribe = subscribeBackend(refreshImmediately, ['content']);
 
     window.addEventListener('focus', refreshSoon);
 

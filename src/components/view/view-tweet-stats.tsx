@@ -135,9 +135,12 @@ function StatsModalContent({
     };
 
     void fetchStats(true);
-    const unsubscribe = subscribeBackend(() => {
-      void fetchStats(false);
-    });
+    const unsubscribe = subscribeBackend(
+      () => {
+        void fetchStats(false);
+      },
+      ['content']
+    );
 
     return () => {
       active = false;

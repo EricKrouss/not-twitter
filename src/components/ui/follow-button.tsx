@@ -46,8 +46,9 @@ export function FollowButton({
   const [updatingFollow, setUpdatingFollow] = useState(false);
 
   useEffect(() => {
+    if (updatingFollow) return;
     setOptimisticFollowing(serverFollowing);
-  }, [serverFollowing]);
+  }, [serverFollowing, updatingFollow]);
 
   const handleLoggedOutFollow = (): void => {
     void push('/');

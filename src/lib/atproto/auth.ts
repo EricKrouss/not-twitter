@@ -32,14 +32,17 @@ export function onAuthStateChanged(
 ): () => void {
   void resumeAuthUser().then(callback);
 
-  return subscribeBackend(() => {
-    const user = getCurrentUser();
-    callback(
-      user
-        ? { uid: user.id, displayName: user.name, photoURL: user.photoURL }
-        : null
-    );
-  });
+  return subscribeBackend(
+    () => {
+      const user = getCurrentUser();
+      callback(
+        user
+          ? { uid: user.id, displayName: user.name, photoURL: user.photoURL }
+          : null
+      );
+    },
+    ['auth']
+  );
 }
 
 export async function signInWithBluesky(
