@@ -38,7 +38,7 @@ export function AsideTrends({ inTrendsPage }: AsideTrendsProps): JSX.Element {
           {...variants}
         >
           {!inTrendsPage && (
-            <h2 className='text-xl font-extrabold'>Trends for you</h2>
+            <h2 className='text-xl font-extrabold'>What&apos;s happening</h2>
           )}
           {trends.map(
             ({

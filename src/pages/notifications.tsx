@@ -9,8 +9,10 @@ import {
   listNotificationsPage,
   markNotificationsSeen
 } from '@lib/atproto/backend';
+import { formatAtprotoDisplayIdentifier } from '@lib/atproto/identity';
 import { manageBookmark, manageLike, manageRetweet } from '@lib/atproto/utils';
 import { useAuth } from '@lib/context/auth-context';
+import { useTheme } from '@lib/context/theme-context';
 import { useLiveUpdates } from '@lib/context/live-updates-context';
 import { useModal } from '@lib/hooks/useModal';
 import { formatDate, formatNumber } from '@lib/date';
@@ -38,8 +40,10 @@ import { Loading } from '@components/ui/loading';
 import { Error as ErrorMessage } from '@components/ui/error';
 import { ToolTip } from '@components/ui/tooltip';
 import { TweetEmbed } from '@components/tweet/tweet-embed';
+import { TweetActionEffect } from '@components/tweet/tweet-action-effect';
 import { TweetRetweetMenu } from '@components/tweet/tweet-retweet-menu';
 import { TweetText } from '@components/tweet/tweet-text';
+import { useOptimisticReactionIds } from '@components/tweet/use-optimistic-reaction-ids';
 import type {
   NotificationItem,
   NotificationReason,
@@ -123,8 +127,18 @@ const mentionActions: Readonly<MentionAction[]> = [
 
 const notificationTabs: Readonly<NotificationsTabData[]> = [
   { label: 'All', value: 'all' },
-  { label: 'Mentions', value: 'mentions' }
+  { label: 'Mentions', value: 'mentions' },
+  { label: 'Tweets', value: 'tweets' }
 ];
+
+function getNotificationReasonsForTab(
+  activeTab: NotificationsTab
+): NotificationReason[] | undefined {
+  if (activeTab === 'mentions') return ['mention', 'reply', 'quote'];
+  if (activeTab === 'tweets') return ['subscribed-post'];
+
+  return undefined;
+}
 
 function getNotificationTime(notification: NotificationItem): number {
   return notification.createdAt.toDate().getTime();
@@ -194,6 +208,12 @@ function getReasonMeta(reason: NotificationReason): ReasonMeta {
         color: 'text-main-accent',
         heroIconName: 'UserIcon'
       };
+    case 'subscribed-post':
+      return {
+        action: 'Tweeted',
+        color: 'text-main-accent',
+        iconName: 'TwitterNotificationsIcon'
+      };
     default:
       return {
         action: 'interacted with you',
@@ -216,7 +236,12 @@ function getTargetHref(
 }
 
 function isTweetNotification(reason: NotificationReason): boolean {
-  return reason === 'mention' || reason === 'reply' || reason === 'quote';
+  return (
+    reason === 'mention' ||
+    reason === 'reply' ||
+    reason === 'quote' ||
+    reason === 'subscribed-post'
+  );
 }
 
 function getFollowBucket(notification: NotificationItem): number {
@@ -399,6 +424,7 @@ function GroupedNotificationText({
         verified={firstUser.verified}
         iconClassName='h-4 w-4'
         className='inline-flex max-w-[220px] align-bottom'
+        disableUnderline
       />{' '}
       {secondUser && group.users.length === 2 ? (
         <>
@@ -410,6 +436,7 @@ function GroupedNotificationText({
             verified={secondUser.verified}
             iconClassName='h-4 w-4'
             className='inline-flex max-w-[220px] align-bottom'
+            disableUnderline
           />{' '}
         </>
       ) : othersCount > 0 ? (
@@ -426,15 +453,22 @@ function NotificationEmptyState({
   activeTab: NotificationsTab;
 }): JSX.Element {
   const mentions = activeTab === 'mentions';
+  const tweets = activeTab === 'tweets';
 
   return (
     <div className='mx-auto flex max-w-sm flex-col px-8 py-10'>
       <h2 className='text-[31px] font-extrabold leading-9'>
-        {mentions ? 'Join the conversation' : 'Nothing to see here - yet'}
+        {mentions
+          ? 'Join the conversation'
+          : tweets
+          ? 'No Tweet notifications yet'
+          : 'Nothing to see here - yet'}
       </h2>
       <p className='mt-2 text-[15px] text-light-secondary dark:text-dark-secondary'>
         {mentions
           ? "When someone mentions you, you'll find it here."
+          : tweets
+          ? "When accounts you've turned on notifications for Tweet, you'll find them here."
           : 'From likes to Retweets and a whole lot more, this is where all the action happens.'}
       </p>
     </div>
@@ -473,7 +507,10 @@ function ActivityNotificationRow({
         <GroupedNotificationText group={group} />
         {text && (
           <Link href={targetHref}>
-            <a className='custom-underline mt-3 block text-light-secondary dark:text-dark-secondary'>
+            <a
+              className='mt-3 block rounded-sm text-light-secondary outline-none
+                         focus-visible:ring-2 focus-visible:ring-main-accent/80 dark:text-dark-secondary'
+            >
               <TweetText
                 className='text-[15px] leading-5'
                 text={text}
@@ -494,19 +531,38 @@ function MentionContext({
   reason: NotificationReason;
   viewerUsername: string | undefined;
 }): JSX.Element | null {
+  const { hideBskySocialSuffix } = useTheme();
+  const displayViewerUsername = formatAtprotoDisplayIdentifier(viewerUsername, {
+    hideBskySocialSuffix
+  });
+
   if (reason === 'reply')
     return (
       <p className='text-[15px] leading-5 text-light-secondary dark:text-dark-secondary'>
         Replying to{' '}
         {viewerUsername ? (
           <Link href={getUserPath(viewerUsername)}>
-            <a className='custom-underline text-main-accent'>
-              @{viewerUsername}
+            <a
+              className='rounded-sm text-main-accent outline-none
+                         focus-visible:ring-2 focus-visible:ring-main-accent/80'
+            >
+              {displayViewerUsername}
             </a>
           </Link>
         ) : (
           'you'
         )}
+      </p>
+    );
+
+  if (reason === 'subscribed-post')
+    return (
+      <p className='flex items-center gap-1 text-[15px] leading-5 text-light-secondary dark:text-dark-secondary'>
+        <CustomIcon
+          className='h-4 w-4 text-main-accent'
+          iconName='TwitterNotificationsIcon'
+        />
+        Tweeted
       </p>
     );
 
@@ -527,26 +583,25 @@ function MentionActionButton({
   openReplyModal: () => void;
 }): JSX.Element {
   const { userBookmarks } = useAuth();
-  const [optimisticLikes, setOptimisticLikes] = useState(
-    tweet?.userLikes ?? []
-  );
-  const [optimisticRetweets, setOptimisticRetweets] = useState(
-    tweet?.userRetweets ?? []
-  );
+  const {
+    optimisticIds: optimisticLikes,
+    active: liked,
+    applyOptimisticActive: applyOptimisticLike,
+    rollbackOptimisticIds: rollbackOptimisticLikes
+  } = useOptimisticReactionIds(tweet?.userLikes, viewerId);
+  const {
+    optimisticIds: optimisticRetweets,
+    active: retweeted,
+    applyOptimisticActive: applyOptimisticRetweet,
+    rollbackOptimisticIds: rollbackOptimisticRetweets
+  } = useOptimisticReactionIds(tweet?.userRetweets, viewerId);
   const [optimisticBookmarked, setOptimisticBookmarked] = useState(
     !!(tweet && userBookmarks?.some(({ id }) => id === tweet.id))
   );
   const [updatingLike, setUpdatingLike] = useState(false);
   const [updatingRetweet, setUpdatingRetweet] = useState(false);
   const [updatingBookmark, setUpdatingBookmark] = useState(false);
-
-  useEffect(() => {
-    setOptimisticLikes(tweet?.userLikes ?? []);
-  }, [tweet?.userLikes]);
-
-  useEffect(() => {
-    setOptimisticRetweets(tweet?.userRetweets ?? []);
-  }, [tweet?.userRetweets]);
+  const [likeEffectKey, setLikeEffectKey] = useState(0);
 
   const bookmarked = !!(
     tweet && userBookmarks?.some(({ id }) => id === tweet.id)
@@ -556,12 +611,6 @@ function MentionActionButton({
     setOptimisticBookmarked(bookmarked);
   }, [bookmarked]);
 
-  const liked = !!(tweet && viewerId && optimisticLikes.includes(viewerId));
-  const retweeted = !!(
-    tweet &&
-    viewerId &&
-    optimisticRetweets.includes(viewerId)
-  );
   const handleLike = useCallback(async (): Promise<void> => {
     if (!tweet || !viewerId || updatingLike) return;
 
@@ -569,21 +618,25 @@ function MentionActionButton({
     const previousLikes = optimisticLikes;
 
     setUpdatingLike(true);
-    setOptimisticLikes((currentLikes) =>
-      shouldLike
-        ? [viewerId, ...currentLikes.filter((id) => id !== viewerId)]
-        : currentLikes.filter((id) => id !== viewerId)
-    );
+    applyOptimisticLike(shouldLike);
 
     try {
       await manageLike(shouldLike ? 'like' : 'unlike', viewerId, tweet.id)();
     } catch {
-      setOptimisticLikes(previousLikes);
+      rollbackOptimisticLikes(previousLikes);
       toast.error('Tweet could not be liked');
     } finally {
       setUpdatingLike(false);
     }
-  }, [liked, optimisticLikes, tweet, updatingLike, viewerId]);
+  }, [
+    applyOptimisticLike,
+    liked,
+    optimisticLikes,
+    rollbackOptimisticLikes,
+    tweet,
+    updatingLike,
+    viewerId
+  ]);
   const handleRetweet = useCallback(async (): Promise<void> => {
     if (!tweet || !viewerId || updatingRetweet) return;
 
@@ -591,11 +644,7 @@ function MentionActionButton({
     const previousRetweets = optimisticRetweets;
 
     setUpdatingRetweet(true);
-    setOptimisticRetweets((currentRetweets) =>
-      shouldRetweet
-        ? [viewerId, ...currentRetweets.filter((id) => id !== viewerId)]
-        : currentRetweets.filter((id) => id !== viewerId)
-    );
+    applyOptimisticRetweet(shouldRetweet);
 
     try {
       await manageRetweet(
@@ -604,12 +653,20 @@ function MentionActionButton({
         tweet.id
       )();
     } catch {
-      setOptimisticRetweets(previousRetweets);
+      rollbackOptimisticRetweets(previousRetweets);
       toast.error('Tweet could not be retweeted');
     } finally {
       setUpdatingRetweet(false);
     }
-  }, [optimisticRetweets, retweeted, tweet, updatingRetweet, viewerId]);
+  }, [
+    applyOptimisticRetweet,
+    optimisticRetweets,
+    retweeted,
+    rollbackOptimisticRetweets,
+    tweet,
+    updatingRetweet,
+    viewerId
+  ]);
   const handleBookmark = useCallback(async (): Promise<void> => {
     if (!tweet || !viewerId || updatingBookmark) return;
 
@@ -655,30 +712,32 @@ function MentionActionButton({
       : action.kind === 'bookmark' && optimisticBookmarked
       ? 'TwitterBookmarksFilledIcon'
       : action.iconName;
-  const onClick =
-    action.kind === 'reply'
-      ? preventBubbling(() => {
-          if (tweet && viewerId) openReplyModal();
-        })
-      : action.kind === 'like'
-      ? preventBubbling(() => {
-          void handleLike();
-        })
-      : action.kind === 'bookmark'
-      ? preventBubbling(() => {
-          void handleBookmark();
-        })
-      : undefined;
+  const actionEffect = action.kind === 'like' ? action.kind : null;
   const disabled =
     !tweet ||
     (action.kind === 'like' && updatingLike) ||
     (action.kind === 'bookmark' && updatingBookmark);
 
+  const handleClick = (): void => {
+    if (action.kind === 'reply') {
+      if (tweet && viewerId) openReplyModal();
+      return;
+    }
+
+    if (action.kind === 'like') {
+      if (!liked) setLikeEffectKey((currentKey) => currentKey + 1);
+      void handleLike();
+      return;
+    }
+
+    if (action.kind === 'bookmark') void handleBookmark();
+  };
+
   if (action.kind === 'retweet')
     return (
       <TweetRetweetMenu
         className={cn(
-          `dark-bg-tab -ml-2 flex h-9 min-w-[36px] items-center gap-2 rounded-full p-0
+          `dark-bg-tab -ml-2 flex h-9 min-w-[36px] items-center gap-1 rounded-full p-0
            text-light-secondary transition dark:text-dark-secondary`,
           action.hoverClassName,
           active && action.activeClassName
@@ -688,7 +747,7 @@ function MentionActionButton({
         tip={retweeted ? 'Undo Retweet' : action.label}
         move={0}
         stats={stats}
-        statsContainerClassName='ml-0'
+        statsContainerClassName='tweet-action-count -ml-1.5'
         iconSizeClassName='h-[18.75px] w-[18.75px]'
         onRetweet={handleRetweet}
         retweeted={retweeted}
@@ -700,7 +759,7 @@ function MentionActionButton({
   return (
     <Button
       className={cn(
-        `dark-bg-tab -ml-2 flex h-9 min-w-[36px] items-center gap-2 rounded-full p-0
+        `dark-bg-tab -ml-2 flex h-9 min-w-[36px] items-center gap-1 rounded-full p-0
          text-light-secondary transition dark:text-dark-secondary`,
         action.hoverClassName,
         active && action.activeClassName
@@ -719,15 +778,27 @@ function MentionActionButton({
           ? 'Remove from Bookmarks'
           : action.label
       }
-      onClick={onClick}
+      onClick={preventBubbling(handleClick)}
       disabled={disabled}
     >
-      <CustomIcon
-        className='h-[18.75px] w-[18.75px] shrink-0'
-        iconName={iconName}
-      />
+      <span className='tweet-action-icon-shell tweet-action-icon-shell--normal'>
+        {actionEffect ? (
+          <TweetActionEffect
+            kind={actionEffect}
+            active={action.kind === 'like' && liked}
+            playKey={likeEffectKey}
+          >
+            <CustomIcon
+              className='h-[18.75px] w-[18.75px]'
+              iconName={iconName}
+            />
+          </TweetActionEffect>
+        ) : (
+          <CustomIcon className='h-[18.75px] w-[18.75px]' iconName={iconName} />
+        )}
+      </span>
       {!!stats && (
-        <span className='min-w-[10px] text-left text-[13px] leading-4'>
+        <span className='tweet-action-count-static -ml-1.5 min-w-[10px] text-left text-[13px] leading-4'>
           {formatNumber(stats)}
         </span>
       )}
@@ -762,7 +833,7 @@ function TweetNotificationRow({
     <>
       <Modal
         className='flex items-start justify-center'
-        modalClassName='bg-main-background rounded-2xl max-w-xl w-full my-8 overflow-hidden'
+        modalClassName='bg-main-background rounded-2xl max-w-xl w-full my-8'
         open={replyOpen}
         closeModal={closeReplyModal}
       >
@@ -794,6 +865,7 @@ function TweetNotificationRow({
                     verified={user.verified}
                     iconClassName='h-4 w-4'
                     className='min-w-0 text-light-primary dark:text-dark-primary'
+                    disableUnderline
                   />
                   <UserUsername
                     username={user.username}
@@ -801,7 +873,10 @@ function TweetNotificationRow({
                   />
                   <span>·</span>
                   <Link href={targetHref}>
-                    <a className='custom-underline shrink-0'>
+                    <a
+                      className='shrink-0 rounded-sm outline-none
+                                 focus-visible:ring-2 focus-visible:ring-main-accent/80'
+                    >
                       <time>{formatDate(createdAt, 'tweet')}</time>
                     </a>
                   </Link>
@@ -887,13 +962,13 @@ export default function Notifications(): JSX.Element {
   const [loadingMore, setLoadingMore] = useState(false);
   const seenMarkedTabs = useMemo(() => new Set<NotificationsTab>(), []);
   const activeTab = getNotificationsTab(asPath);
-  const mentionsOnly = activeTab === 'mentions';
+  const notificationReasons = getNotificationReasonsForTab(activeTab);
 
   const { data, error } = useSWR<NotificationsPage, Error>(
     ['notifications', activeTab],
     () =>
       listNotificationsPage(undefined, {
-        mentionsOnly,
+        reasons: notificationReasons,
         limit: NOTIFICATIONS_PAGE_SIZE
       }),
     {
@@ -936,7 +1011,7 @@ export default function Notifications(): JSX.Element {
 
     try {
       const nextPage = await listNotificationsPage(cursor, {
-        mentionsOnly,
+        reasons: notificationReasons,
         limit: NOTIFICATIONS_PAGE_SIZE
       });
 
@@ -962,8 +1037,10 @@ export default function Notifications(): JSX.Element {
     <MainContainer>
       <SEO
         title={
-          mentionsOnly
+          activeTab === 'mentions'
             ? 'Mentions / Not Twitter'
+            : activeTab === 'tweets'
+            ? 'Tweets / Not Twitter'
             : 'Notifications / Not Twitter'
         }
       />

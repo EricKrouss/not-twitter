@@ -1,6 +1,7 @@
 import { useRouter } from 'next/router';
 import { motion } from 'framer-motion';
 import { useAuth } from '@lib/context/auth-context';
+import { useTheme } from '@lib/context/theme-context';
 import { useUser } from '@lib/context/user-context';
 import { formatAtprotoDisplayIdentifier } from '@lib/atproto/identity';
 import { isProfileBirthdayToday } from '@lib/profile-birthday';
@@ -37,6 +38,7 @@ function canViewerMessageUser(
 
 export function UserHomeLayout({ children }: LayoutProps): JSX.Element {
   const { user, isAdmin } = useAuth();
+  const { hideBskySocialSuffix } = useTheme();
   const { user: userData, loading } = useUser();
 
   const {
@@ -45,7 +47,13 @@ export function UserHomeLayout({ children }: LayoutProps): JSX.Element {
     query: { id }
   } = useRouter();
   const routeId = (Array.isArray(id) ? id[0] : id) ?? getProfileRouteId(asPath);
-  const routeLabel = formatAtprotoDisplayIdentifier(routeId);
+  const routeLabel = formatAtprotoDisplayIdentifier(routeId, {
+    hideBskySocialSuffix
+  });
+  const profileTitleUsername = formatAtprotoDisplayIdentifier(
+    userData?.username,
+    { hideBskySocialSuffix }
+  );
 
   const coverData = userData?.coverPhotoURL
     ? { src: userData.coverPhotoURL, alt: userData.name }
@@ -82,7 +90,7 @@ export function UserHomeLayout({ children }: LayoutProps): JSX.Element {
     <>
       {userData && (
         <SEO
-          title={`${`${userData.name} (@${userData.username})`} / Not Twitter`}
+          title={`${`${userData.name} (${profileTitleUsername})`} / Not Twitter`}
         />
       )}
       {showBirthdayBalloons && <UserBirthdayBalloons />}
@@ -112,7 +120,7 @@ export function UserHomeLayout({ children }: LayoutProps): JSX.Element {
         ) : (
           <>
             <UserHomeCover coverData={coverData} />
-            <div className='relative flex flex-col gap-3 px-4 py-3'>
+            <div className='relative flex flex-col gap-2 px-4 py-3'>
               <div className='flex justify-between'>
                 <UserHomeAvatar profileData={profileData} />
                 {isOwner ? (
@@ -185,12 +193,16 @@ function BlockedProfileState({
   blockedBy: boolean;
   blockedByListName: string | null;
 }): JSX.Element {
-  const title = blockedBy ? 'You’re blocked' : `You blocked @${username}`;
+  const { hideBskySocialSuffix } = useTheme();
+  const displayUsername = formatAtprotoDisplayIdentifier(username, {
+    hideBskySocialSuffix
+  });
+  const title = blockedBy ? 'You’re blocked' : `You blocked ${displayUsername}`;
   const description = blockedBy
-    ? `You can’t follow or see @${username}’s Tweets.`
+    ? `You can’t follow or see ${displayUsername}’s Tweets.`
     : blockedByListName
     ? `This account is blocked by ${blockedByListName}.`
-    : `You can view @${username}’s Tweets, but they still can’t follow or message you.`;
+    : `You can’t follow or see ${displayUsername}’s Tweets.`;
 
   return (
     <div

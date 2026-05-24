@@ -4,9 +4,15 @@ import { AnimatePresence, motion } from 'framer-motion';
 import cn from 'clsx';
 import { toast } from 'react-hot-toast';
 import { RichText } from '@atproto/api';
-import { tweetsCollection } from '@lib/atproto/collections';
-import { addDoc, getDoc, serverTimestamp } from '@lib/atproto/store';
-import { getTweetPath, getUserPath } from '@lib/routes';
+import { tweetsCollection, usersCollection } from '@lib/atproto/collections';
+import { addDoc, doc, getDoc, serverTimestamp } from '@lib/atproto/store';
+import {
+  canonicalizeBskyPostLinksInText,
+  getBskyPostLinkFromText,
+  getTweetPath,
+  getUserPath,
+  removeBskyPostLinkFromText
+} from '@lib/routes';
 import {
   manageReply,
   uploadImages,
@@ -25,6 +31,8 @@ import { getImagesData } from '@lib/validation';
 import { createYouTubeCardFromText } from '@lib/youtube';
 import { UserAvatar } from '@components/user/user-avatar';
 import { TweetEmbed } from '@components/tweet/tweet-embed';
+import { Button } from '@components/ui/button';
+import { HeroIcon } from '@components/ui/hero-icon';
 import { InputForm, fromTop } from './input-form';
 import { ImagePreview } from './image-preview';
 import { InputOptions } from './input-options';
@@ -36,7 +44,6 @@ import type { User } from '@lib/types/user';
 import type {
   EmbeddedTweet,
   Tweet,
-  TweetAudience,
   TweetCard,
   TweetReplySetting,
   TweetWithUser
@@ -162,10 +169,14 @@ export function Input({
   const [selectedGifCard, setSelectedGifCard] = useState<TweetCard | null>(
     null
   );
+  const [linkedQuoteTweet, setLinkedQuoteTweet] =
+    useState<TweetWithUser | null>(null);
+  const [linkedQuoteTweetId, setLinkedQuoteTweetId] = useState<string | null>(
+    null
+  );
   const [inputValue, setInputValue] = useState('');
   const [loading, setLoading] = useState(false);
   const [visited, setVisited] = useState(false);
-  const [audience, setAudience] = useState<TweetAudience>('everyone');
   const [replySetting, setReplySetting] =
     useState<TweetReplySetting>('everyone');
 
@@ -176,6 +187,21 @@ export function Input({
   const youtubeCard = useMemo(
     () => createYouTubeCardFromText(inputValue),
     [inputValue]
+  );
+  const detectedPostLink = useMemo(
+    () => (quoteTweet ? null : getBskyPostLinkFromText(inputValue)),
+    [inputValue, quoteTweet]
+  );
+  const linkedQuoteIsCurrent =
+    !!linkedQuoteTweet && linkedQuoteTweetId === detectedPostLink?.tweetId;
+  const activeQuoteTweet =
+    quoteTweet ?? (linkedQuoteIsCurrent ? linkedQuoteTweet : null);
+  const submittedText = useMemo(
+    () =>
+      linkedQuoteIsCurrent && detectedPostLink
+        ? removeBskyPostLinkFromText(inputValue, detectedPostLink)
+        : canonicalizeBskyPostLinksInText(inputValue),
+    [detectedPostLink, inputValue, linkedQuoteIsCurrent]
   );
 
   const previewCount = imagesPreview.length;
@@ -199,6 +225,44 @@ export function Input({
     requestAnimationFrame(() => inputRef.current?.focus());
   }, [focusSignal]);
 
+  useEffect(() => {
+    if (quoteTweet || !detectedPostLink) {
+      setLinkedQuoteTweet(null);
+      setLinkedQuoteTweetId(null);
+      return;
+    }
+
+    if (linkedQuoteTweetId === detectedPostLink.tweetId) return;
+
+    let canceled = false;
+    const tweetId = detectedPostLink.tweetId;
+
+    setLinkedQuoteTweetId(tweetId);
+    setLinkedQuoteTweet(null);
+
+    void (async (): Promise<void> => {
+      const tweetSnapshot = await getDoc(doc(tweetsCollection, tweetId));
+
+      if (!tweetSnapshot.exists()) return;
+
+      const tweet = tweetSnapshot.data();
+      const userSnapshot = await getDoc(doc(usersCollection, tweet.createdBy));
+
+      if (!userSnapshot.exists() || canceled) return;
+
+      setLinkedQuoteTweet({
+        ...tweet,
+        user: userSnapshot.data()
+      });
+    })().catch(() => {
+      if (!canceled) setLinkedQuoteTweet(null);
+    });
+
+    return () => {
+      canceled = true;
+    };
+  }, [detectedPostLink, linkedQuoteTweetId, quoteTweet]);
+
   const sendTweet = async (): Promise<void> => {
     inputRef.current?.blur();
 
@@ -208,13 +272,15 @@ export function Input({
       const isReplying = reply ?? replyModal;
 
       const userId = user?.id as string;
-      const quotedTweet = quoteTweet ? getQuotedTweetPreview(quoteTweet) : null;
+      const quotedTweet = activeQuoteTweet
+        ? getQuotedTweetPreview(activeQuoteTweet)
+        : null;
       const uploadedImages = selectedGifCard
         ? imagesPreview
         : await uploadImages(userId, selectedImages);
 
       const tweetData: WithFieldValue<TweetDraft> = {
-        text: inputValue.trim() || null,
+        text: submittedText || null,
         langs: [],
         parent: isReplying && parent ? parent : null,
         images: uploadedImages,
@@ -230,8 +296,8 @@ export function Input({
         userQuotes: 0,
         bookmarkCount: 0,
         replySetting: isReplying ? undefined : replySetting,
-        quoteTarget: quoteTweet
-          ? { id: quoteTweet.id, createdBy: quoteTweet.createdBy }
+        quoteTarget: activeQuoteTweet
+          ? { id: activeQuoteTweet.id, createdBy: activeQuoteTweet.createdBy }
           : undefined
       };
 
@@ -354,7 +420,6 @@ export function Input({
   const discardTweet = (): void => {
     setInputValue('');
     setVisited(false);
-    setAudience('everyone');
     setReplySetting('everyone');
     cleanImage();
 
@@ -465,23 +530,25 @@ export function Input({
   const formId = useId();
 
   const inputLimit = BLUESKY_POST_GRAPHEME_LIMIT;
-  const quotedTweetPreview = quoteTweet
-    ? getQuotedTweetPreview(quoteTweet)
+  const quotedTweetPreview = activeQuoteTweet
+    ? getQuotedTweetPreview(activeQuoteTweet)
     : null;
   const shouldCompactQuotedTweetPreview =
     isUploadingImages || !!activeExternalCard;
+  const showModalHeader = !!modal && !replyModal && !!closeModal;
 
   const inputLength = useMemo(
     () =>
-      new RichText({ text: inputValue }, { cleanNewlines: true })
+      new RichText({ text: submittedText }, { cleanNewlines: true })
         .graphemeLength,
-    [inputValue]
+    [submittedText]
   );
-  const isValidInput = !!inputValue.trim().length;
+  const isValidInput = !!submittedText.length;
   const isCharLimitExceeded = inputLength > inputLimit;
 
   const isValidTweet =
-    !isCharLimitExceeded && (isValidInput || isUploadingImages || !!quoteTweet);
+    !isCharLimitExceeded &&
+    (isValidInput || isUploadingImages || !!activeQuoteTweet);
 
   return (
     <form
@@ -494,6 +561,31 @@ export function Input({
     >
       {loading && (
         <motion.i className='h-1 animate-pulse bg-main-accent' {...variants} />
+      )}
+      {showModalHeader && (
+        <header
+          className='flex h-[53px] shrink-0 items-center justify-between border-b
+                     border-light-border px-2 dark:border-dark-border'
+        >
+          <Button
+            className='dark-bg-tab group relative h-9 w-9 rounded-full p-0
+                       hover:bg-light-primary/10 active:bg-light-primary/20
+                       dark:hover:bg-dark-primary/10 dark:active:bg-dark-primary/20'
+            aria-label='Close'
+            onClick={closeModal}
+          >
+            <HeroIcon className='h-5 w-5' iconName='XMarkIcon' />
+          </Button>
+          {!quoteTweet && (
+            <Button
+              className='accent-tab accent-bg-tab px-4 py-2 text-[15px] font-bold
+                         leading-5 text-main-accent hover:bg-main-accent/10
+                         active:bg-main-accent/20'
+            >
+              Unsent Tweets
+            </Button>
+          )}
+        </header>
       )}
       {children}
       {reply && visited && (
@@ -519,7 +611,9 @@ export function Input({
             ? 'pt-3 pb-1'
             : replyModal
             ? 'pt-0'
-            : 'border-b-2 border-light-border dark:border-dark-border',
+            : modal
+            ? 'pb-4'
+            : 'border-b border-light-border dark:border-dark-border',
           compactReply && 'pr-5',
           (disabled || loading) && 'pointer-events-none opacity-50'
         )}
@@ -535,18 +629,16 @@ export function Input({
           <InputForm
             modal={modal}
             reply={reply}
-            quote={!!quoteTweet}
+            quote={!!activeQuoteTweet}
             formId={formId}
             visited={visited}
             loading={loading}
             inputRef={inputRef}
             replyModal={replyModal}
             inputValue={inputValue}
-            audience={audience}
             replySetting={replySetting}
             isValidTweet={isValidTweet}
             isUploadingImages={isUploadingImages}
-            setAudience={setAudience}
             setReplySetting={setReplySetting}
             sendTweet={sendTweet}
             handleHashtagSelect={handleHashtagSelect}

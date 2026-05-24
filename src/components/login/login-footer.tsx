@@ -10,7 +10,7 @@ export function LoginFooter(): JSX.Element {
   return (
     <footer
       className='flex flex-wrap items-center justify-center gap-x-4 gap-y-2 px-4 py-3
-                 text-[13px] leading-5 text-light-secondary dark:text-dark-secondary'
+                 text-[13px] leading-5 text-main-secondary'
     >
       {footerLinks.map(({ label, href }) =>
         href.startsWith('http') ? (

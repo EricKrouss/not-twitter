@@ -4,7 +4,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { toast } from 'react-hot-toast';
 import { preventBubbling } from '@lib/utils';
 import { siteURL } from '@lib/env';
-import { getTweetPath } from '@lib/routes';
+import { getBskyTweetUrl, getTweetPath } from '@lib/routes';
 import { Button } from '@components/ui/button';
 import { HeroIcon } from '@components/ui/hero-icon';
 import { CustomIcon } from '@components/ui/custom-icon';
@@ -24,9 +24,11 @@ export function TweetShare({
 }: TweetShareProps): JSX.Element {
   const handleCopy = (closeMenu: () => void) => async (): Promise<void> => {
     closeMenu();
-    await navigator.clipboard.writeText(
-      `${siteURL}${getTweetPath(tweetId, username)}`
-    );
+    const url =
+      getBskyTweetUrl(tweetId, username) ??
+      `${siteURL}${getTweetPath(tweetId, username)}`;
+
+    await navigator.clipboard.writeText(url);
     toast.success('Copied to clipboard');
   };
 

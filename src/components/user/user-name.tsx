@@ -10,6 +10,7 @@ type UserNameProps = {
   username?: string;
   className?: string;
   iconClassName?: string;
+  disableUnderline?: boolean;
 };
 
 export function UserName({
@@ -18,7 +19,8 @@ export function UserName({
   verified,
   username,
   className,
-  iconClassName
+  iconClassName,
+  disableUnderline
 }: UserNameProps): JSX.Element {
   const CustomTag = tag ? tag : 'p';
 
@@ -28,7 +30,12 @@ export function UserName({
         className={cn(
           `inline-flex min-w-0 max-w-full items-center gap-1 truncate
            align-bottom font-bold leading-[inherit]`,
-          username ? 'custom-underline' : 'pointer-events-none',
+          username
+            ? disableUnderline
+              ? `outline-none focus-visible:rounded-sm focus-visible:ring-2
+                 focus-visible:ring-main-accent/80`
+              : 'custom-underline'
+            : 'pointer-events-none',
           className
         )}
         tabIndex={username ? 0 : -1}

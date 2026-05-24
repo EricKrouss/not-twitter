@@ -14,8 +14,19 @@ export function UserHomeCover({ coverData }: UserHomeCoverProps): JSX.Element {
 
   return (
     <div className='mt-0.5 h-36 xs:h-48 sm:h-52'>
-      <Modal open={open} closeModal={closeModal}>
-        <ImageModal imageData={coverData as ImageData} previewCount={1} />
+      <Modal
+        className='!overflow-hidden !p-0'
+        modalClassName='h-screen w-screen'
+        open={open}
+        closeModal={closeModal}
+        closePanelOnClick
+      >
+        <ImageModal
+          imageData={coverData as ImageData}
+          previewCount={1}
+          profileMediaKind='cover'
+          closeModal={closeModal}
+        />
       </Modal>
       {coverData ? (
         <Button

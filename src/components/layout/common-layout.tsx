@@ -7,7 +7,10 @@ import { Suggestions } from '@components/aside/suggestions';
 import { Placeholder } from '@components/common/placeholder';
 import { SearchFilters } from '@components/explore/search-filters';
 import { MainLayout } from './main-layout';
-import { LoggedOutTwitterLayout } from './logged-out-twitter-layout';
+import {
+  LoggedOutProfileLayout,
+  LoggedOutTwitterLayout
+} from './logged-out-twitter-layout';
 import type { ReactNode } from 'react';
 
 export type LayoutProps = {
@@ -47,20 +50,16 @@ export function UserLayout({ children }: LayoutProps): JSX.Element {
 }
 
 export function PublicUserLayout({ children }: LayoutProps): JSX.Element {
-  const { user, loading } = useAuth();
-
-  if (loading) return <Placeholder />;
+  const { user } = useAuth();
 
   return user ? (
     <MainLayout>
       <UserLayout>{children}</UserLayout>
     </MainLayout>
   ) : (
-    <LoggedOutTwitterLayout>
-      <WindowContextProvider>
-        <div className='mx-auto flex w-full max-w-xl'>{children}</div>
-      </WindowContextProvider>
-    </LoggedOutTwitterLayout>
+    <LoggedOutProfileLayout>
+      <WindowContextProvider>{children}</WindowContextProvider>
+    </LoggedOutProfileLayout>
   );
 }
 

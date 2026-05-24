@@ -3,6 +3,7 @@ import '@styles/globals.scss';
 import { AuthContextProvider } from '@lib/context/auth-context';
 import { ThemeContextProvider } from '@lib/context/theme-context';
 import { AppHead } from '@components/common/app-head';
+import { ServerConnectionModal } from '@components/modal/server-connection-modal';
 import type { ReactElement, ReactNode } from 'react';
 import type { NextPage } from 'next';
 import type { AppProps } from 'next/app';
@@ -27,6 +28,7 @@ export default function App({
       <AuthContextProvider>
         <ThemeContextProvider>
           {getLayout(<Component {...pageProps} />)}
+          <ServerConnectionModal />
         </ThemeContextProvider>
       </AuthContextProvider>
     </>

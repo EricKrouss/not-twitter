@@ -30,7 +30,9 @@ import {
   type ChatMessage
 } from '@lib/atproto/backend';
 import { useSearchUsers } from '@lib/api/search';
+import { formatAtprotoDisplayIdentifier } from '@lib/atproto/identity';
 import { useAuth } from '@lib/context/auth-context';
+import { useTheme } from '@lib/context/theme-context';
 import { formatDate } from '@lib/date';
 import { DEFAULT_PROFILE_PHOTO_URL } from '@lib/default-images';
 import { useModal } from '@lib/hooks/useModal';
@@ -66,9 +68,16 @@ function getConvoTitle(convo: ChatConvo): string {
   return convo.members.map(({ name }) => name).join(', ');
 }
 
-function getConvoHandle(convo: ChatConvo): string {
+function getConvoHandle(
+  convo: ChatConvo,
+  hideBskySocialSuffix = false
+): string {
   if (!convo.members.length) return '';
-  return convo.members.map(({ username }) => `@${username}`).join(', ');
+  return convo.members
+    .map((member) =>
+      formatAtprotoDisplayIdentifier(member.username, { hideBskySocialSuffix })
+    )
+    .join(', ');
 }
 
 function getMessagePreview(message: ChatMessage | null): string {
@@ -316,6 +325,11 @@ function NewMessageUserRow({
   selected,
   onSelect
 }: NewMessageUserRowProps): JSX.Element {
+  const { hideBskySocialSuffix } = useTheme();
+  const displayUsername = formatAtprotoDisplayIdentifier(user.username, {
+    hideBskySocialSuffix
+  });
+
   return (
     <Button
       className={cn(
@@ -338,7 +352,7 @@ function NewMessageUserRow({
             )}
           </span>
           <span className='block truncate text-[15px] text-light-secondary dark:text-dark-secondary'>
-            @{user.username}
+            {displayUsername}
           </span>
         </span>
       </span>
@@ -587,6 +601,8 @@ function MessageRequestsPanel({
   onLoadMore,
   onOpenSettings
 }: MessageRequestsPanelProps): JSX.Element {
+  const { hideBskySocialSuffix } = useTheme();
+
   return (
     <section className='flex min-h-0 flex-1 flex-col'>
       <header className='flex h-[53px] shrink-0 items-center justify-between px-3'>
@@ -668,7 +684,7 @@ function MessageRequestsPanel({
                         )}
                       </div>
                       <p className='truncate text-[15px] text-light-secondary dark:text-dark-secondary'>
-                        {getConvoHandle(convo)}
+                        {getConvoHandle(convo, hideBskySocialSuffix)}
                       </p>
                       <p className='mt-0.5 truncate text-[15px] leading-5 text-light-secondary dark:text-dark-secondary'>
                         {getMessagePreview(convo.lastMessage)}
@@ -833,8 +849,13 @@ function ConversationRow({
   viewerId,
   onClick
 }: ConversationRowProps): JSX.Element {
+  const { hideBskySocialSuffix } = useTheme();
   const participant = convo.members[0];
   const preview = getMessagePreview(convo.lastMessage);
+  const participantUsername = formatAtprotoDisplayIdentifier(
+    participant?.username,
+    { hideBskySocialSuffix }
+  );
   const lastMessageIsMine = convo.lastMessage?.senderId === viewerId;
   const deliveryStatus = convo.lastMessage
     ? getMessageDeliveryStatus(convo.lastMessage, viewerId, lastMessageIsMine)
@@ -866,7 +887,7 @@ function ConversationRow({
           )}
           {participant && (
             <p className='min-w-0 truncate text-light-secondary dark:text-dark-secondary'>
-              @{participant.username}
+              {participantUsername}
             </p>
           )}
           {convo.lastMessage && (
@@ -994,8 +1015,11 @@ function ConversationInfo({
   onReportParticipant,
   onDeleteConversation
 }: ConversationInfoProps): JSX.Element {
+  const { hideBskySocialSuffix } = useTheme();
   const firstMember = convo.members[0];
-  const firstHandle = firstMember ? `@${firstMember.username}` : '';
+  const firstHandle = formatAtprotoDisplayIdentifier(firstMember?.username, {
+    hideBskySocialSuffix
+  });
 
   return (
     <div className='min-h-0 flex-1 overflow-y-auto'>
@@ -1017,7 +1041,9 @@ function ConversationInfo({
                 )}
               </div>
               <p className='truncate text-[15px] text-light-secondary dark:text-dark-secondary'>
-                @{member.username}
+                {formatAtprotoDisplayIdentifier(member.username, {
+                  hideBskySocialSuffix
+                })}
               </p>
             </div>
             <CustomIcon
@@ -1183,6 +1209,7 @@ function MessageReactionPicker({
 
 export default function Messages(): JSX.Element {
   const { user, signInWithBluesky } = useAuth();
+  const { hideBskySocialSuffix } = useTheme();
   const { isReady, query, replace } = useRouter();
   const [convos, setConvos] = useState<ChatConvo[]>([]);
   const [convoCursor, setConvoCursor] = useState<string | null>(null);
@@ -1292,11 +1319,11 @@ export default function Messages(): JSX.Element {
     if (!normalizedSearch) return convos;
 
     return convos.filter((convo) =>
-      `${getConvoTitle(convo)} ${getConvoHandle(convo)}`
+      `${getConvoTitle(convo)} ${getConvoHandle(convo, hideBskySocialSuffix)}`
         .toLowerCase()
         .includes(normalizedSearch)
     );
-  }, [convos, searchValue]);
+  }, [convos, hideBskySocialSuffix, searchValue]);
   const unreadTotal = useMemo(() => getUnreadTotal(convos), [convos]);
 
   useEffect(() => {
@@ -1959,7 +1986,7 @@ export default function Messages(): JSX.Element {
 
     try {
       await blockChatParticipant(firstMember.id);
-      toast.success(`Blocked @${firstMember.username}`);
+      toast.success(`Blocked ${firstMemberDisplayUsername}`);
     } catch (error) {
       toast.error(getErrorMessage(error));
     } finally {
@@ -1992,6 +2019,10 @@ export default function Messages(): JSX.Element {
 
   const showThread = !!activeConvoId;
   const firstMember = activeConvo?.members[0];
+  const firstMemberDisplayUsername = formatAtprotoDisplayIdentifier(
+    firstMember?.username,
+    { hideBskySocialSuffix }
+  );
 
   return (
     <>
@@ -2213,7 +2244,7 @@ export default function Messages(): JSX.Element {
                           )}
                         </div>
                         <p className='truncate text-sm text-light-secondary dark:text-dark-secondary'>
-                          {getConvoHandle(activeConvo)}
+                          {getConvoHandle(activeConvo, hideBskySocialSuffix)}
                         </p>
                       </div>
                     </div>

@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import cn from 'clsx';
 import { useAuth } from '@lib/context/auth-context';
 import { useLiveUpdates } from '@lib/context/live-updates-context';
 import { useWindow } from '@lib/context/window-context';
@@ -25,24 +26,40 @@ export function Sidebar(): JSX.Element {
   return (
     <header
       id='sidebar'
-      className='flex w-0 shrink-0 transition-opacity duration-200 xs:w-20 md:w-24
-                 lg:max-w-none xl:-mr-4 xl:w-full xl:max-w-xs xl:justify-end'
+      className={cn(
+        'flex shrink-0 transition-opacity duration-200',
+        isMobile
+          ? 'w-0'
+          : `w-20 md:w-24 lg:max-w-none xl:-mr-4 xl:w-72
+             xl:max-w-[288px] xl:justify-end`
+      )}
     >
       <Modal
         className='flex items-start justify-center'
-        modalClassName='bg-main-background rounded-2xl max-w-xl w-full mt-8 overflow-hidden'
+        modalClassName='mt-8 w-full max-w-[600px] overflow-hidden rounded-2xl bg-main-background'
         open={open}
         closeModal={closeModal}
       >
         <Input modal closeModal={closeModal} />
       </Modal>
       <div
-        className='fixed bottom-0 z-10 flex w-full flex-col justify-between border-t border-light-border 
-                   bg-main-background py-0 pb-[env(safe-area-inset-bottom)] dark:border-dark-border xs:top-0 xs:h-full xs:w-auto xs:border-0
-                   xs:bg-transparent xs:px-2 xs:py-3 xs:pt-2 md:px-4 xl:w-72'
+        className={cn(
+          `fixed bottom-0 z-10 flex w-full flex-col justify-between border-t
+           border-light-border bg-main-background py-0
+           pb-[env(safe-area-inset-bottom)] dark:border-dark-border`,
+          isMobile && 'left-0',
+          !isMobile &&
+            `top-0 h-full w-auto border-0 bg-transparent px-2 py-3 pt-2
+             md:px-4 xl:w-72`
+        )}
       >
-        <section className='flex flex-col justify-center gap-2 xs:items-center xl:items-stretch'>
-          <h1 className='hidden xs:flex'>
+        <section
+          className={cn(
+            'flex flex-col justify-center gap-2',
+            !isMobile && 'items-center xl:items-stretch'
+          )}
+        >
+          <h1 className={cn(isMobile ? 'hidden' : 'flex')}>
             <Link href='/home'>
               <a
                 className='custom-button main-tab text-accent-blue transition hover:bg-light-primary/10 
@@ -53,7 +70,12 @@ export function Sidebar(): JSX.Element {
               </a>
             </Link>
           </h1>
-          <nav className='flex items-center justify-around xs:flex-col xs:justify-center xl:block'>
+          <nav
+            className={cn(
+              'flex items-center justify-around',
+              !isMobile && 'flex-col justify-center xl:block'
+            )}
+          >
             {navLinks.map(({ ...linkData }) => (
               <SidebarLink
                 {...linkData}
@@ -77,9 +99,14 @@ export function Sidebar(): JSX.Element {
             {!isMobile && <MoreSettings />}
           </nav>
           <Button
-            className='accent-tab absolute right-4 flex h-[52px] -translate-y-[72px] items-center justify-center
-                       bg-main-accent text-center text-lg font-bold text-white outline-none transition-colors
-                       hover:bg-main-accent/90 active:bg-main-accent/75 xs:static xs:translate-y-0 xl:w-11/12'
+            className={cn(
+              `accent-tab flex h-[52px] items-center justify-center
+               bg-main-accent text-center text-lg font-bold text-white outline-none
+               transition-colors hover:bg-main-accent/90 active:bg-main-accent/75`,
+              isMobile
+                ? 'absolute right-4 -translate-y-[72px]'
+                : 'static translate-y-0 xl:w-11/12'
+            )}
             onClick={openModal}
           >
             <CustomIcon

@@ -1,5 +1,7 @@
 import { motion } from 'framer-motion';
+import { formatAtprotoDisplayIdentifier } from '@lib/atproto/identity';
 import { useSearchUsers } from '@lib/api/search';
+import { useTheme } from '@lib/context/theme-context';
 import { getHashtagSuggestions } from '@lib/hashtags';
 import { CustomIcon } from '@components/ui/custom-icon';
 import { HeroIcon } from '@components/ui/hero-icon';
@@ -81,6 +83,11 @@ function MentionSuggestionRow({
   user: User;
   onSelect: (username: string) => void;
 }): JSX.Element {
+  const { hideBskySocialSuffix } = useTheme();
+  const displayUsername = formatAtprotoDisplayIdentifier(user.username, {
+    hideBskySocialSuffix
+  });
+
   const selectMention = (event: MouseEvent<HTMLButtonElement>): void => {
     event.preventDefault();
     event.stopPropagation();
@@ -113,7 +120,7 @@ function MentionSuggestionRow({
           )}
         </span>
         <span className='block truncate text-sm text-light-secondary dark:text-dark-secondary'>
-          @{user.username}
+          {displayUsername}
         </span>
       </span>
     </button>

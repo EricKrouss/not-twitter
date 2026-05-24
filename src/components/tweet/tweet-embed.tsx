@@ -1,5 +1,8 @@
 import { useRouter } from 'next/router';
+import { useEffect, useState } from 'react';
 import cn from 'clsx';
+import { formatAtprotoDisplayIdentifier } from '@lib/atproto/identity';
+import { useTheme } from '@lib/context/theme-context';
 import { formatDate } from '@lib/date';
 import { getTweetPath } from '@lib/routes';
 import { createYouTubeCardFromText, getYouTubeVideoInfo } from '@lib/youtube';
@@ -9,6 +12,10 @@ import { HeroIcon } from '@components/ui/hero-icon';
 import { NextImage } from '@components/ui/next-image';
 import { TweetText } from './tweet-text';
 import { TweetTranslation } from './tweet-translation';
+import {
+  TweetTombstone,
+  isViewableTweetTombstoneKind
+} from './tweet-tombstone';
 import type {
   CSSProperties,
   KeyboardEvent,
@@ -16,7 +23,7 @@ import type {
   ReactNode
 } from 'react';
 import type { EmbeddedTweet, TweetCard } from '@lib/types/tweet';
-import type { ImageData } from '@lib/types/file';
+import type { ImageData, ImagesPreview } from '@lib/types/file';
 import type { YouTubeVideoInfo } from '@lib/youtube';
 
 type TweetEmbedProps = {
@@ -265,19 +272,10 @@ function TweetUnavailableCard({
 }: {
   quotedTweet: EmbeddedTweet;
 }): JSX.Element {
-  const message =
-    quotedTweet.unavailable === 'blocked'
-      ? 'This Tweet is from an account you blocked.'
-      : 'This Tweet is unavailable.';
+  if (quotedTweet.unavailable === 'blocked')
+    return <TweetTombstone kind='limited-visibility' className='mt-2' />;
 
-  return (
-    <div
-      className='mt-2 rounded-2xl border border-light-border px-3 py-4 text-[15px]
-                 text-light-secondary dark:border-dark-border dark:text-dark-secondary'
-    >
-      {message}
-    </div>
-  );
+  return <TweetTombstone kind='unavailable' className='mt-2' />;
 }
 
 function isVideoLikeMedia({ src, type }: ImageData): boolean {
@@ -290,39 +288,107 @@ function isGifLikeMedia({ src, type }: ImageData): boolean {
   return type === 'gif' || !!type?.includes('gif') || /\.gif($|\?)/i.test(src);
 }
 
+function getMediaThumbnailSrc(media: ImageData): string | null | undefined {
+  return isVideoLikeMedia(media) ? media.poster : media.poster ?? media.src;
+}
+
+function getQuotedCardPreviewMedia(
+  card: TweetCard | null
+): ImagesPreview | null {
+  if (!card?.image) return null;
+
+  return [
+    {
+      id: `${card.url}-quote-card-preview`,
+      src: card.image,
+      alt: card.title,
+      type: card.type === 'youtube' ? 'video' : 'image',
+      poster: card.image,
+      aspectRatio: null
+    }
+  ];
+}
+
+function getQuotedTweetPreviewMedia({
+  quotedTweet,
+  card,
+  hideMedia,
+  expanded
+}: {
+  quotedTweet: EmbeddedTweet;
+  card: TweetCard | null;
+  hideMedia?: boolean;
+  expanded?: boolean;
+}): ImagesPreview | null {
+  if (hideMedia || expanded) return null;
+
+  if (quotedTweet.images?.length) return quotedTweet.images;
+
+  return getQuotedCardPreviewMedia(card);
+}
+
+function getQuoteMediaGridClassName(
+  index: number,
+  previewCount: number
+): string {
+  if (previewCount === 1) return 'col-span-2 row-span-2';
+
+  if (previewCount === 2) return 'row-span-2';
+
+  if (previewCount === 3 && index === 0) return 'row-span-2';
+
+  return '';
+}
+
 function QuotedTweetMediaThumbnail({
   media
 }: {
-  media: ImageData;
+  media: ImagesPreview;
 }): JSX.Element {
-  const isVideo = isVideoLikeMedia(media);
-  const isGif = isGifLikeMedia(media);
-  const thumbnailSrc = isVideo ? media.poster : media.poster ?? media.src;
+  const visibleMedia = media.slice(0, 4);
+  const firstMedia = visibleMedia[0];
+  const previewCount = visibleMedia.length;
+  const isVideo = !!firstMedia && isVideoLikeMedia(firstMedia);
+  const isGif = !!firstMedia && isGifLikeMedia(firstMedia);
+  const showBadge = previewCount === 1 && (isVideo || isGif);
 
   return (
     <div
-      className='dark:bg-dark-hover relative h-[86px] w-[86px] shrink-0 overflow-hidden
-                 rounded-xl border border-light-border
-                 bg-light-line-reply dark:border-dark-border xs:h-[112px] xs:w-[112px]'
+      className='dark:bg-dark-hover relative grid h-[102px] w-[102px] shrink-0
+                 grid-cols-2 grid-rows-2 gap-0.5 overflow-hidden rounded-xl bg-light-line-reply'
     >
-      {thumbnailSrc ? (
-        <NextImage
-          className='absolute inset-0'
-          imgClassName='object-cover object-center'
-          layout='fill'
-          src={thumbnailSrc}
-          alt={media.alt}
-          useSkeleton
-        />
-      ) : (
-        <div className='flex h-full w-full items-center justify-center text-light-secondary dark:text-dark-secondary'>
-          <HeroIcon className='h-7 w-7' iconName='PlayIcon' solid />
-        </div>
-      )}
-      {(isVideo || isGif) && (
+      {visibleMedia.map((item, index) => {
+        const thumbnailSrc = getMediaThumbnailSrc(item);
+
+        return (
+          <div
+            className={cn(
+              'relative min-h-0 min-w-0 overflow-hidden',
+              getQuoteMediaGridClassName(index, previewCount)
+            )}
+            key={`${item.id}-${index}`}
+          >
+            {thumbnailSrc ? (
+              <NextImage
+                className='absolute inset-0'
+                imgClassName='object-cover object-center'
+                layout='fill'
+                src={thumbnailSrc}
+                alt={item.alt}
+                useSkeleton
+              />
+            ) : (
+              <div className='flex h-full w-full items-center justify-center text-light-secondary dark:text-dark-secondary'>
+                <HeroIcon className='h-7 w-7' iconName='PlayIcon' solid />
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {showBadge && (
         <span
-          className='absolute bottom-1.5 left-1.5 flex min-h-[20px] items-center rounded-sm
-                     bg-black/75 px-1.5 py-0.5 text-[11px] font-bold leading-4 text-white'
+          className='absolute bottom-2 left-2 flex h-5 items-center rounded
+                     bg-black/40 px-[5px] text-[13px] font-bold leading-4 text-white'
         >
           {isGif ? (
             'GIF'
@@ -335,15 +401,11 @@ function QuotedTweetMediaThumbnail({
   );
 }
 
-function getQuotedTweetMaxHeightClassName(expanded?: boolean): string {
-  return expanded ? '' : 'max-h-[168px]';
-}
-
 function getQuotedTweetCardClassName(
   viewTweet?: boolean,
   expanded?: boolean
 ): string {
-  return cn(viewTweet && 'mt-3', getQuotedTweetMaxHeightClassName(expanded));
+  return cn('!rounded-xl', viewTweet && 'mt-3', expanded && 'overflow-visible');
 }
 
 function getQuotedTweetTextClampStyle(
@@ -353,8 +415,60 @@ function getQuotedTweetTextClampStyle(
 
   return {
     ...quotedTweetPreviewTextStyleBase,
-    WebkitLineClamp: 5
+    WebkitLineClamp: 4
   };
+}
+
+function QuotedTweetHeader({
+  quotedTweet
+}: {
+  quotedTweet: EmbeddedTweet;
+}): JSX.Element {
+  const { hideBskySocialSuffix } = useTheme();
+  const authorUsername = formatAtprotoDisplayIdentifier(
+    quotedTweet.authorUsername,
+    { hideBskySocialSuffix }
+  );
+
+  return (
+    <div className='flex min-w-0 items-center gap-1 text-[15px] leading-5'>
+      {quotedTweet.authorAvatar && (
+        <NextImage
+          className='mr-1 shrink-0'
+          imgClassName='rounded-full'
+          width={20}
+          height={20}
+          src={quotedTweet.authorAvatar}
+          alt={quotedTweet.authorName ?? 'User avatar'}
+          useSkeleton
+        />
+      )}
+      <span className='truncate font-bold text-light-primary dark:text-dark-primary'>
+        {quotedTweet.authorName}
+      </span>
+      {quotedTweet.authorVerified && (
+        <CustomIcon
+          className='h-4 w-4 shrink-0'
+          iconName='TwitterVerifiedIcon'
+        />
+      )}
+      {quotedTweet.authorUsername && (
+        <span className='truncate text-light-secondary dark:text-dark-secondary'>
+          {authorUsername}
+        </span>
+      )}
+      {quotedTweet.createdAt && (
+        <>
+          <span className='shrink-0 text-light-secondary dark:text-dark-secondary'>
+            ·
+          </span>
+          <span className='shrink-0 text-light-secondary dark:text-dark-secondary'>
+            {formatDate(quotedTweet.createdAt, 'tweet')}
+          </span>
+        </>
+      )}
+    </div>
+  );
 }
 
 function QuotedTweetCard({
@@ -369,16 +483,39 @@ function QuotedTweetCard({
   expanded?: boolean;
 }): JSX.Element {
   const router = useRouter();
+  const [tombstoneRevealed, setTombstoneRevealed] = useState(false);
+
+  useEffect(() => {
+    setTombstoneRevealed(false);
+  }, [quotedTweet.id, quotedTweet.tombstone]);
 
   if (quotedTweet.unavailable)
     return <TweetUnavailableCard quotedTweet={quotedTweet} />;
+
+  if (quotedTweet.tombstone && !tombstoneRevealed)
+    return (
+      <TweetTombstone
+        kind={quotedTweet.tombstone}
+        className='mt-2'
+        onView={
+          isViewableTweetTombstoneKind(quotedTweet.tombstone)
+            ? (): void => setTombstoneRevealed(true)
+            : undefined
+        }
+      />
+    );
 
   const quotedTweetCard = hideMedia
     ? null
     : quotedTweet.card ?? createYouTubeCardFromText(quotedTweet.text);
   const expandPreview = expanded && !hideMedia;
-  const compactMedia = !expandPreview ? quotedTweet.images?.[0] : null;
-  const quotedTweetCardPreview = compactMedia ? null : quotedTweetCard;
+  const compactMedia = getQuotedTweetPreviewMedia({
+    quotedTweet,
+    card: quotedTweetCard,
+    hideMedia,
+    expanded: expandPreview
+  });
+  const quotedTweetCardPreview = expandPreview ? quotedTweetCard : null;
   const tweetHref = quotedTweet.id
     ? getTweetPath(quotedTweet.id, quotedTweet.authorUsername)
     : null;
@@ -396,67 +533,34 @@ function QuotedTweetCard({
     >
       <div
         className={cn(
-          'min-w-0 overflow-hidden px-3 py-2',
-          getQuotedTweetMaxHeightClassName(expandPreview)
+          'min-w-0 overflow-hidden px-3 py-3',
+          expandPreview && 'overflow-visible'
         )}
       >
-        <div className='flex min-w-0 items-center gap-1 text-[15px]'>
-          {quotedTweet.authorAvatar && (
-            <NextImage
-              className='mr-1 shrink-0'
-              imgClassName='rounded-full'
-              width={20}
-              height={20}
-              src={quotedTweet.authorAvatar}
-              alt={quotedTweet.authorName ?? 'User avatar'}
-              useSkeleton
-            />
-          )}
-          <span className='truncate font-bold text-light-primary dark:text-dark-primary'>
-            {quotedTweet.authorName}
-          </span>
-          {quotedTweet.authorVerified && (
-            <CustomIcon
-              className='h-4 w-4 shrink-0'
-              iconName='TwitterVerifiedIcon'
-            />
-          )}
-          {quotedTweet.authorUsername && (
-            <span className='truncate text-light-secondary dark:text-dark-secondary'>
-              @{quotedTweet.authorUsername}
-            </span>
-          )}
-          {quotedTweet.createdAt && (
-            <>
-              <span className='shrink-0 text-light-secondary dark:text-dark-secondary'>
-                ·
-              </span>
-              <span className='shrink-0 text-light-secondary dark:text-dark-secondary'>
-                {formatDate(quotedTweet.createdAt, 'tweet')}
-              </span>
-            </>
-          )}
-        </div>
         {compactMedia ? (
-          <div className='mt-2 flex min-w-0 gap-3'>
+          <div className='flex min-w-0 gap-3'>
             <QuotedTweetMediaThumbnail media={compactMedia} />
-            {quotedTweet.text && (
-              <div className='min-w-0 flex-1 py-0.5'>
+            <div className='min-w-0 flex-1'>
+              <QuotedTweetHeader quotedTweet={quotedTweet} />
+              {quotedTweet.text && (
                 <TweetText
-                  className='text-[15px] leading-5 text-light-primary dark:text-dark-primary'
+                  className='mt-px text-[15px] leading-5 text-light-primary dark:text-dark-primary'
                   style={getQuotedTweetTextClampStyle()}
                   text={quotedTweet.text}
                 />
+              )}
+              {quotedTweet.text && (
                 <TweetTranslation
                   className='text-[14px] leading-5'
                   text={quotedTweet.text}
                   langs={quotedTweet.langs}
                 />
-              </div>
-            )}
+              )}
+            </div>
           </div>
         ) : quotedTweet.text ? (
           <>
+            <QuotedTweetHeader quotedTweet={quotedTweet} />
             <TweetText
               className='mt-1 text-[15px] leading-5 text-light-primary dark:text-dark-primary'
               style={getQuotedTweetTextClampStyle(expandPreview)}
@@ -468,7 +572,9 @@ function QuotedTweetCard({
               langs={quotedTweet.langs}
             />
           </>
-        ) : null}
+        ) : (
+          <QuotedTweetHeader quotedTweet={quotedTweet} />
+        )}
         {!hideMedia && !compactMedia && quotedTweet.images && (
           <ImagePreview
             tweet

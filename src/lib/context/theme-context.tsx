@@ -9,8 +9,10 @@ import type { Theme, Accent } from '@lib/types/theme';
 type ThemeContext = {
   theme: Theme;
   accent: Accent;
+  hideBskySocialSuffix: boolean;
   changeTheme: ({ target: { value } }: ChangeEvent<HTMLInputElement>) => void;
   changeAccent: ({ target: { value } }: ChangeEvent<HTMLInputElement>) => void;
+  toggleHideBskySocialSuffix: () => void;
 };
 
 export const ThemeContext = createContext<ThemeContext | null>(null);
@@ -36,11 +38,20 @@ function setInitialAccent(): Accent {
   return savedAccent ?? 'blue';
 }
 
+function setInitialHideBskySocialSuffix(): boolean {
+  if (typeof window === 'undefined') return false;
+
+  return localStorage.getItem('hideBskySocialSuffix') === 'true';
+}
+
 export function ThemeContextProvider({
   children
 }: ThemeContextProviderProps): JSX.Element {
   const [theme, setTheme] = useState<Theme>(setInitialTheme);
   const [accent, setAccent] = useState<Accent>(setInitialAccent);
+  const [hideBskySocialSuffix, setHideBskySocialSuffix] = useState(
+    setInitialHideBskySocialSuffix
+  );
 
   const { user } = useAuth();
   const { id: userId, theme: userTheme, accent: userAccent } = user ?? {};
@@ -62,6 +73,8 @@ export function ThemeContextProvider({
       else root.classList.remove('dark');
 
       root.style.setProperty('--main-background', `var(--${theme}-background)`);
+      root.style.setProperty('--main-primary', `var(--${theme}-primary)`);
+      root.style.setProperty('--main-secondary', `var(--${theme}-secondary)`);
 
       root.style.setProperty(
         '--main-search-background',
@@ -103,6 +116,13 @@ export function ThemeContextProvider({
     return () => clearTimeout(timeoutId);
   }, [userId, accent]);
 
+  useEffect(() => {
+    localStorage.setItem(
+      'hideBskySocialSuffix',
+      hideBskySocialSuffix ? 'true' : 'false'
+    );
+  }, [hideBskySocialSuffix]);
+
   const changeTheme = ({
     target: { value }
   }: ChangeEvent<HTMLInputElement>): void => setTheme(value as Theme);
@@ -111,11 +131,16 @@ export function ThemeContextProvider({
     target: { value }
   }: ChangeEvent<HTMLInputElement>): void => setAccent(value as Accent);
 
+  const toggleHideBskySocialSuffix = (): void =>
+    setHideBskySocialSuffix((currentValue) => !currentValue);
+
   const value: ThemeContext = {
     theme,
     accent,
+    hideBskySocialSuffix,
     changeTheme,
-    changeAccent
+    changeAccent,
+    toggleHideBskySocialSuffix
   };
 
   return (

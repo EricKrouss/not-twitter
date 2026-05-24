@@ -2,11 +2,12 @@ import cn from 'clsx';
 import { Popover } from '@headlessui/react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { toast } from 'react-hot-toast';
+import { formatAtprotoDisplayIdentifier } from '@lib/atproto/identity';
 import { preventBubbling } from '@lib/utils';
-import { siteURL } from '@lib/env';
-import { getUserPath } from '@lib/routes';
+import { getBskyUserUrl } from '@lib/routes';
 import { manageBlock, manageMute, reportAccount } from '@lib/atproto/utils';
 import { useAuth } from '@lib/context/auth-context';
+import { useTheme } from '@lib/context/theme-context';
 import { useModal } from '@lib/hooks/useModal';
 import { Modal } from '@components/modal/modal';
 import { ActionModal } from '@components/modal/action-modal';
@@ -35,6 +36,10 @@ export function UserShare({
   mutingByListName
 }: UserShareProps): JSX.Element {
   const { user } = useAuth();
+  const { hideBskySocialSuffix } = useTheme();
+  const displayUsername = formatAtprotoDisplayIdentifier(username, {
+    hideBskySocialSuffix
+  });
   const {
     open: blockOpen,
     openModal: blockOpenModal,
@@ -56,7 +61,7 @@ export function UserShare({
 
   const handleCopy = (closeMenu: () => void) => async (): Promise<void> => {
     closeMenu();
-    await navigator.clipboard.writeText(`${siteURL}${getUserPath(username)}`);
+    await navigator.clipboard.writeText(getBskyUserUrl(username));
     toast.success('Copied to clipboard');
   };
   const handleOpenBlock = (closeMenu: () => void) => (): void => {
@@ -75,25 +80,25 @@ export function UserShare({
     if (!user || !targetId) return;
     await manageBlock('block', user.id, targetId);
     blockCloseModal();
-    toast.success(`@${username} has been blocked`);
+    toast.success(`${displayUsername} has been blocked`);
   };
   const handleUnblock = async (): Promise<void> => {
     if (!user || !targetId) return;
     await manageBlock('unblock', user.id, targetId);
     blockCloseModal();
-    toast.success(`@${username} has been unblocked`);
+    toast.success(`${displayUsername} has been unblocked`);
   };
   const handleMute = async (): Promise<void> => {
     if (!user || !targetId) return;
     await manageMute('mute', user.id, targetId);
     muteCloseModal();
-    toast.success(`@${username} has been muted`);
+    toast.success(`${displayUsername} has been muted`);
   };
   const handleUnmute = async (): Promise<void> => {
     if (!user || !targetId) return;
     await manageMute('unmute', user.id, targetId);
     muteCloseModal();
-    toast.success(`@${username} has been unmuted`);
+    toast.success(`${displayUsername} has been unmuted`);
   };
   const handleReport = (
     reasonType: ModerationReportReason,
@@ -114,7 +119,9 @@ export function UserShare({
       >
         <ActionModal
           title={
-            actionIsUnblock ? `Unblock @${username}?` : `Block @${username}?`
+            actionIsUnblock
+              ? `Unblock ${displayUsername}?`
+              : `Block ${displayUsername}?`
           }
           description={
             actionIsUnblock
@@ -137,7 +144,11 @@ export function UserShare({
         closeModal={muteCloseModal}
       >
         <ActionModal
-          title={actionIsUnmute ? `Unmute @${username}?` : `Mute @${username}?`}
+          title={
+            actionIsUnmute
+              ? `Unmute ${displayUsername}?`
+              : `Mute ${displayUsername}?`
+          }
           description={
             actionIsUnmute
               ? 'Their Tweets will be allowed back into your timelines and conversations.'
@@ -222,8 +233,8 @@ export function UserShare({
                       {muteIsListOnly
                         ? `Muted by ${mutingByListName}`
                         : actionIsUnmute
-                        ? `Unmute @${username}`
-                        : `Mute @${username}`}
+                        ? `Unmute ${displayUsername}`
+                        : `Mute ${displayUsername}`}
                     </Popover.Button>
                   )}
                   {canModerate && (
@@ -242,8 +253,8 @@ export function UserShare({
                       {blockIsListOnly
                         ? `Blocked by ${blockingByListName}`
                         : actionIsUnblock
-                        ? `Unblock @${username}`
-                        : `Block @${username}`}
+                        ? `Unblock ${displayUsername}`
+                        : `Block ${displayUsername}`}
                     </Popover.Button>
                   )}
                   {canModerate && (
@@ -254,7 +265,7 @@ export function UserShare({
                       onClick={preventBubbling(handleOpenReport(close))}
                     >
                       <HeroIcon iconName='FlagIcon' />
-                      Report @{username}
+                      Report {displayUsername}
                     </Popover.Button>
                   )}
                 </Popover.Panel>

@@ -1,6 +1,7 @@
 import { useRouter } from 'next/router';
 import Link from 'next/link';
 import cn from 'clsx';
+import { useWindow } from '@lib/context/window-context';
 import { preventBubbling } from '@lib/utils';
 import { CustomIcon } from '@components/ui/custom-icon';
 import { isNavLinkActive } from './nav-links';
@@ -19,6 +20,7 @@ export function SidebarLink({
   badgeDot
 }: SidebarLinkProps): JSX.Element {
   const { asPath } = useRouter();
+  const { isMobile } = useWindow();
   const isActive = isNavLinkActive(asPath, href);
   const renderedIconName = isActive ? activeIconName ?? iconName : iconName;
   const showBadgeCount = !!badgeCount;
@@ -39,7 +41,7 @@ export function SidebarLink({
       <a
         className={cn(
           'group py-1 outline-none',
-          canBeHidden ? 'hidden xs:flex' : 'flex',
+          canBeHidden && isMobile ? 'hidden' : 'flex',
           disabled && 'cursor-not-allowed'
         )}
         onClick={disabled ? preventBubbling() : undefined}

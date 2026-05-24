@@ -1,6 +1,7 @@
 import { useRouter } from 'next/router';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useAuth } from '@lib/context/auth-context';
+import { useTheme } from '@lib/context/theme-context';
 import { useUser } from '@lib/context/user-context';
 import { useCollection } from '@lib/hooks/useCollection';
 import { isPlural } from '@lib/utils';
@@ -26,11 +27,17 @@ export function UserHeader(): JSX.Element {
 
   const { user, loading } = useUser();
   const { user: authUser } = useAuth();
+  const { hideBskySocialSuffix } = useTheme();
 
   const userId = user ? user.id : null;
   const currentView = getProfileRouteView(asPath);
   const routeId = (Array.isArray(id) ? id[0] : id) ?? getProfileRouteId(asPath);
-  const routeLabel = formatAtprotoDisplayIdentifier(routeId);
+  const routeLabel = formatAtprotoDisplayIdentifier(routeId, {
+    hideBskySocialSuffix
+  });
+  const displayUsername = formatAtprotoDisplayIdentifier(user?.username, {
+    hideBskySocialSuffix
+  });
   const currentPage = currentView ?? pathname.split('/').pop() ?? '';
 
   const isInTweetPage = ['[id]', 'tweets', 'with_replies'].includes(
@@ -101,7 +108,7 @@ export function UserHeader(): JSX.Element {
           />
           <p className='text-xs text-light-secondary dark:text-dark-secondary'>
             {isInFollowPage
-              ? `@${user.username}`
+              ? displayUsername
               : isInTweetPage
               ? totalTweets
                 ? `${totalTweets} ${`Tweet${isPlural(totalTweets)}`}`

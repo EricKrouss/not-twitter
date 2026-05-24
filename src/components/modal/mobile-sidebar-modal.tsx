@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { toast } from 'react-hot-toast';
+import { formatAtprotoDisplayIdentifier } from '@lib/atproto/identity';
 import { useAuth } from '@lib/context/auth-context';
+import { useTheme } from '@lib/context/theme-context';
 import { useModal } from '@lib/hooks/useModal';
 import { formatNumber } from '@lib/date';
 import { getUserPath } from '@lib/routes';
@@ -77,6 +79,7 @@ export function MobileSidebarModal({
   closeModal
 }: MobileSidebarModalProps): JSX.Element {
   const { accounts, signOut, switchBlueskyAccount } = useAuth();
+  const { hideBskySocialSuffix } = useTheme();
   const [view, setView] = useState<MobileSidebarView>('account-info');
 
   const {
@@ -112,6 +115,10 @@ export function MobileSidebarModal({
     updatedAt: ''
   };
   const alternateAccounts = accounts.filter((account) => account.id !== id);
+  const firstAlternateUsername = formatAtprotoDisplayIdentifier(
+    alternateAccounts[0]?.username,
+    { hideBskySocialSuffix }
+  );
 
   const handleClose = (): void => {
     setView('account-info');
@@ -228,8 +235,8 @@ export function MobileSidebarModal({
                       onClick={(): void =>
                         void handleSwitchAccount(alternateAccounts[0].id)
                       }
-                      aria-label={`Switch to @${alternateAccounts[0].username}`}
-                      title={`Switch to @${alternateAccounts[0].username}`}
+                      aria-label={`Switch to ${firstAlternateUsername}`}
+                      title={`Switch to ${firstAlternateUsername}`}
                     >
                       <AccountAvatar
                         className='self-center'

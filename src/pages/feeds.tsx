@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/router';
 import cn from 'clsx';
 import useSWR from 'swr';
 import { toast } from 'react-hot-toast';
 import {
+  DISCOVER_HOME_FEED_HREF,
   addSavedHomeFeed,
   getFeedBrowserFeeds,
   removeSavedHomeFeed,
@@ -12,6 +14,8 @@ import {
   type FeedBrowserFeed,
   type FeedSearchPage
 } from '@lib/atproto/backend';
+import { formatAtprotoDisplayIdentifier } from '@lib/atproto/identity';
+import { useTheme } from '@lib/context/theme-context';
 import { formatNumber } from '@lib/date';
 import { HomeLayout, ProtectedLayout } from '@components/layout/common-layout';
 import { MainLayout } from '@components/layout/main-layout';
@@ -40,11 +44,20 @@ function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Something went wrong.';
 }
 
-function getFeedMeta(feed: FeedBrowserFeed): string {
+function getFeedMeta(
+  feed: FeedBrowserFeed,
+  hideBskySocialSuffix: boolean
+): string {
   return [
-    `@${feed.creatorUsername}`,
+    formatAtprotoDisplayIdentifier(feed.creatorUsername, {
+      hideBskySocialSuffix
+    }),
     `${formatNumber(feed.likeCount)} ${feed.likeCount === 1 ? 'like' : 'likes'}`
   ].join(' - ');
+}
+
+function isOfficialForYouFeed(feed: FeedBrowserFeed): boolean {
+  return feed.href === DISCOVER_HOME_FEED_HREF;
 }
 
 function mergeFeeds(
@@ -191,6 +204,8 @@ function SavedFeedRow({
   onDrop: (event: DragEvent<HTMLDivElement>) => void;
   onDragEnd: () => void;
 }): JSX.Element {
+  const { hideBskySocialSuffix } = useTheme();
+
   return (
     <div
       className={cn(
@@ -212,7 +227,7 @@ function SavedFeedRow({
           </a>
         </Link>
         <p className='mt-0.5 truncate text-sm text-light-secondary dark:text-dark-secondary'>
-          {getFeedMeta(feed)}
+          {getFeedMeta(feed, hideBskySocialSuffix)}
         </p>
         {feed.description && (
           <p className='mt-1 max-h-10 overflow-hidden text-[15px] leading-5'>
@@ -297,6 +312,8 @@ function SearchFeedRow({
   saving: boolean;
   onAdd: () => void;
 }): JSX.Element {
+  const { hideBskySocialSuffix } = useTheme();
+
   return (
     <div className='hover-card flex min-h-[76px] items-center gap-3 border-b border-light-border px-4 py-3 dark:border-dark-border'>
       <FeedAvatar avatar={feed.avatar} name={feed.displayName} />
@@ -310,7 +327,7 @@ function SearchFeedRow({
           {feed.saved && <StatusPill accent>Added</StatusPill>}
         </div>
         <p className='mt-0.5 truncate text-sm text-light-secondary dark:text-dark-secondary'>
-          {getFeedMeta(feed)}
+          {getFeedMeta(feed, hideBskySocialSuffix)}
         </p>
         {feed.description && (
           <p className='mt-1 max-h-10 overflow-hidden text-[15px] leading-5'>
@@ -336,6 +353,7 @@ function SearchFeedRow({
 }
 
 export default function Feeds(): JSX.Element {
+  const { back } = useRouter();
   const [searchInput, setSearchInput] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [orderedFeeds, setOrderedFeeds] = useState<FeedBrowserFeed[]>([]);
@@ -368,13 +386,13 @@ export default function Feeds(): JSX.Element {
     () => (savedFeeds ?? []).filter(({ editable }) => editable),
     [savedFeeds]
   );
-  const forYouFeed = savedFeeds?.find(({ editable }) => !editable);
+  const forYouFeed = savedFeeds?.find(isOfficialForYouFeed);
   const fixedFeeds: FixedFeed[] = [
     {
       id: 'for-you',
       title: 'For you',
       description: 'Top posts selected from Bluesky Discover.',
-      href: forYouFeed?.href ?? '/profile/bsky.app/feed/whats-hot',
+      href: DISCOVER_HOME_FEED_HREF,
       iconName: 'SparklesIcon',
       feed: forYouFeed
     },
@@ -543,7 +561,15 @@ export default function Feeds(): JSX.Element {
       <SEO title='Feeds / Not Twitter' />
       <header className='hover-animation sticky top-0 z-20 bg-main-background/80 backdrop-blur-md'>
         <div className='flex h-[53px] items-center justify-between px-4'>
-          <div className='flex min-w-0 items-center gap-8'>
+          <div className='flex min-w-0 items-center gap-4'>
+            <Button
+              className='dark-bg-tab group relative p-2 hover:bg-light-primary/10 active:bg-light-primary/20 dark:hover:bg-dark-primary/10 dark:active:bg-dark-primary/20'
+              aria-label='Back'
+              onClick={back}
+            >
+              <HeroIcon className='h-5 w-5' iconName='ArrowLeftIcon' />
+              <ToolTip tip='Back' />
+            </Button>
             <MobileSidebar />
             <h2 className='truncate text-xl font-bold'>Feeds</h2>
           </div>

@@ -9,11 +9,21 @@
     --main-background: var(--dark-background);
     --main-search-background: var(--dark-search-background);
     --main-sidebar-background: var(--dark-sidebar-background);
+    --main-primary: var(--dark-primary);
+    --main-secondary: var(--dark-secondary);
     --main-accent: var(--accent-blue);
 
     --dark-background: 0 0 0;
     --dim-background: 22 33 44;
     --light-background: 255 255 255;
+
+    --dark-primary: 231 233 234;
+    --dim-primary: 247 249 249;
+    --light-primary: 15 20 25;
+
+    --dark-secondary: 113 118 123;
+    --dim-secondary: 139 152 165;
+    --light-secondary: 83 100 113;
 
     --dark-search-background: 32 35 39;
     --dim-search-background: 39 51 64;
@@ -39,7 +49,7 @@
   }
 
   body {
-    @apply hover-animation bg-main-background font-twitter-chirp text-light-primary dark:text-dark-primary;
+    @apply hover-animation bg-main-background font-twitter-chirp text-main-primary;
   }
 }
 
@@ -229,6 +239,215 @@
     animation-fill-mode: forwards;
   }
 
+  .tweet-action-button {
+    column-gap: 4px;
+  }
+
+  .tweet-action-icon-shell {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+  }
+
+  .tweet-action-icon-shell--normal {
+    width: 34.75px;
+    height: 34.75px;
+  }
+
+  .tweet-action-icon-shell--large {
+    width: 38.5px;
+    height: 38.5px;
+  }
+
+  .tweet-action-count,
+  .tweet-action-count-static {
+    display: inline-flex;
+    height: 20px;
+    align-items: center;
+    transform: translateY(0.5px);
+  }
+
+  .tweet-action-count-text {
+    display: block;
+    font-weight: 400;
+    letter-spacing: 0;
+  }
+
+  .tweet-action-effect {
+    --tweet-action-rgb: var(--accent-blue);
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: inherit;
+    contain: layout;
+    transform: translateZ(0);
+  }
+
+  .tweet-action-effect--like {
+    --tweet-action-rgb: var(--accent-pink);
+  }
+
+  .tweet-action-effect__icon {
+    position: relative;
+    z-index: 1;
+    display: inline-flex;
+    transform-origin: center;
+    will-change: transform;
+  }
+
+  .tweet-action-effect__ring,
+  .tweet-action-effect__burst {
+    pointer-events: none;
+    position: absolute;
+    inset: -14px;
+    border-radius: 9999px;
+    opacity: 0;
+  }
+
+  .tweet-action-effect__ring {
+    background: radial-gradient(
+      circle,
+      transparent 49%,
+      rgb(var(--tweet-action-rgb) / 35%) 50%,
+      rgb(var(--tweet-action-rgb) / 35%) 64%,
+      transparent 65%
+    );
+    will-change: opacity, transform;
+  }
+
+  .tweet-action-effect__burst span {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    height: 3.5px;
+    width: 3.5px;
+    border-radius: 9999px;
+    background: rgb(var(--tweet-action-rgb));
+    opacity: 0;
+    transform: translate(-50%, -50%) rotate(var(--tweet-action-dot-angle))
+      translateY(0) scale(0);
+    will-change: opacity, transform;
+  }
+
+  .tweet-action-effect__burst span:nth-child(2n) {
+    background: #ffd400;
+  }
+
+  .tweet-action-effect__burst span:nth-child(3n) {
+    background: #1d9bf0;
+  }
+
+  .tweet-action-effect__burst span:nth-child(4n) {
+    background: #00ba7c;
+  }
+
+  .tweet-action-effect--playing .tweet-action-effect__ring {
+    animation: tweet-action-ring 460ms cubic-bezier(0.2, 0, 0, 1) both;
+  }
+
+  .tweet-action-effect--playing.tweet-action-effect--like
+    .tweet-action-effect__icon {
+    animation: tweet-like-pop 800ms steps(28, end) both;
+  }
+
+  .tweet-action-effect--playing.tweet-action-effect--like
+    .tweet-action-effect__burst {
+    animation: tweet-burst-visibility 800ms ease-out both;
+  }
+
+  .tweet-action-effect--playing.tweet-action-effect--like
+    .tweet-action-effect__burst
+    span {
+    animation: tweet-like-burst 800ms cubic-bezier(0.18, 0.9, 0.22, 1) both;
+  }
+
+  .tweet-action-effect--playing.tweet-action-effect--like
+    .tweet-action-effect__burst
+    span:nth-child(2n) {
+    animation-duration: 820ms;
+  }
+
+  .tweet-action-effect--playing.tweet-action-effect--like
+    .tweet-action-effect__burst
+    span:nth-child(3n) {
+    animation-duration: 760ms;
+  }
+
+  @keyframes tweet-action-ring {
+    0% {
+      opacity: 0;
+      transform: scale(0.16);
+    }
+
+    18% {
+      opacity: 1;
+    }
+
+    100% {
+      opacity: 0;
+      transform: scale(1.35);
+    }
+  }
+
+  @keyframes tweet-like-pop {
+    0% {
+      transform: scale(0.16);
+    }
+
+    14% {
+      transform: scale(0.16);
+    }
+
+    42% {
+      transform: scale(1.25);
+    }
+
+    60% {
+      transform: scale(0.95);
+    }
+
+    78% {
+      transform: scale(1.04);
+    }
+
+    100% {
+      transform: scale(1);
+    }
+  }
+
+  @keyframes tweet-burst-visibility {
+    0%,
+    100% {
+      opacity: 1;
+    }
+  }
+
+  @keyframes tweet-like-burst {
+    0% {
+      opacity: 0;
+      transform: translate(-50%, -50%) rotate(var(--tweet-action-dot-angle))
+        translateY(0) scale(0);
+    }
+
+    18% {
+      opacity: 1;
+    }
+
+    72% {
+      opacity: 0.95;
+      transform: translate(-50%, -50%) rotate(var(--tweet-action-dot-angle))
+        translateY(-17px) scale(1);
+    }
+
+    100% {
+      opacity: 0;
+      transform: translate(-50%, -50%) rotate(var(--tweet-action-dot-angle))
+        translateY(-22px) scale(0);
+    }
+  }
+
   @keyframes birthday-balloon-float {
     0% {
       opacity: 0;
@@ -252,6 +471,18 @@
 
   @media (prefers-reduced-motion: reduce) {
     .birthday-balloons {
+      display: none;
+    }
+
+    .tweet-action-effect--playing .tweet-action-effect__ring,
+    .tweet-action-effect--playing .tweet-action-effect__burst,
+    .tweet-action-effect--playing .tweet-action-effect__burst span,
+    .tweet-action-effect--playing .tweet-action-effect__icon {
+      animation: none;
+    }
+
+    .tweet-action-effect__ring,
+    .tweet-action-effect__burst {
       display: none;
     }
   }

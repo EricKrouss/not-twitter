@@ -59,7 +59,7 @@ export function TweetRetweetMenu({
     <>
       <Modal
         className='flex items-start justify-center'
-        modalClassName='mt-8 w-full max-w-xl overflow-hidden rounded-2xl bg-main-background'
+        modalClassName='mt-8 w-full max-w-xl rounded-2xl bg-main-background'
         open={modalOpen}
         closeModal={closeModal}
       >
@@ -76,7 +76,7 @@ export function TweetRetweetMenu({
           <>
             <Popover.Button
               className={cn(
-                `group flex items-center gap-1 p-0 outline-none transition-colors
+                `tweet-action-button group flex items-center p-0 outline-none transition-colors
                  duration-200 ease-out disabled:cursor-not-allowed
                  inner:transition-colors inner:duration-200 inner:ease-out`,
                 disabled && 'cursor-not-allowed opacity-50',
@@ -90,7 +90,11 @@ export function TweetRetweetMenu({
             >
               <i
                 className={cn(
-                  'relative rounded-full p-2 not-italic group-focus-visible:ring-2',
+                  `tweet-action-icon-shell relative rounded-full not-italic
+                   group-focus-visible:ring-2`,
+                  viewTweet
+                    ? 'tweet-action-icon-shell--large'
+                    : 'tweet-action-icon-shell--normal',
                   iconClassName
                 )}
               >
@@ -107,8 +111,10 @@ export function TweetRetweetMenu({
               </i>
               {!viewTweet && (
                 <NumberStats
-                  className='min-w-[10px] text-left text-[13px] leading-4'
-                  containerClassName={statsContainerClassName ?? '-ml-1.5'}
+                  className='tweet-action-count-text min-w-[10px] text-left text-[13px] leading-4'
+                  containerClassName={
+                    statsContainerClassName ?? 'tweet-action-count -ml-1.5'
+                  }
                   move={move as number}
                   stats={stats as number}
                 />

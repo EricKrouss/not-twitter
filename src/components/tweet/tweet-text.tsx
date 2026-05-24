@@ -1,5 +1,7 @@
 import Link from 'next/link';
 import cn from 'clsx';
+import { formatAtprotoDisplayIdentifier } from '@lib/atproto/identity';
+import { useTheme } from '@lib/context/theme-context';
 import { getUserPath } from '@lib/routes';
 import {
   getHashtagSearchQuery,
@@ -150,6 +152,7 @@ export function TweetText({
   disableLinks,
   style
 }: TweetTextProps): JSX.Element {
+  const { hideBskySocialSuffix } = useTheme();
   const stopEntityClick = (event: MouseEvent<HTMLAnchorElement>): void => {
     event.stopPropagation();
   };
@@ -197,7 +200,9 @@ export function TweetText({
             key={`${part.value}-${index}`}
           >
             <a className={entityClassName} onClick={stopEntityClick}>
-              {part.value}
+              {formatAtprotoDisplayIdentifier(part.username, {
+                hideBskySocialSuffix
+              })}
             </a>
           </Link>
         ) : (

@@ -3,7 +3,9 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Dialog, Menu } from '@headlessui/react';
 import { toast } from 'react-hot-toast';
 import cn from 'clsx';
+import { formatAtprotoDisplayIdentifier } from '@lib/atproto/identity';
 import { useAuth } from '@lib/context/auth-context';
+import { useTheme } from '@lib/context/theme-context';
 import { useModal } from '@lib/hooks/useModal';
 import { Modal } from '@components/modal/modal';
 import { ActionModal } from '@components/modal/action-modal';
@@ -58,6 +60,11 @@ function AccountIdentity({
 }: {
   account: BlueskyAccount;
 }): JSX.Element {
+  const { hideBskySocialSuffix } = useTheme();
+  const displayUsername = formatAtprotoDisplayIdentifier(account.username, {
+    hideBskySocialSuffix
+  });
+
   return (
     <div className='min-w-0 truncate text-left leading-5'>
       <div className='flex items-center gap-1 truncate font-bold'>
@@ -69,7 +76,7 @@ function AccountIdentity({
         )}
       </div>
       <p className='truncate text-light-secondary dark:text-dark-secondary'>
-        @{account.username}
+        {displayUsername}
       </p>
     </div>
   );
@@ -139,7 +146,7 @@ export function AddAccountModal({
   const handleIdentifierChange = ({
     target: { value }
   }: ChangeEvent<HTMLInputElement>): void => {
-    setIdentifier(value);
+    setIdentifier(value.replace(/^@+/, ''));
     if (errorMessage) setErrorMessage('');
   };
 
@@ -154,7 +161,7 @@ export function AddAccountModal({
     e.preventDefault();
 
     if (!trimmedIdentifier) {
-      setErrorMessage('Enter your Bluesky handle or DID.');
+      setErrorMessage('Enter your Bluesky username.');
       return;
     }
 
@@ -203,17 +210,23 @@ export function AddAccountModal({
             htmlFor='add-bluesky-identifier'
           >
             <span className='absolute left-3 top-2 text-sm text-light-secondary dark:text-dark-secondary'>
-              Bluesky handle or DID
+              Bluesky username
             </span>
-            <input
-              className='mt-6 w-full bg-transparent px-3 pb-2 text-lg outline-none'
-              id='add-bluesky-identifier'
-              type='text'
-              autoComplete='username'
-              autoFocus
-              value={identifier}
-              onChange={handleIdentifierChange}
-            />
+            <span className='mt-6 flex items-center px-3 pb-2'>
+              <CustomIcon
+                className='mr-2 h-5 w-5 shrink-0 text-light-secondary dark:text-dark-secondary'
+                iconName='TwitterAtIcon'
+              />
+              <input
+                className='min-w-0 flex-1 bg-transparent text-lg outline-none'
+                id='add-bluesky-identifier'
+                type='text'
+                autoComplete='username'
+                autoFocus
+                value={identifier}
+                onChange={handleIdentifierChange}
+              />
+            </span>
           </label>
           {errorMessage && (
             <p className='text-sm text-accent-red'>{errorMessage}</p>
@@ -240,6 +253,7 @@ export function AddAccountModal({
 
 export function SidebarProfile(): JSX.Element {
   const { user, accounts, signOut, switchBlueskyAccount } = useAuth();
+  const { hideBskySocialSuffix } = useTheme();
   const {
     open: logOutOpen,
     openModal: logOutOpenModal,
@@ -264,6 +278,9 @@ export function SidebarProfile(): JSX.Element {
     activeAccount,
     ...accounts.filter((account) => account.id !== id)
   ];
+  const displayUsername = formatAtprotoDisplayIdentifier(username, {
+    hideBskySocialSuffix
+  });
 
   const handleSwitchAccount = async (accountId: string): Promise<void> => {
     try {
@@ -311,11 +328,15 @@ export function SidebarProfile(): JSX.Element {
                 open && 'bg-light-primary/10 dark:bg-dark-primary/10'
               )}
             >
-              <div className='flex gap-3 truncate'>
+              <div className='flex min-w-0 gap-3 truncate'>
                 <UserAvatar src={photoURL} alt={name} size={40} />
-                <div className='hidden truncate text-start leading-5 xl:block'>
+                <div className='hidden min-w-0 text-start leading-5 xl:flex xl:flex-col'>
                   <UserName name={name} className='start' verified={verified} />
-                  <UserUsername username={username} disableLink />
+                  <UserUsername
+                    username={username}
+                    className='max-w-full'
+                    disableLink
+                  />
                 </div>
               </div>
               <HeroIcon
@@ -374,7 +395,7 @@ export function SidebarProfile(): JSX.Element {
                           )}
                           onClick={logOutOpenModal}
                         >
-                          Log out @{username}
+                          Log out {displayUsername}
                         </Button>
                       )}
                     </Menu.Item>

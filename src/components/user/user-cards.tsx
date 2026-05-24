@@ -8,7 +8,7 @@ import type { User } from '@lib/types/user';
 import type { StatsType } from '@components/view/view-tweet-stats';
 import type { StatsEmptyProps } from '@components/tweet/stats-empty';
 
-type FollowType = 'following' | 'followers';
+type FollowType = 'following' | 'followers' | 'followers_you_follow';
 
 type UserCardStatsType = Exclude<StatsType, 'quotes'>;
 
@@ -45,6 +45,11 @@ const allNoStatsData: Readonly<NoStatsData> = {
     imageData: { src: '/assets/no-followers.png', alt: 'No followers' },
     description:
       'When someone follows this account, they’ll show up here. Tweeting and interacting with others helps boost followers.'
+  },
+  followers_you_follow: {
+    title: 'No followers you know',
+    description:
+      'When people you follow also follow this account, they’ll show up here.'
   }
 };
 

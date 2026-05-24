@@ -113,6 +113,8 @@ export function AuthContextProvider({
           followers: [],
           followingCount: 0,
           followersCount: 0,
+          knownFollowers: [],
+          knownFollowersCount: 0,
           muting: false,
           mutingByListName: null,
           blocking: false,

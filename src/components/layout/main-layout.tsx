@@ -2,7 +2,7 @@ import { SWRConfig } from 'swr';
 import { Toaster } from 'react-hot-toast';
 import { fetchJSON } from '@lib/fetch';
 import { LiveUpdatesProvider } from '@lib/context/live-updates-context';
-import { WindowContextProvider } from '@lib/context/window-context';
+import { useWindow, WindowContextProvider } from '@lib/context/window-context';
 import { Sidebar } from '@components/sidebar/sidebar';
 import type { DefaultToastOptions } from 'react-hot-toast';
 import type { LayoutProps } from './common-layout';
@@ -16,20 +16,28 @@ const toastOptions: DefaultToastOptions = {
   success: { duration: 4000 }
 };
 
+function MainToaster(): JSX.Element {
+  const { isMobile } = useWindow();
+
+  return (
+    <Toaster
+      position='bottom-center'
+      toastOptions={toastOptions}
+      containerClassName={isMobile ? 'mb-12' : 'mb-0'}
+    />
+  );
+}
+
 export function MainLayout({ children }: LayoutProps): JSX.Element {
   return (
-    <div className='flex w-full justify-center gap-0 lg:gap-4'>
+    <div className='flex w-full justify-center gap-0 min-[1120px]:gap-4'>
       <WindowContextProvider>
         <LiveUpdatesProvider>
           <Sidebar />
           <SWRConfig value={{ fetcher: fetchJSON }}>{children}</SWRConfig>
         </LiveUpdatesProvider>
+        <MainToaster />
       </WindowContextProvider>
-      <Toaster
-        position='bottom-center'
-        toastOptions={toastOptions}
-        containerClassName='mb-12 xs:mb-0'
-      />
     </div>
   );
 }

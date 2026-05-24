@@ -16,7 +16,6 @@ import { Tweet } from '@components/tweet/tweet';
 import { ViewTweet } from '@components/view/view-tweet';
 import { SEO } from '@components/common/seo';
 import { Loading } from '@components/ui/loading';
-import { Error } from '@components/ui/error';
 import type { ReactElement, ReactNode } from 'react';
 import type {
   TweetThreadPage,
@@ -58,6 +57,25 @@ function hasTweet(tweets: TweetWithUser[], tweetId: string): boolean {
   return tweets.some(({ id }) => id === tweetId);
 }
 
+function TweetNotFound(): JSX.Element {
+  return (
+    <>
+      <SEO
+        title='Tweet not found / Not Twitter'
+        description='Hmm...this page doesn’t exist. Try searching for something else.'
+      />
+      <div className='mx-auto flex w-full max-w-sm flex-col px-8 py-10'>
+        <h2 className='text-[31px] font-extrabold leading-9'>
+          Hmm...this page doesn’t exist.
+        </h2>
+        <p className='mt-2 text-[15px] leading-5 text-light-secondary dark:text-dark-secondary'>
+          Try searching for something else.
+        </p>
+      </div>
+    </>
+  );
+}
+
 export default function TweetId(): JSX.Element {
   const { asPath, query: routeQuery, back } = useRouter();
   const tweetId =
@@ -86,6 +104,7 @@ export default function TweetId(): JSX.Element {
   const parentTweets = parentPage.parents;
   const threadReplies = threadData?.threadReplies ?? [];
   const repliesData = threadData?.replies ?? [];
+  const tweetUnavailable = !!tweetData?.unavailable;
 
   const { text, images } = tweetData ?? {};
 
@@ -95,9 +114,11 @@ export default function TweetId(): JSX.Element {
   const hasThread = hasParentTweets || hasThreadReplies;
 
   const pageTitle = tweetData
-    ? `${tweetData.user.name} on Not Twitter: "${text ?? ''}${
-        images ? ` (${imagesLength} image${isPlural(imagesLength)})` : ''
-      }" / Not Twitter`
+    ? tweetUnavailable
+      ? 'Tweet unavailable / Not Twitter'
+      : `${tweetData.user.name} on Not Twitter: "${text ?? ''}${
+          images ? ` (${imagesLength} image${isPlural(imagesLength)})` : ''
+        }" / Not Twitter`
     : null;
 
   useEffect(() => {
@@ -159,12 +180,9 @@ export default function TweetId(): JSX.Element {
   useEffect(() => {
     if (!tweetId) return undefined;
 
-    return subscribeBackend(
-      () => {
-        void mutate();
-      },
-      ['content']
-    );
+    return subscribeBackend(() => {
+      void mutate();
+    }, ['content']);
   }, [mutate, tweetId]);
 
   const handleReplySent = useCallback(
@@ -204,10 +222,7 @@ export default function TweetId(): JSX.Element {
         {tweetLoading ? (
           <Loading className='mt-5' />
         ) : !tweetData ? (
-          <>
-            <SEO title='Tweet not found / Not Twitter' />
-            <Error message='Tweet not found' />
-          </>
+          <TweetNotFound />
         ) : (
           <>
             {pageTitle && <SEO title={pageTitle} />}
@@ -235,16 +250,26 @@ export default function TweetId(): JSX.Element {
               </div>
             )}
             {parentTweets.map((parentTweet) => (
-              <Tweet parentTweet {...parentTweet} key={parentTweet.id} />
+              <Tweet
+                parentTweet
+                conversationTweet
+                {...parentTweet}
+                key={parentTweet.id}
+              />
             ))}
-            <ViewTweet
-              viewTweetRef={viewTweetRef}
-              onReplySent={handleReplySent}
-              {...tweetData}
-            />
+            {tweetUnavailable ? (
+              <Tweet conversationTweet {...tweetData} key={tweetData.id} />
+            ) : (
+              <ViewTweet
+                viewTweetRef={viewTweetRef}
+                onReplySent={handleReplySent}
+                {...tweetData}
+              />
+            )}
             <AnimatePresence>
               {threadReplies.map((tweet) => (
                 <Tweet
+                  conversationTweet
                   {...tweet}
                   onReplySent={handleReplySent}
                   key={tweet.id}
@@ -252,6 +277,7 @@ export default function TweetId(): JSX.Element {
               ))}
               {repliesData.map((tweet) => (
                 <Tweet
+                  conversationTweet
                   {...tweet}
                   onReplySent={handleReplySent}
                   key={tweet.id}

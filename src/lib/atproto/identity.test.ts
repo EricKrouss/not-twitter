@@ -11,6 +11,8 @@ jest.mock('@atproto/syntax', () => ({
 }));
 
 import {
+  formatAtprotoDisplayIdentifier,
+  formatAtprotoHandleForDisplay,
   isAtprotoIdentityDid,
   normalizeAtprotoDid,
   normalizeAtprotoIdentifier,
@@ -55,5 +57,26 @@ describe('ATProto identity helpers', () => {
     expect(normalizeProfileSearchActor('did:web:alice.example.com')).toBe(
       'did:web:alice.example.com'
     );
+  });
+
+  it('hides only generic bsky.social handle suffixes when requested', () => {
+    expect(formatAtprotoHandleForDisplay('alice.bsky.social', true)).toBe(
+      'alice'
+    );
+    expect(
+      formatAtprotoDisplayIdentifier('alice.bsky.social', {
+        hideBskySocialSuffix: true
+      })
+    ).toBe('@alice');
+    expect(
+      formatAtprotoDisplayIdentifier('alice.example.com', {
+        hideBskySocialSuffix: true
+      })
+    ).toBe('@alice.example.com');
+    expect(
+      formatAtprotoDisplayIdentifier('did:web:alice.example.com', {
+        hideBskySocialSuffix: true
+      })
+    ).toBe('did:web:alice.example.com');
   });
 });

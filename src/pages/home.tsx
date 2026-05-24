@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import cn from 'clsx';
 import useSWR from 'swr';
 import {
+  getDiscoverHomeFeedPage,
   getFollowingHomeFeedPage,
   getSubscribedHomeFeedPage,
   getSubscribedHomeFeeds,
@@ -28,7 +29,7 @@ import type { MouseEvent, PointerEvent, ReactElement, ReactNode } from 'react';
 import type { HomeFeedPage, SubscribedHomeFeed } from '@lib/atproto/backend';
 import type { TweetWithUser } from '@lib/types/tweet';
 
-type HomeFeedTab = 'following' | `feed:${string}`;
+type HomeFeedTab = 'for-you' | 'following' | `feed:${string}`;
 
 type HomeFeedTabData = {
   label: string;
@@ -36,6 +37,7 @@ type HomeFeedTabData = {
 };
 
 const HOME_FEED_REFRESH_INTERVAL_MS = 15000;
+const FOR_YOU_HOME_FEED_TAB = 'for-you';
 const FEED_TAB_PREFIX = 'feed:';
 type HomeFeedRefreshMode = 'banner' | 'replace';
 
@@ -43,6 +45,7 @@ async function getHomeFeedPage(
   tab: HomeFeedTab,
   cursor?: string
 ): Promise<HomeFeedPage> {
+  if (tab === FOR_YOU_HOME_FEED_TAB) return getDiscoverHomeFeedPage(cursor);
   if (tab === 'following') return getFollowingHomeFeedPage(cursor);
 
   return getSubscribedHomeFeedPage(tab.slice(FEED_TAB_PREFIX.length), cursor);
@@ -52,14 +55,14 @@ function normalizeFeedLabel(label: string): string {
   return label.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
-function isDiscoverFeed({ displayName }: SubscribedHomeFeed): boolean {
-  return normalizeFeedLabel(displayName) === 'discover';
-}
-
-function isDuplicateForYouFeed({ displayName }: SubscribedHomeFeed): boolean {
+function isFixedForYouDuplicate({ displayName }: SubscribedHomeFeed): boolean {
   const normalizedLabel = normalizeFeedLabel(displayName);
 
-  return normalizedLabel === 'for you' || normalizedLabel === 'for-you';
+  return (
+    normalizedLabel === 'discover' ||
+    normalizedLabel === 'for you' ||
+    normalizedLabel === 'for-you'
+  );
 }
 
 function getSubscribedFeedTab(
@@ -75,15 +78,13 @@ function getSubscribedFeedTab(
 function getHomeFeedTabs(
   subscribedFeeds: SubscribedHomeFeed[]
 ): HomeFeedTabData[] {
-  const discoverFeed = subscribedFeeds.find(isDiscoverFeed);
   const savedFeedTabs = subscribedFeeds
     .filter((feed) => feed.type === 'feed')
-    .filter((feed) => feed !== discoverFeed)
-    .filter((feed) => !isDuplicateForYouFeed(feed))
+    .filter((feed) => !isFixedForYouDuplicate(feed))
     .map((feed) => getSubscribedFeedTab(feed));
 
   return [
-    ...(discoverFeed ? [getSubscribedFeedTab(discoverFeed, 'For you')] : []),
+    { label: 'For you', value: FOR_YOU_HOME_FEED_TAB },
     { label: 'Following', value: 'following' },
     ...savedFeedTabs
   ];
@@ -276,7 +277,9 @@ export default function Home(): JSX.Element {
   const { isMobile } = useWindow();
   const { push } = useRouter();
   const { clearHomeBadge } = useLiveUpdates();
-  const [activeTab, setActiveTab] = useState<HomeFeedTab>('following');
+  const [activeTab, setActiveTab] = useState<HomeFeedTab>(
+    FOR_YOU_HOME_FEED_TAB
+  );
   const [feed, setFeed] = useState<TweetWithUser[]>([]);
   const [newTweets, setNewTweets] = useState<TweetWithUser[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -304,12 +307,12 @@ export default function Home(): JSX.Element {
   useEffect(() => {
     if (!adoptedInitialTabRef.current && subscribedFeeds) {
       adoptedInitialTabRef.current = true;
-      setActiveTab(homeFeedTabs[0]?.value ?? 'following');
+      setActiveTab(homeFeedTabs[0]?.value ?? FOR_YOU_HOME_FEED_TAB);
       return;
     }
 
     if (!homeFeedTabs.some(({ value }) => value === activeTab))
-      setActiveTab(homeFeedTabs[0]?.value ?? 'following');
+      setActiveTab(homeFeedTabs[0]?.value ?? FOR_YOU_HOME_FEED_TAB);
   }, [activeTab, homeFeedTabs, subscribedFeeds]);
 
   useEffect(() => {

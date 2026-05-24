@@ -4,6 +4,14 @@ import type { ProfileBirthday } from '@lib/profile-birthday';
 
 export type UserMessageAllowIncoming = 'all' | 'following' | 'none';
 
+export type UserKnownFollower = {
+  id: string;
+  name: string;
+  username: string;
+  photoURL: string;
+  verified: boolean;
+};
+
 export type User = {
   id: string;
   bio: string | null;
@@ -21,6 +29,8 @@ export type User = {
   followers: string[];
   followingCount: number;
   followersCount: number;
+  knownFollowers: UserKnownFollower[];
+  knownFollowersCount: number;
   muting: boolean;
   mutingByListName: string | null;
   blocking: boolean;
@@ -59,6 +69,9 @@ export const userConverter: DataConverter<User> = {
       muting: data.muting ?? false,
       birthday: data.birthday ?? null,
       messageAllowIncoming: data.messageAllowIncoming ?? null,
+      knownFollowers: data.knownFollowers ?? [],
+      knownFollowersCount:
+        data.knownFollowersCount ?? data.knownFollowers?.length ?? 0,
       mutingByListName: data.mutingByListName ?? null,
       blocking: data.blocking ?? false,
       blockedBy: data.blockedBy ?? false,

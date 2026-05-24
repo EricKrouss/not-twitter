@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { toast } from 'react-hot-toast';
+import { formatAtprotoDisplayIdentifier } from '@lib/atproto/identity';
 import { orderBy, query } from '@lib/atproto/store';
 import { useAuth } from '@lib/context/auth-context';
+import { useTheme } from '@lib/context/theme-context';
 import { useModal } from '@lib/hooks/useModal';
 import { useCollection } from '@lib/hooks/useCollection';
 import { useArrayDocument } from '@lib/hooks/useArrayDocument';
@@ -29,11 +31,15 @@ import type { ReactElement, ReactNode } from 'react';
 
 export default function Bookmarks(): JSX.Element {
   const { user } = useAuth();
+  const { hideBskySocialSuffix } = useTheme();
 
   const { open, openModal, closeModal } = useModal();
   const [clearMenuOpen, setClearMenuOpen] = useState(false);
 
   const userId = user?.id as string;
+  const displayUsername = formatAtprotoDisplayIdentifier(user?.username, {
+    hideBskySocialSuffix
+  });
 
   const { data: bookmarksRef, loading: bookmarksRefLoading } = useCollection(
     query(userBookmarksCollection(userId), orderBy('createdAt', 'desc')),
@@ -86,7 +92,7 @@ export default function Bookmarks(): JSX.Element {
         <div className='-mb-1 flex flex-col'>
           <h2 className='-mt-1 text-xl font-bold'>Bookmarks</h2>
           <p className='text-xs text-light-secondary dark:text-dark-secondary'>
-            @{user?.username}
+            {displayUsername}
           </p>
         </div>
         <div className='relative'>

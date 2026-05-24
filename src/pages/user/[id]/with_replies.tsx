@@ -1,8 +1,10 @@
 import { AnimatePresence } from 'framer-motion';
+import { formatAtprotoDisplayIdentifier } from '@lib/atproto/identity';
 import { doc, query, where, orderBy } from '@lib/atproto/store';
 import { useCollection } from '@lib/hooks/useCollection';
 import { useDocument } from '@lib/hooks/useDocument';
 import { tweetsCollection } from '@lib/atproto/collections';
+import { useTheme } from '@lib/context/theme-context';
 import { useUser } from '@lib/context/user-context';
 import { PublicUserLayout } from '@components/layout/common-layout';
 import { SEO } from '@components/common/seo';
@@ -15,9 +17,13 @@ import { TweetWithParent } from '@components/tweet/tweet-with-parent';
 import type { ReactElement, ReactNode } from 'react';
 
 export default function UserWithReplies(): JSX.Element {
+  const { hideBskySocialSuffix } = useTheme();
   const { user } = useUser();
 
   const { id, name, username, pinnedTweet } = user ?? {};
+  const displayUsername = formatAtprotoDisplayIdentifier(username, {
+    hideBskySocialSuffix
+  });
   const profileRestricted = !!user?.blocking || !!user?.blockedBy;
 
   const { data: pinnedData, loading: pinnedLoading } = useDocument(
@@ -48,15 +54,15 @@ export default function UserWithReplies(): JSX.Element {
   return (
     <section>
       <SEO
-        title={`Tweets with replies by ${name as string} (@${
-          username as string
-        }) / Not Twitter`}
+        title={`Tweets with replies by ${
+          name as string
+        } (${displayUsername}) / Not Twitter`}
       />
       {timelineLoading ? (
         <Loading className='mt-5' />
       ) : !hasProfileTweets ? (
         <StatsEmpty
-          title={`@${username as string} hasn't tweeted`}
+          title={`${displayUsername} hasn't tweeted`}
           description='When they do, their Tweets will show up here.'
         />
       ) : (

@@ -1,5 +1,7 @@
 import { AnimatePresence } from 'framer-motion';
+import { formatAtprotoDisplayIdentifier } from '@lib/atproto/identity';
 import { doc, query, where } from '@lib/atproto/store';
+import { useTheme } from '@lib/context/theme-context';
 import { useUser } from '@lib/context/user-context';
 import { useCollection } from '@lib/hooks/useCollection';
 import { useDocument } from '@lib/hooks/useDocument';
@@ -14,9 +16,13 @@ import { Tweet } from '@components/tweet/tweet';
 import type { ReactElement, ReactNode } from 'react';
 
 export default function UserTweets(): JSX.Element {
+  const { hideBskySocialSuffix } = useTheme();
   const { user } = useUser();
 
   const { id, username, pinnedTweet } = user ?? {};
+  const displayUsername = formatAtprotoDisplayIdentifier(username, {
+    hideBskySocialSuffix
+  });
   const profileRestricted = !!user?.blocking || !!user?.blockedBy;
 
   const { data: pinnedData, loading: pinnedLoading } = useDocument(
@@ -61,7 +67,7 @@ export default function UserTweets(): JSX.Element {
         <Loading className='mt-5' />
       ) : !hasProfileTweets ? (
         <StatsEmpty
-          title={`@${username as string} hasn't tweeted`}
+          title={`${displayUsername} hasn't tweeted`}
           description='When they do, their Tweets will show up here.'
         />
       ) : (
