@@ -6,9 +6,12 @@ import { LoggedOutTwitterLayout } from '@components/layout/logged-out-twitter-la
 import FeedPage from './profile/[actor]/feed/[rkey]';
 import TweetPage from './tweet/[id]';
 import UserFollowersPage from './user/[id]/followers';
+import UserFollowersYouKnowPage from './user/[id]/followers_you_follow';
 import UserFollowingPage from './user/[id]/following';
 import UserLikesPage from './user/[id]/likes';
+import UserListsPage from './user/[id]/lists';
 import UserMediaPage from './user/[id]/media';
+import UserStarterPacksPage from './user/[id]/starter-packs';
 import UserTweetsPage from './user/[id]';
 import UserRepliesPage from './user/[id]/with_replies';
 import type { ReactElement, ReactNode } from 'react';
@@ -35,22 +38,27 @@ export default function NotFound(): JSX.Element {
   if (staticRoute?.type === 'feed') return <>{renderPage(FeedPage)}</>;
   if (staticRoute?.type === 'tweet') return <>{renderPage(TweetPage)}</>;
 
-  if (staticRoute?.type === 'user') {
+  if (staticRoute?.type === 'user')
     switch (staticRoute.view) {
       case 'followers':
         return <>{renderPage(UserFollowersPage)}</>;
+      case 'followers_you_follow':
+        return <>{renderPage(UserFollowersYouKnowPage)}</>;
       case 'following':
         return <>{renderPage(UserFollowingPage)}</>;
       case 'likes':
         return <>{renderPage(UserLikesPage)}</>;
+      case 'lists':
+        return <>{renderPage(UserListsPage)}</>;
       case 'media':
         return <>{renderPage(UserMediaPage)}</>;
+      case 'starter-packs':
+        return <>{renderPage(UserStarterPacksPage)}</>;
       case 'with_replies':
         return <>{renderPage(UserRepliesPage)}</>;
       default:
         return <>{renderPage(UserTweetsPage)}</>;
     }
-  }
 
   return (
     <>

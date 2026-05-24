@@ -2,7 +2,9 @@ import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import cn from 'clsx';
+import { formatAtprotoDisplayIdentifier } from '@lib/atproto/identity';
 import { useAuth } from '@lib/context/auth-context';
+import { useTheme } from '@lib/context/theme-context';
 import { useModal } from '@lib/hooks/useModal';
 import { getTweetPath, getUserPath } from '@lib/routes';
 import { createYouTubeCardFromText } from '@lib/youtube';
@@ -19,6 +21,11 @@ import { TweetEmbed } from '@components/tweet/tweet-embed';
 import { TweetStats } from '@components/tweet/tweet-stats';
 import { TweetText } from '@components/tweet/tweet-text';
 import { TweetDate } from '@components/tweet/tweet-date';
+import { TweetReplyRestrictionConversationNotice } from '@components/tweet/tweet-reply-restriction';
+import {
+  TweetTombstone,
+  isViewableTweetTombstoneKind
+} from '@components/tweet/tweet-tombstone';
 import { Input } from '@components/input/input';
 import type { RefObject } from 'react';
 import type { User } from '@lib/types/user';
@@ -46,6 +53,9 @@ export function ViewTweet(tweet: ViewTweetProps): JSX.Element {
     userRetweets,
     userReplies,
     userQuotes = 0,
+    tombstone,
+    replySetting,
+    viewerCanReply,
     viewTweetRef,
     user: tweetUserData,
     onReplySent
@@ -54,11 +64,12 @@ export function ViewTweet(tweet: ViewTweetProps): JSX.Element {
   const { id: ownerId, name, username, verified, photoURL } = tweetUserData;
 
   const { user } = useAuth();
+  const { hideBskySocialSuffix } = useTheme();
 
   const { open, openModal, closeModal } = useModal();
-  const [optimisticReplyCount, setOptimisticReplyCount] =
-    useState(userReplies);
+  const [optimisticReplyCount, setOptimisticReplyCount] = useState(userReplies);
   const [optimisticQuoteCount, setOptimisticQuoteCount] = useState(userQuotes);
+  const [tombstoneRevealed, setTombstoneRevealed] = useState(false);
 
   const tweetLink = getTweetPath(tweetId, username);
   const displayCard = card ?? createYouTubeCardFromText(text);
@@ -67,10 +78,20 @@ export function ViewTweet(tweet: ViewTweetProps): JSX.Element {
   const userId = user?.id ?? '';
 
   const isOwner = userId === createdBy;
+  const mutedAccountTombstone: Tweet['tombstone'] =
+    !isOwner && (tweetUserData.muting || tweetUserData.mutingByListName)
+      ? 'muted-account'
+      : null;
+  const tweetTombstoneKind: Tweet['tombstone'] =
+    tombstone ?? mutedAccountTombstone;
+  const tweetIsHiddenByTombstone = !!tweetTombstoneKind && !tombstoneRevealed;
 
   const reply = !!parent;
 
   const { id: parentId, username: parentUsername = username } = parent ?? {};
+  const parentDisplayUsername = formatAtprotoDisplayIdentifier(parentUsername, {
+    hideBskySocialSuffix
+  });
 
   useEffect(() => {
     setOptimisticReplyCount(userReplies);
@@ -79,6 +100,15 @@ export function ViewTweet(tweet: ViewTweetProps): JSX.Element {
   useEffect(() => {
     setOptimisticQuoteCount(userQuotes);
   }, [userQuotes]);
+
+  useEffect(() => {
+    setTombstoneRevealed(false);
+  }, [
+    tweetId,
+    tombstone,
+    tweetUserData.muting,
+    tweetUserData.mutingByListName
+  ]);
 
   const handleReplySent = useCallback(
     (replyTweet: TweetWithUser): void => {
@@ -91,6 +121,26 @@ export function ViewTweet(tweet: ViewTweetProps): JSX.Element {
   const handleQuoteTweetSent = useCallback((): void => {
     setOptimisticQuoteCount((count) => count + 1);
   }, []);
+
+  if (tweetIsHiddenByTombstone)
+    return (
+      <motion.article
+        className='border-b border-light-border px-4 py-3 dark:border-dark-border'
+        {...variants}
+        animate={{ ...variants.animate, transition: { duration: 0.2 } }}
+        exit={undefined}
+        ref={viewTweetRef}
+      >
+        <TweetTombstone
+          kind={tweetTombstoneKind}
+          onView={
+            isViewableTweetTombstoneKind(tweetTombstoneKind)
+              ? (): void => setTombstoneRevealed(true)
+              : undefined
+          }
+        />
+      </motion.article>
+    );
 
   return (
     <motion.article
@@ -106,7 +156,7 @@ export function ViewTweet(tweet: ViewTweetProps): JSX.Element {
     >
       <Modal
         className='flex items-start justify-center'
-        modalClassName='bg-main-background rounded-2xl max-w-xl w-full mt-8 overflow-hidden'
+        modalClassName='bg-main-background rounded-2xl max-w-xl w-full mt-8'
         open={open}
         closeModal={closeModal}
       >
@@ -165,7 +215,7 @@ export function ViewTweet(tweet: ViewTweetProps): JSX.Element {
           Replying to{' '}
           <Link href={getUserPath(parentUsername)}>
             <a className='custom-underline text-main-accent'>
-              @{parentUsername}
+              {parentDisplayUsername}
             </a>
           </Link>
         </p>
@@ -204,10 +254,16 @@ export function ViewTweet(tweet: ViewTweetProps): JSX.Element {
             userReplies={optimisticReplyCount}
             userQuotes={optimisticQuoteCount}
             openModal={openModal}
+            viewerCanReply={viewerCanReply}
             onQuoteTweetSent={handleQuoteTweetSent}
           />
+          <TweetReplyRestrictionConversationNotice
+            replySetting={replySetting}
+            viewerCanReply={viewerCanReply}
+            username={username}
+          />
         </div>
-        {user && (
+        {user && viewerCanReply !== false && (
           <Input
             reply
             parent={{ id: tweetId, username: username }}

@@ -15,9 +15,8 @@ import { SearchBar } from '@components/aside/search-bar';
 import { MobileSidebar } from '@components/sidebar/mobile-sidebar';
 import { Tweet } from '@components/tweet/tweet';
 import { UserCard } from '@components/user/user-card';
-import { Button } from '@components/ui/button';
+import { CustomIcon } from '@components/ui/custom-icon';
 import { Error } from '@components/ui/error';
-import { HeroIcon } from '@components/ui/hero-icon';
 import { Loading } from '@components/ui/loading';
 import { ToolTip } from '@components/ui/tooltip';
 import type {
@@ -96,14 +95,17 @@ function ExploreSearchHeader(): JSX.Element {
     >
       <MobileSidebar />
       <SearchBar className='min-w-0 flex-1 bg-transparent p-0' sticky={false} />
-      <Button
-        className='group relative p-2 hover:bg-light-primary/10 active:bg-light-primary/20 
-                   dark:hover:bg-dark-primary/10 dark:active:bg-dark-primary/20'
-        aria-label='Explore settings'
-      >
-        <HeroIcon className='h-5 w-5' iconName='Cog6ToothIcon' />
-        <ToolTip tip='Settings' />
-      </Button>
+      <Link href='/interests'>
+        <a
+          className='custom-button main-tab group relative p-2 hover:bg-light-primary/10
+                     active:bg-light-primary/20 dark:hover:bg-dark-primary/10
+                     dark:active:bg-dark-primary/20'
+          aria-label='Interests'
+        >
+          <CustomIcon className='h-5 w-5' iconName='TwitterSettingsIcon' />
+          <ToolTip tip='Interests' />
+        </a>
+      </Link>
     </header>
   );
 }
@@ -300,7 +302,7 @@ export default function Explore(): JSX.Element {
       ) : (
         <>
           <div className='border-y border-light-border px-4 py-3 dark:border-dark-border'>
-            <h1 className='text-xl font-extrabold'>Trends for you</h1>
+            <h1 className='text-xl font-extrabold'>What&apos;s happening</h1>
           </div>
           <AsideTrends inTrendsPage />
         </>

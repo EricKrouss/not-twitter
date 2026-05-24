@@ -1,5 +1,7 @@
 import Link from 'next/link';
 import cn from 'clsx';
+import { formatAtprotoDisplayIdentifier } from '@lib/atproto/identity';
+import { useTheme } from '@lib/context/theme-context';
 import { getUserPath } from '@lib/routes';
 
 type UserUsernameProps = {
@@ -13,6 +15,11 @@ export function UserUsername({
   className,
   disableLink
 }: UserUsernameProps): JSX.Element {
+  const { hideBskySocialSuffix } = useTheme();
+  const displayUsername = formatAtprotoDisplayIdentifier(username, {
+    hideBskySocialSuffix
+  });
+
   return (
     <Link href={getUserPath(username)}>
       <a
@@ -23,7 +30,7 @@ export function UserUsername({
         )}
         tabIndex={-1}
       >
-        @{username}
+        {displayUsername}
       </a>
     </Link>
   );

@@ -30,7 +30,9 @@ export function onAuthStateChanged(
   _auth: Auth,
   callback: (user: User | null) => void
 ): () => void {
-  void resumeAuthUser().then(callback);
+  void resumeAuthUser()
+    .then(callback)
+    .catch(() => callback(null));
 
   return subscribeBackend(() => {
     const user = getCurrentUser();
@@ -39,7 +41,7 @@ export function onAuthStateChanged(
         ? { uid: user.id, displayName: user.name, photoURL: user.photoURL }
         : null
     );
-  });
+  }, ['auth']);
 }
 
 export async function signInWithBluesky(

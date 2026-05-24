@@ -4,7 +4,9 @@ import { Popover } from '@headlessui/react';
 import { AnimatePresence, motion } from 'framer-motion';
 import cn from 'clsx';
 import { toast } from 'react-hot-toast';
+import { formatAtprotoDisplayIdentifier } from '@lib/atproto/identity';
 import { useAuth } from '@lib/context/auth-context';
+import { useTheme } from '@lib/context/theme-context';
 import { useModal } from '@lib/hooks/useModal';
 import { tweetsCollection } from '@lib/atproto/collections';
 import { doc, getDoc } from '@lib/atproto/store';
@@ -92,7 +94,11 @@ export function TweetActions({
   createdBy
 }: TweetActionsProps): JSX.Element {
   const { user, isAdmin } = useAuth();
+  const { hideBskySocialSuffix } = useTheme();
   const { push } = useRouter();
+  const displayUsername = formatAtprotoDisplayIdentifier(username, {
+    hideBskySocialSuffix
+  });
 
   const {
     open: removeOpen,
@@ -148,7 +154,7 @@ export function TweetActions({
     ]);
 
     toast.success(
-      `${isInAdminControl ? `@${username}'s` : 'Your'} Tweet was deleted`
+      `${isInAdminControl ? `${displayUsername}'s` : 'Your'} Tweet was deleted`
     );
 
     removeCloseModal();
@@ -171,7 +177,9 @@ export function TweetActions({
       await manageFollow(...args);
 
       toast.success(
-        `You ${type === 'follow' ? 'followed' : 'unfollowed'} @${username}`
+        `You ${
+          type === 'follow' ? 'followed' : 'unfollowed'
+        } ${displayUsername}`
       );
     };
 
@@ -183,7 +191,9 @@ export function TweetActions({
   const handleBlock = async (): Promise<void> => {
     if (!userId) return;
     await manageBlock(blocking ? 'unblock' : 'block', userId, createdBy);
-    toast.success(`You ${blocking ? 'unblocked' : 'blocked'} @${username}`);
+    toast.success(
+      `You ${blocking ? 'unblocked' : 'blocked'} ${displayUsername}`
+    );
     blockCloseModal();
   };
 
@@ -195,7 +205,7 @@ export function TweetActions({
   const handleMute = async (): Promise<void> => {
     if (!userId) return;
     await manageMute(muting ? 'unmute' : 'mute', userId, createdBy);
-    toast.success(`You ${muting ? 'unmuted' : 'muted'} @${username}`);
+    toast.success(`You ${muting ? 'unmuted' : 'muted'} ${displayUsername}`);
     muteCloseModal();
   };
 
@@ -234,9 +244,9 @@ export function TweetActions({
         <ActionModal
           title='Delete Tweet?'
           description={`This can’t be undone and it will be removed from ${
-            isInAdminControl ? `@${username}'s` : 'your'
+            isInAdminControl ? `${displayUsername}'s` : 'your'
           } profile, the timeline of any accounts that follow ${
-            isInAdminControl ? `@${username}` : 'you'
+            isInAdminControl ? displayUsername : 'you'
           }, and from Not Twitter search results.`}
           mainBtnClassName='bg-accent-red hover:bg-accent-red/90 active:bg-accent-red/75 accent-tab
                             focus-visible:bg-accent-red/90'
@@ -266,7 +276,7 @@ export function TweetActions({
         closeModal={blockCloseModal}
       >
         <ActionModal
-          title={`${blocking ? 'Unblock' : 'Block'} @${username}?`}
+          title={`${blocking ? 'Unblock' : 'Block'} ${displayUsername}?`}
           description={
             blocking
               ? 'They will be able to follow you and view your Tweets.'
@@ -288,7 +298,7 @@ export function TweetActions({
         closeModal={muteCloseModal}
       >
         <ActionModal
-          title={`${muting ? 'Unmute' : 'Mute'} @${username}?`}
+          title={`${muting ? 'Unmute' : 'Mute'} ${displayUsername}?`}
           description={
             muting
               ? 'Their Tweets will be allowed back into your timelines and conversations.'
@@ -363,7 +373,7 @@ export function TweetActions({
                       onClick={preventBubbling(handleLoggedOutAction(close))}
                     >
                       <HeroIcon iconName='UserPlusIcon' />
-                      Follow @{username}
+                      Follow {displayUsername}
                     </Popover.Button>
                   ) : isOwner ? (
                     <Popover.Button
@@ -392,7 +402,7 @@ export function TweetActions({
                       )}
                     >
                       <HeroIcon iconName='UserMinusIcon' />
-                      Unfollow @{username}
+                      Unfollow {displayUsername}
                     </Popover.Button>
                   ) : (
                     <Popover.Button
@@ -403,7 +413,7 @@ export function TweetActions({
                       )}
                     >
                       <HeroIcon iconName='UserPlusIcon' />
-                      Follow @{username}
+                      Follow {displayUsername}
                     </Popover.Button>
                   )}
                   {signedIn && !isOwner && !blockingByListName && (
@@ -417,7 +427,9 @@ export function TweetActions({
                       onClick={preventBubbling(handleBlockOpen(close))}
                     >
                       <HeroIcon iconName='NoSymbolIcon' />
-                      {blocking ? `Unblock @${username}` : `Block @${username}`}
+                      {blocking
+                        ? `Unblock ${displayUsername}`
+                        : `Block ${displayUsername}`}
                     </Popover.Button>
                   )}
                   {signedIn && !isOwner && (
@@ -440,8 +452,8 @@ export function TweetActions({
                       {mutingByListName
                         ? `Muted by ${mutingByListName}`
                         : muting
-                        ? `Unmute @${username}`
-                        : `Mute @${username}`}
+                        ? `Unmute ${displayUsername}`
+                        : `Mute ${displayUsername}`}
                     </Popover.Button>
                   )}
                   {signedIn && !isOwner && (

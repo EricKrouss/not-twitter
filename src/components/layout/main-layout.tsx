@@ -6,7 +6,7 @@ import { fetchJSON } from '@lib/fetch';
 import { useAuth } from '@lib/context/auth-context';
 import { getUserPath } from '@lib/routes';
 import { LiveUpdatesProvider } from '@lib/context/live-updates-context';
-import { WindowContextProvider } from '@lib/context/window-context';
+import { useWindow, WindowContextProvider } from '@lib/context/window-context';
 import { Sidebar } from '@components/sidebar/sidebar';
 import { KeyboardShortcutsModal } from '@components/modal/keyboard-shortcuts-modal';
 import type { DefaultToastOptions } from 'react-hot-toast';
@@ -20,6 +20,18 @@ const toastOptions: DefaultToastOptions = {
   },
   success: { duration: 4000 }
 };
+
+function MainToaster(): JSX.Element {
+  const { isMobile } = useWindow();
+
+  return (
+    <Toaster
+      position='bottom-center'
+      toastOptions={toastOptions}
+      containerClassName={isMobile ? 'mb-12' : 'mb-0'}
+    />
+  );
+}
 
 export function MainLayout({ children }: LayoutProps): JSX.Element {
   const router = useRouter();
@@ -305,20 +317,15 @@ export function MainLayout({ children }: LayoutProps): JSX.Element {
   }, [username, router]);
 
   return (
-    <div className='flex w-full justify-center gap-0 lg:gap-4'>
+    <div className='flex w-full justify-center gap-0 min-[1120px]:gap-4'>
       <WindowContextProvider>
         <LiveUpdatesProvider>
           <Sidebar />
           <SWRConfig value={{ fetcher: fetchJSON }}>{children}</SWRConfig>
         </LiveUpdatesProvider>
+        <MainToaster />
       </WindowContextProvider>
-      <Toaster
-        position='bottom-center'
-        toastOptions={toastOptions}
-        containerClassName='mb-12 xs:mb-0'
-      />
       <KeyboardShortcutsModal open={shortcutsOpen} closeModal={() => setShortcutsOpen(false)} />
     </div>
   );
 }
-

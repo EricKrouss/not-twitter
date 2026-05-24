@@ -1,4 +1,19 @@
-import { getTweetPath, getTweetQuotesPath } from './routes';
+import {
+  getTweetPath,
+  getTweetQuotesPath,
+  canonicalizeBskyPostLinksInText,
+  getBskyPostLinkFromText,
+  getBskyTweetUrl,
+  removeBskyPostLinkFromText
+} from './routes';
+
+function postIdFromAtUri(uri: string): string {
+  return Buffer.from(uri, 'utf8')
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
 
 describe('getTweetPath', () => {
   it('formats standard ATProto route when username and base64 encoded post ID are provided', () => {
@@ -31,5 +46,70 @@ describe('getTweetQuotesPath', () => {
     const base64PostId = 'YXQ6Ly9kaWQ6cGxjOmgyM2s2eHJ4b3Q0eGhndGFoaWVmc3pjaC9hcHAuYnNreS5mZWVkLnBvc3QvM21taXdjMnNreGMycg';
     const path = getTweetQuotesPath(base64PostId, 'christophkappes.bsky.social');
     expect(path).toBe('/profile/christophkappes.bsky.social/post/3mmiwc2skxc2r/retweets/with_comments');
+  });
+});
+
+describe('Bluesky post route helpers', () => {
+  const atUri = 'at://did:plc:abc123/app.bsky.feed.post/3mmht5rnfc2h';
+  const encodedTweetId = postIdFromAtUri(atUri);
+
+  it('creates canonical bsky.app share URLs from internal post IDs', () => {
+    expect(getBskyTweetUrl(encodedTweetId, 'krouss.net')).toBe(
+      'https://bsky.app/profile/krouss.net/post/3mmht5rnfc2h'
+    );
+  });
+
+  it('detects canonical bsky.app post links', () => {
+    expect(
+      getBskyPostLinkFromText(
+        'hey https://bsky.app/profile/krouss.net/post/3mmht5rnfc2h'
+      )
+    ).toMatchObject({
+      actor: 'krouss.net',
+      rkey: '3mmht5rnfc2h'
+    });
+  });
+
+  it('detects self-host status links with internal encoded IDs', () => {
+    expect(
+      getBskyPostLinkFromText(
+        `hey https://example.social/krouss.net/status/${encodedTweetId}`
+      )
+    ).toMatchObject({
+      actor: 'krouss.net',
+      rkey: '3mmht5rnfc2h',
+      tweetId: encodedTweetId
+    });
+  });
+
+  it('detects self-host status links with plain Bluesky post rkeys', () => {
+    const postLink = getBskyPostLinkFromText(
+      'hey https://example.social/krouss.net/status/3mmht5rnfc2h'
+    );
+
+    expect(postLink).toMatchObject({
+      actor: 'krouss.net',
+      rkey: '3mmht5rnfc2h'
+    });
+    expect(postLink?.tweetId).toBe(
+      postIdFromAtUri('at://krouss.net/app.bsky.feed.post/3mmht5rnfc2h')
+    );
+  });
+
+  it('canonicalizes self-host post links before posting', () => {
+    expect(
+      canonicalizeBskyPostLinksInText(
+        'check https://example.social/krouss.net/status/3mmht5rnfc2h'
+      )
+    ).toBe('check https://bsky.app/profile/krouss.net/post/3mmht5rnfc2h');
+  });
+
+  it('removes an attached post link when it is represented by a quote embed', () => {
+    const text = `John would like this\nhttps://example.social/krouss.net/status/${encodedTweetId}`;
+    const postLink = getBskyPostLinkFromText(text);
+
+    expect(removeBskyPostLinkFromText(text, postLink)).toBe(
+      'John would like this'
+    );
   });
 });

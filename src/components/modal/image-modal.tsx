@@ -2,18 +2,21 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import cn from 'clsx';
 import { toast } from 'react-hot-toast';
+import { siteURL } from '@lib/env';
+import { formatAtprotoDisplayIdentifier } from '@lib/atproto/identity';
 import { preventBubbling } from '@lib/utils';
 import { formatDate, formatNumber } from '@lib/date';
 import { useAuth } from '@lib/context/auth-context';
+import { useTheme } from '@lib/context/theme-context';
 import { useCollection } from '@lib/hooks/useCollection';
 import { tweetsCollection } from '@lib/atproto/collections';
 import { query, where, orderBy } from '@lib/atproto/store';
 import { manageBookmark, manageLike, manageRetweet } from '@lib/atproto/utils';
-import { getTweetPath, getUserPath } from '@lib/routes';
+import { getBskyTweetUrl, getTweetPath, getUserPath } from '@lib/routes';
 import { Button } from '@components/ui/button';
 import { HeroIcon } from '@components/ui/hero-icon';
 import { AppIcon, type AppIconName } from '@components/ui/app-icon';
@@ -24,6 +27,11 @@ import { UserName } from '@components/user/user-name';
 import { UserUsername } from '@components/user/user-username';
 import { Input } from '@components/input/input';
 import { TweetActions } from '@components/tweet/tweet-actions';
+import {
+  TweetActionEffect,
+  type TweetActionEffectKind
+} from '@components/tweet/tweet-action-effect';
+import { useOptimisticReactionIds } from '@components/tweet/use-optimistic-reaction-ids';
 import { TweetShare } from '@components/tweet/tweet-share';
 import { TweetText } from '@components/tweet/tweet-text';
 import type { VariantLabels, Variants } from 'framer-motion';
@@ -35,6 +43,7 @@ type ImageModalProps = {
   tweet?: boolean;
   imageData: ImageData;
   previewCount: number;
+  profileMediaKind?: 'avatar' | 'cover';
   tweetData?: TweetWithUser;
   selectedIndex?: number;
   handleNextIndex?: (type: 'prev' | 'next') => () => void;
@@ -54,9 +63,52 @@ const mediaFade: Variants = {
   exit: { opacity: 0, transition: { duration: 0.12, ease: 'easeOut' } }
 };
 
+const fullscreenMediaGlide: Variants = {
+  initial: (direction: number) => ({
+    opacity: 0,
+    x: direction > 0 ? 72 : -72,
+    scale: 0.985
+  }),
+  animate: {
+    opacity: 1,
+    x: 0,
+    scale: 1,
+    transition: { duration: 0.28, ease: [0.2, 0, 0, 1] }
+  },
+  exit: (direction: number) => ({
+    opacity: 0,
+    x: direction > 0 ? -72 : 72,
+    scale: 0.985,
+    transition: { duration: 0.22, ease: [0.2, 0, 0, 1] }
+  })
+};
+
+const profileAvatarFrameStyle = {
+  width: 'min(100vw, 100vh, 400px)',
+  height: 'min(100vw, 100vh, 400px)'
+};
+
+const profileCoverFrameStyle = {
+  width: 'min(100vw, 300vh)',
+  aspectRatio: '3 / 1'
+};
+
 type FullscreenImageModalProps = Pick<
   ImageModalProps,
-  'imageData' | 'tweetData' | 'previewCount' | 'handleNextIndex' | 'closeModal'
+  | 'imageData'
+  | 'tweetData'
+  | 'previewCount'
+  | 'selectedIndex'
+  | 'handleNextIndex'
+  | 'closeModal'
+> & {
+  loading: boolean;
+  mediaDirection: number;
+};
+
+type ProfileFullscreenImageModalProps = Pick<
+  ImageModalProps,
+  'imageData' | 'profileMediaKind' | 'closeModal'
 > & {
   loading: boolean;
 };
@@ -67,6 +119,10 @@ type ConversationTweetProps = {
   onReply?: () => void;
 };
 
+type ConversationActionBarProps = ConversationTweetProps & {
+  mediaOnly?: boolean;
+};
+
 type ConversationActionButtonProps = {
   tip: string;
   iconName: AppIconName;
@@ -75,6 +131,8 @@ type ConversationActionButtonProps = {
   root?: boolean;
   className: string;
   iconClassName: string;
+  actionEffect?: TweetActionEffectKind;
+  countClassName?: string;
   onClick?: () => void;
 };
 
@@ -84,11 +142,22 @@ function isVideoMedia({ src, type }: ImageData): boolean {
   );
 }
 
+const mediaModalBorder =
+  'border-dark-border lg:border-light-border dark:lg:border-dark-border';
+const mediaModalPrimaryText =
+  'text-dark-primary lg:text-light-primary dark:lg:text-dark-primary';
+const mediaModalSecondaryText =
+  'text-dark-secondary lg:text-light-secondary dark:lg:text-dark-secondary';
+const mediaModalSecondaryHoverText =
+  'text-dark-secondary hover:text-dark-primary lg:text-light-secondary lg:hover:text-light-primary dark:lg:text-dark-secondary dark:lg:hover:text-dark-primary';
+
 function FullscreenImageModal({
   imageData,
   tweetData,
   previewCount,
+  selectedIndex,
   loading,
+  mediaDirection,
   handleNextIndex,
   closeModal
 }: FullscreenImageModalProps): JSX.Element {
@@ -99,7 +168,10 @@ function FullscreenImageModal({
 
   return (
     <div className='flex h-screen w-screen flex-col overflow-hidden bg-black text-white lg:flex-row'>
-      <section className='relative flex min-h-0 flex-1 items-center justify-center bg-black'>
+      <section
+        className='relative flex min-h-[100svh] shrink-0 items-center justify-center overflow-hidden
+                   bg-black lg:min-h-0 lg:flex-1'
+      >
         {closeModal && (
           <Button
             className='absolute left-4 top-4 z-20 flex h-11 w-11 items-center justify-center bg-black/40
@@ -128,19 +200,24 @@ function FullscreenImageModal({
               <HeroIcon iconName={iconName} />
             </Button>
           ))}
-        <AnimatePresence mode='wait'>
+        <AnimatePresence custom={mediaDirection} initial={false}>
           {loading ? (
             <motion.div
-              className='flex h-full w-full items-center justify-center'
+              className='absolute inset-0 flex h-full w-full items-center justify-center'
               {...mediaFade}
+              key={`loading-${selectedIndex ?? src}`}
             >
               <Loading iconClassName='h-12 w-12 text-white' />
             </motion.div>
           ) : (
             <motion.div
-              className='flex h-full w-full items-center justify-center p-4 sm:p-8 lg:px-16 lg:py-12'
-              {...mediaFade}
-              key={src}
+              className='absolute inset-0 flex h-full w-full items-center justify-center p-4 sm:p-8 lg:px-16 lg:py-12'
+              custom={mediaDirection}
+              variants={fullscreenMediaGlide}
+              initial='initial'
+              animate='animate'
+              exit='exit'
+              key={`${selectedIndex ?? 0}-${src}`}
             >
               {isVideo ? (
                 <TwitterVideoPlayer
@@ -167,8 +244,74 @@ function FullscreenImageModal({
             </motion.div>
           )}
         </AnimatePresence>
+        {tweetData && <ConversationActionBar tweet={tweetData} mediaOnly />}
       </section>
       {tweetData && <MediaConversation tweet={tweetData} />}
+    </div>
+  );
+}
+
+function ProfileFullscreenImageModal({
+  imageData,
+  profileMediaKind,
+  loading,
+  closeModal
+}: ProfileFullscreenImageModalProps): JSX.Element {
+  const { src, alt } = imageData;
+  const isAvatar = profileMediaKind === 'avatar';
+
+  return (
+    <div className='relative flex h-screen w-screen overflow-hidden bg-black/90 text-white transition-colors duration-500'>
+      {closeModal && (
+        <Button
+          className='absolute top-3 left-3 z-20 flex h-11 w-11 items-center justify-center
+                     bg-transparent p-0 text-white transition-colors duration-200 ease-out
+                     hover:bg-white/10 focus-visible:ring-white/70 active:bg-white/20'
+          aria-label='Close'
+          onClick={preventBubbling(closeModal)}
+        >
+          <HeroIcon iconName='XMarkIcon' />
+        </Button>
+      )}
+      <AnimatePresence mode='wait'>
+        {loading ? (
+          <motion.div
+            className='absolute inset-0 flex items-center justify-center'
+            {...mediaFade}
+            key={`profile-loading-${src}`}
+          >
+            <Loading iconClassName='h-12 w-12 text-white' />
+          </motion.div>
+        ) : (
+          <motion.div
+            className='flex h-full w-full items-center justify-center'
+            {...mediaFade}
+            key={`profile-media-${profileMediaKind ?? 'media'}-${src}`}
+          >
+            <picture
+              className={cn(
+                'relative flex shrink-0 items-center justify-center',
+                isAvatar ? 'p-4' : 'max-h-screen'
+              )}
+              style={
+                isAvatar ? profileAvatarFrameStyle : profileCoverFrameStyle
+              }
+              onClick={preventBubbling()}
+            >
+              <source srcSet={src} type='image/*' />
+              <img
+                className={cn(
+                  'h-full w-full object-contain',
+                  isAvatar && 'rounded-full'
+                )}
+                src={src}
+                alt={alt}
+                draggable={false}
+              />
+            </picture>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -189,10 +332,12 @@ function MediaConversation({ tweet }: { tweet: TweetWithUser }): JSX.Element {
 
   return (
     <aside
-      className='flex h-[44vh] w-full shrink-0 flex-col border-t border-light-border bg-main-background
-                 text-light-primary dark:border-dark-border dark:text-dark-primary lg:h-full lg:w-[350px]
-                 lg:min-w-[350px]
-                 lg:border-t-0 lg:border-l'
+      className={cn(
+        `hidden h-full w-[350px] min-w-[350px] shrink-0 flex-col border-l
+         bg-main-background lg:flex`,
+        mediaModalBorder,
+        mediaModalPrimaryText
+      )}
       onClick={preventBubbling(null, true)}
     >
       <div className='min-h-0 flex-1 overflow-y-auto overscroll-contain'>
@@ -201,17 +346,19 @@ function MediaConversation({ tweet }: { tweet: TweetWithUser }): JSX.Element {
           root
           onReply={(): void => setReplyFocusRequest((request) => request + 1)}
         />
-        <div className='border-b border-light-border text-[15px] dark:border-dark-border'>
+        <div className={cn('border-b text-[15px]', mediaModalBorder)}>
           <button
-            className='accent-tab flex items-center gap-1 px-4 py-2.5 text-light-secondary outline-none
-                       hover:text-light-primary dark:text-dark-secondary dark:hover:text-dark-primary'
+            className={cn(
+              'accent-tab flex items-center gap-1 px-4 py-2.5 outline-none',
+              mediaModalSecondaryHoverText
+            )}
             type='button'
           >
             <span>Relevant</span>
             <HeroIcon className='h-4 w-4' iconName='ChevronDownIcon' />
           </button>
         </div>
-        <div className='border-b border-light-border px-4 dark:border-dark-border'>
+        <div className={cn('border-b px-4', mediaModalBorder)}>
           <Input
             reply
             compactReply
@@ -251,15 +398,25 @@ function ConversationTweet({
   } = tweet;
 
   const { user: authUser } = useAuth();
+  const { hideBskySocialSuffix } = useTheme();
 
   const { id: ownerId, name, username, verified, photoURL } = user;
   const userId = authUser?.id as string;
   const isOwner = userId === createdBy;
   const tweetLink = getTweetPath(id, username);
+  const parentDisplayUsername = formatAtprotoDisplayIdentifier(
+    parent?.username,
+    { hideBskySocialSuffix }
+  );
 
   if (root)
     return (
-      <article className='relative border-b border-light-border px-4 pt-3 text-[15px] dark:border-dark-border'>
+      <article
+        className={cn(
+          'relative border-b px-4 pt-3 text-[15px]',
+          mediaModalBorder
+        )}
+      >
         <div className='flex min-w-0 gap-3 pr-10'>
           <UserAvatar
             className='mt-0.5'
@@ -268,14 +425,22 @@ function ConversationTweet({
             alt={name}
             username={username}
           />
-          <div className='min-w-0 flex-1 text-light-secondary dark:text-dark-secondary'>
+          <div
+            className={cn(
+              'flex min-w-0 flex-1 flex-col leading-5',
+              mediaModalSecondaryText
+            )}
+          >
             <UserName
               name={name}
               username={username}
               verified={verified}
-              className='text-light-primary dark:text-dark-primary'
+              className={mediaModalPrimaryText}
             />
-            <UserUsername username={username} />
+            <UserUsername
+              className={cn('block leading-5', mediaModalSecondaryText)}
+              username={username}
+            />
           </div>
         </div>
         <TweetActions
@@ -290,11 +455,11 @@ function ConversationTweet({
           viewTweet
         />
         {parent && (
-          <p className='mt-3 text-light-secondary dark:text-dark-secondary'>
+          <p className={cn('mt-3', mediaModalSecondaryText)}>
             Replying to{' '}
             <Link href={getUserPath(parent.username)}>
               <a className='custom-underline text-main-accent'>
-                @{parent.username}
+                {parentDisplayUsername}
               </a>
             </Link>
           </p>
@@ -306,7 +471,12 @@ function ConversationTweet({
           />
         )}
         <Link href={tweetLink}>
-          <a className='custom-underline mt-4 block text-[15px] leading-5 text-light-secondary dark:text-dark-secondary'>
+          <a
+            className={cn(
+              'custom-underline mt-4 block text-[15px] leading-5',
+              mediaModalSecondaryText
+            )}
+          >
             {formatDate(createdAt, 'full')} · Twitter Web App
           </a>
         </Link>
@@ -318,7 +488,8 @@ function ConversationTweet({
   return (
     <article
       className={cn(
-        'relative border-b border-light-border px-4 text-[15px] dark:border-dark-border',
+        'relative border-b px-4 text-[15px]',
+        mediaModalBorder,
         root ? 'pt-3 pb-0' : 'hover-card py-3 duration-200'
       )}
     >
@@ -333,7 +504,8 @@ function ConversationTweet({
         <div className={cn('min-w-0', root ? 'pr-0' : 'pr-8')}>
           <div
             className={cn(
-              'min-w-0 text-light-secondary dark:text-dark-secondary',
+              'min-w-0',
+              mediaModalSecondaryText,
               root ? 'flex flex-col' : 'flex flex-wrap items-center gap-x-1'
             )}
           >
@@ -341,10 +513,13 @@ function ConversationTweet({
               name={name}
               username={username}
               verified={verified}
-              className='text-light-primary dark:text-dark-primary'
+              className={mediaModalPrimaryText}
             />
             <div className='flex min-w-0 items-center gap-1'>
-              <UserUsername username={username} />
+              <UserUsername
+                className={mediaModalSecondaryText}
+                username={username}
+              />
               {!root && (
                 <>
                   <i>·</i>
@@ -358,11 +533,11 @@ function ConversationTweet({
             </div>
           </div>
           {parent && (
-            <p className='mt-1 text-light-secondary dark:text-dark-secondary'>
+            <p className={cn('mt-1', mediaModalSecondaryText)}>
               Replying to{' '}
               <Link href={getUserPath(parent.username)}>
                 <a className='custom-underline text-main-accent'>
-                  @{parent.username}
+                  {parentDisplayUsername}
                 </a>
               </Link>
             </p>
@@ -379,7 +554,12 @@ function ConversationTweet({
           {!root && <ConversationAttachments images={images} />}
           {root && (
             <Link href={tweetLink}>
-              <a className='custom-underline mt-3 block text-[15px] text-light-secondary dark:text-dark-secondary'>
+              <a
+                className={cn(
+                  'custom-underline mt-3 block text-[15px]',
+                  mediaModalSecondaryText
+                )}
+              >
                 {formatDate(createdAt, 'full')}
               </a>
             </Link>
@@ -422,10 +602,16 @@ function MediaTweetStatsRow({
   if (!visibleStats.length) return null;
 
   return (
-    <div className='mt-3 flex flex-wrap gap-x-4 gap-y-2 border-t border-light-border py-3 text-[15px] text-light-secondary dark:border-dark-border dark:text-dark-secondary'>
+    <div
+      className={cn(
+        'mt-3 flex flex-wrap gap-x-4 gap-y-2 border-t py-3 text-[15px]',
+        mediaModalBorder,
+        mediaModalSecondaryText
+      )}
+    >
       {visibleStats.map(([count, label]) => (
         <span className='flex gap-1' key={label}>
-          <b className='font-bold text-light-primary dark:text-dark-primary'>
+          <b className={cn('font-bold', mediaModalPrimaryText)}>
             {formatNumber(count)}
           </b>
           <span>{label}</span>
@@ -445,7 +631,8 @@ function ConversationAttachments({
   return (
     <div
       className={cn(
-        'mt-2 grid overflow-hidden rounded-2xl border border-light-border bg-black dark:border-dark-border',
+        'mt-2 grid overflow-hidden rounded-2xl border bg-black',
+        mediaModalBorder,
         previewCount === 1 ? 'grid-cols-1' : 'grid-cols-2',
         previewCount > 2 && 'grid-rows-2'
       )}
@@ -488,15 +675,24 @@ function ConversationAttachments({
 function ConversationActionBar({
   tweet,
   root,
-  onReply
-}: ConversationTweetProps): JSX.Element {
+  onReply,
+  mediaOnly
+}: ConversationActionBarProps): JSX.Element {
   const { push } = useRouter();
   const { user, userBookmarks } = useAuth();
 
-  const [optimisticLikes, setOptimisticLikes] = useState(tweet.userLikes);
-  const [optimisticRetweets, setOptimisticRetweets] = useState(
-    tweet.userRetweets
-  );
+  const {
+    optimisticIds: optimisticLikes,
+    active: tweetIsLiked,
+    applyOptimisticActive: applyOptimisticLike,
+    rollbackOptimisticIds: rollbackOptimisticLikes
+  } = useOptimisticReactionIds(tweet.userLikes, user?.id);
+  const {
+    optimisticIds: optimisticRetweets,
+    active: tweetIsRetweeted,
+    applyOptimisticActive: applyOptimisticRetweet,
+    rollbackOptimisticIds: rollbackOptimisticRetweets
+  } = useOptimisticReactionIds(tweet.userRetweets, user?.id);
   const [optimisticBookmarked, setOptimisticBookmarked] = useState(
     !!userBookmarks?.some(({ id }) => id === tweet.id)
   );
@@ -507,37 +703,7 @@ function ConversationActionBar({
   const [updatingRetweet, setUpdatingRetweet] = useState(false);
   const [updatingBookmark, setUpdatingBookmark] = useState(false);
 
-  const userId = user?.id as string;
-  const tweetIsLiked = optimisticLikes.includes(userId);
-  const tweetIsRetweeted = optimisticRetweets.includes(userId);
-
-  useEffect(() => {
-    setOptimisticLikes((current) => {
-      if (!userId) return tweet.userLikes;
-      const wasLiked = current.includes(userId);
-      const isLikedInProp = tweet.userLikes.includes(userId);
-      if (wasLiked && !isLikedInProp) {
-        return [userId, ...tweet.userLikes.filter((id) => id !== userId)];
-      } else if (!wasLiked && isLikedInProp) {
-        return tweet.userLikes.filter((id) => id !== userId);
-      }
-      return tweet.userLikes;
-    });
-  }, [tweet.userLikes, userId]);
-
-  useEffect(() => {
-    setOptimisticRetweets((current) => {
-      if (!userId) return tweet.userRetweets;
-      const wasRetweeted = current.includes(userId);
-      const isRetweetedInProp = tweet.userRetweets.includes(userId);
-      if (wasRetweeted && !isRetweetedInProp) {
-        return [userId, ...tweet.userRetweets.filter((id) => id !== userId)];
-      } else if (!wasRetweeted && isRetweetedInProp) {
-        return tweet.userRetweets.filter((id) => id !== userId);
-      }
-      return tweet.userRetweets;
-    });
-  }, [tweet.userRetweets, userId]);
+  const userId = user?.id as string | undefined;
   useEffect(() => {
     const bookmarked = !!userBookmarks?.some(({ id }) => id === tweet.id);
 
@@ -551,18 +717,35 @@ function ConversationActionBar({
     void push(getTweetPath(tweet.id, tweet.user.username));
   };
 
+  const handleShare = async (): Promise<void> => {
+    const url =
+      getBskyTweetUrl(tweet.id, tweet.user.username) ??
+      `${siteURL}${getTweetPath(tweet.id, tweet.user.username)}`;
+
+    try {
+      if (navigator.share) await navigator.share({ url });
+      else {
+        await navigator.clipboard.writeText(url);
+        toast.success('Copied to clipboard');
+      }
+    } catch {
+      // Native share can reject when the user dismisses the sheet.
+    }
+  };
+
   const handleRetweet = async (): Promise<void> => {
+    if (!userId) {
+      void push('/');
+      return;
+    }
+
     if (updatingRetweet) return;
 
     const shouldRetweet = !tweetIsRetweeted;
     const previousRetweets = optimisticRetweets;
 
     setUpdatingRetweet(true);
-    setOptimisticRetweets((currentRetweets) =>
-      shouldRetweet
-        ? [userId, ...currentRetweets.filter((id) => id !== userId)]
-        : currentRetweets.filter((id) => id !== userId)
-    );
+    applyOptimisticRetweet(shouldRetweet);
 
     try {
       await manageRetweet(
@@ -571,7 +754,7 @@ function ConversationActionBar({
         tweet.id
       )();
     } catch {
-      setOptimisticRetweets(previousRetweets);
+      rollbackOptimisticRetweets(previousRetweets);
       toast.error('Tweet could not be retweeted');
     } finally {
       setUpdatingRetweet(false);
@@ -579,22 +762,23 @@ function ConversationActionBar({
   };
 
   const handleLike = async (): Promise<void> => {
+    if (!userId) {
+      void push('/');
+      return;
+    }
+
     if (updatingLike) return;
 
     const shouldLike = !tweetIsLiked;
     const previousLikes = optimisticLikes;
 
     setUpdatingLike(true);
-    setOptimisticLikes((currentLikes) =>
-      shouldLike
-        ? [userId, ...currentLikes.filter((id) => id !== userId)]
-        : currentLikes.filter((id) => id !== userId)
-    );
+    applyOptimisticLike(shouldLike);
 
     try {
       await manageLike(shouldLike ? 'like' : 'unlike', userId, tweet.id)();
     } catch {
-      setOptimisticLikes(previousLikes);
+      rollbackOptimisticLikes(previousLikes);
       toast.error('Tweet could not be liked');
     } finally {
       setUpdatingLike(false);
@@ -602,6 +786,11 @@ function ConversationActionBar({
   };
 
   const handleBookmark = async (): Promise<void> => {
+    if (!userId) {
+      void push('/');
+      return;
+    }
+
     if (updatingBookmark) return;
 
     const shouldBookmark = !optimisticBookmarked;
@@ -637,19 +826,30 @@ function ConversationActionBar({
   return (
     <div
       className={cn(
-        'flex text-light-secondary dark:text-dark-secondary',
-        root
-          ? 'mt-3 justify-between border-t border-light-border px-1 py-1.5 dark:border-dark-border'
-          : 'mt-2 max-w-md justify-between'
+        'flex',
+        mediaOnly
+          ? `pointer-events-auto absolute inset-x-0 bottom-0 z-20 items-center
+             justify-between bg-gradient-to-t from-black via-black/80 to-transparent
+             px-7 pb-5 pt-12 text-white lg:hidden`
+          : cn(
+              mediaModalSecondaryText,
+              root
+                ? cn(
+                    'mt-3 justify-between border-t px-1 py-1.5',
+                    mediaModalBorder
+                  )
+                : 'mt-2 max-w-md justify-between'
+            )
       )}
     >
       <ConversationActionButton
         tip='Reply'
         iconName='TwitterReplyIcon'
         count={tweet.userReplies}
-        root={root}
+        root={mediaOnly ? true : root}
         className='hover:text-accent-blue focus-visible:text-accent-blue'
         iconClassName='group-hover:bg-accent-blue/10 group-active:bg-accent-blue/20 group-focus-visible:bg-accent-blue/10'
+        countClassName={mediaOnly ? 'text-white' : undefined}
         onClick={onReply ?? openReplyTarget}
       />
       <ConversationActionButton
@@ -657,9 +857,10 @@ function ConversationActionBar({
         iconName='TwitterRetweetIcon'
         count={optimisticRetweets.length}
         active={tweetIsRetweeted}
-        root={root}
+        root={mediaOnly ? true : root}
         className='hover:text-accent-green focus-visible:text-accent-green'
         iconClassName='group-hover:bg-accent-green/10 group-active:bg-accent-green/20 group-focus-visible:bg-accent-green/10'
+        countClassName={mediaOnly ? 'text-white' : undefined}
         onClick={handleRetweet}
       />
       <ConversationActionButton
@@ -667,25 +868,40 @@ function ConversationActionBar({
         iconName={tweetIsLiked ? 'TwitterLikeFilledIcon' : 'TwitterLikeIcon'}
         count={optimisticLikes.length}
         active={tweetIsLiked}
-        root={root}
+        root={mediaOnly ? true : root}
+        actionEffect='like'
         className='hover:text-accent-pink focus-visible:text-accent-pink'
         iconClassName='group-hover:bg-accent-pink/10 group-active:bg-accent-pink/20 group-focus-visible:bg-accent-pink/10'
+        countClassName={mediaOnly ? 'text-white' : undefined}
         onClick={handleLike}
       />
-      <button
-        className='sr-only'
-        aria-label={optimisticBookmarked ? 'Remove from Bookmarks' : 'Bookmark'}
-        onClick={!updatingBookmark ? handleBookmark : undefined}
-        disabled={updatingBookmark}
-      />
-      <TweetShare
-        tweetId={tweet.id}
-        username={tweet.user.username}
-        viewTweet={root}
-        isBookmarked={optimisticBookmarked}
-        onBookmark={handleBookmark}
-        disabled={updatingBookmark}
-      />
+      {mediaOnly ? (
+        <ConversationActionButton
+          tip='Share'
+          iconName='TwitterShareIcon'
+          root
+          className='hover:text-accent-blue focus-visible:text-accent-blue'
+          iconClassName='group-hover:bg-accent-blue/10 group-active:bg-accent-blue/20 group-focus-visible:bg-accent-blue/10'
+          onClick={handleShare}
+        />
+      ) : (
+        <>
+          <button
+            className='sr-only'
+            aria-label={optimisticBookmarked ? 'Remove from Bookmarks' : 'Bookmark'}
+            onClick={!updatingBookmark ? handleBookmark : undefined}
+            disabled={updatingBookmark}
+          />
+          <TweetShare
+            tweetId={tweet.id}
+            username={tweet.user.username}
+            viewTweet={root}
+            isBookmarked={optimisticBookmarked}
+            onBookmark={handleBookmark}
+            disabled={updatingBookmark}
+          />
+        </>
+      )}
     </div>
   );
 }
@@ -698,8 +914,11 @@ function ConversationActionButton({
   root,
   className,
   iconClassName,
+  actionEffect,
+  countClassName,
   onClick
 }: ConversationActionButtonProps): JSX.Element {
+  const [effectPlayKey, setEffectPlayKey] = useState(0);
   const activeClassName =
     iconName === 'TwitterRetweetIcon'
       ? 'text-accent-green'
@@ -709,35 +928,57 @@ function ConversationActionButton({
         iconName === 'TwitterBookmarksFilledIcon'
       ? 'text-main-accent'
       : null;
+  const iconClassNameBySize = root
+    ? 'h-[22.5px] w-[22.5px]'
+    : 'h-[18.75px] w-[18.75px]';
+
+  const handleClick = (): void => {
+    if (actionEffect === 'like' && !active)
+      setEffectPlayKey((currentKey) => currentKey + 1);
+
+    if (onClick) void onClick();
+  };
 
   return (
     <button
       className={cn(
-        `group flex items-center gap-1 p-0 outline-none transition-colors
+        `tweet-action-button group flex items-center p-0 outline-none transition-colors
          duration-200 ease-out inner:transition-colors inner:duration-200
          inner:ease-out`,
         active && activeClassName,
         className
       )}
       aria-label={tip}
-      onClick={preventBubbling(onClick)}
+      onClick={preventBubbling(handleClick)}
     >
       <i
         className={cn(
-          'relative rounded-full p-2 not-italic group-focus-visible:ring-2',
+          `tweet-action-icon-shell relative rounded-full not-italic
+           group-focus-visible:ring-2`,
+          root
+            ? 'tweet-action-icon-shell--large'
+            : 'tweet-action-icon-shell--normal',
           iconClassName
         )}
       >
-        <AppIcon
-          className={root ? 'h-[22.5px] w-[22.5px]' : 'h-[18.75px] w-[18.75px]'}
-          iconName={iconName}
-        />
+        {actionEffect ? (
+          <TweetActionEffect
+            kind={actionEffect}
+            active={active}
+            playKey={effectPlayKey}
+          >
+            <AppIcon className={iconClassNameBySize} iconName={iconName} />
+          </TweetActionEffect>
+        ) : (
+          <AppIcon className={iconClassNameBySize} iconName={iconName} />
+        )}
       </i>
       {!!count && (
         <span
           className={cn(
-            '-ml-1.5 min-w-[10px] text-left text-[13px] leading-4',
-            root && 'text-light-secondary dark:text-dark-secondary'
+            `tweet-action-count-static -ml-1.5 min-w-[10px] text-left
+             text-[13px] leading-4`,
+            countClassName ?? (root && mediaModalSecondaryText)
           )}
         >
           {formatNumber(count)}
@@ -751,13 +992,16 @@ export function ImageModal({
   tweet,
   imageData,
   previewCount,
+  profileMediaKind,
   tweetData,
   selectedIndex,
   handleNextIndex,
   closeModal
 }: ImageModalProps): JSX.Element {
-  const [indexes, setIndexes] = useState<number[]>([]);
   const [loading, setLoading] = useState(true);
+  const loadedIndexes = useRef<Set<number>>(new Set());
+  const previousSelectedIndex = useRef(selectedIndex ?? 0);
+  const [mediaDirection, setMediaDirection] = useState(1);
 
   const { src, alt } = imageData;
 
@@ -766,27 +1010,70 @@ export function ImageModal({
   const requireArrows = handleNextIndex && previewCount > 1;
 
   useEffect(() => {
-    if (
+    if (selectedIndex === undefined) return;
+
+    const previousIndex = previousSelectedIndex.current;
+
+    if (previousIndex !== selectedIndex) {
+      const lastIndex = previewCount - 1;
+      const nextDirection =
+        previousIndex === lastIndex && selectedIndex === 0
+          ? 1
+          : previousIndex === 0 && selectedIndex === lastIndex
+          ? -1
+          : selectedIndex > previousIndex
+          ? 1
+          : -1;
+
+      setMediaDirection(nextDirection);
+      previousSelectedIndex.current = selectedIndex;
+    }
+  }, [previewCount, selectedIndex]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let loadingTimer: ReturnType<typeof setTimeout> | null = null;
+    const newTweetMedia =
       tweet &&
       selectedIndex !== undefined &&
-      !indexes.includes(selectedIndex)
-    ) {
-      setLoading(true);
-      setIndexes([...indexes, selectedIndex]);
-    }
+      !loadedIndexes.current.has(selectedIndex);
 
-    const handleLoadingCompleted = (): void => setLoading(false);
+    const handleLoadingCompleted = (): void => {
+      if (cancelled) return;
+      if (loadingTimer) clearTimeout(loadingTimer);
+      setLoading(false);
+    };
+
+    if (newTweetMedia) {
+      loadedIndexes.current.add(selectedIndex as number);
+
+      loadingTimer = setTimeout(() => {
+        if (!cancelled) setLoading(true);
+      }, 120);
+    } else if (tweet) setLoading(false);
+    else setLoading(true);
 
     if (isVideo) {
       handleLoadingCompleted();
-      return;
+      return () => {
+        cancelled = true;
+        if (loadingTimer) clearTimeout(loadingTimer);
+      };
     }
 
     const media = new Image();
 
-    media.src = src;
     media.onload = handleLoadingCompleted;
-  }, [...(tweet && previewCount > 1 ? [src] : [])]);
+    media.onerror = handleLoadingCompleted;
+    media.src = src;
+
+    if (media.complete) handleLoadingCompleted();
+
+    return () => {
+      cancelled = true;
+      if (loadingTimer) clearTimeout(loadingTimer);
+    };
+  }, [isVideo, selectedIndex, src, tweet]);
 
   useEffect(() => {
     if (!requireArrows) return;
@@ -806,13 +1093,25 @@ export function ImageModal({
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [handleNextIndex]);
 
+  if (profileMediaKind)
+    return (
+      <ProfileFullscreenImageModal
+        imageData={imageData}
+        profileMediaKind={profileMediaKind}
+        loading={loading}
+        closeModal={closeModal}
+      />
+    );
+
   if (tweetData)
     return (
       <FullscreenImageModal
         imageData={imageData}
         tweetData={tweetData}
         previewCount={previewCount}
+        selectedIndex={selectedIndex}
         loading={loading}
+        mediaDirection={mediaDirection}
         handleNextIndex={handleNextIndex}
         closeModal={closeModal}
       />

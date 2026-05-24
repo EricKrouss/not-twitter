@@ -1,14 +1,19 @@
 import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import cn from 'clsx';
+import { useSearchUsers } from '@lib/api/search';
+import { useTheme } from '@lib/context/theme-context';
 import {
   formatAtprotoDisplayIdentifier,
   normalizeProfileSearchActor
 } from '@lib/atproto/identity';
 import { getUserPath } from '@lib/routes';
+import { NextImage } from '@components/ui/next-image';
+import { CustomIcon } from '@components/ui/custom-icon';
 import { HeroIcon } from '@components/ui/hero-icon';
 import { Button } from '@components/ui/button';
 import type { ChangeEvent, FormEvent, KeyboardEvent } from 'react';
+import type { User } from '@lib/types/user';
 
 type SearchBarProps = {
   className?: string;
@@ -18,8 +23,76 @@ type SearchBarProps = {
   withDropdown?: boolean;
 };
 
+const typeaheadDelayMs = 250;
+const typeaheadUserLimit = 5;
+
 function getRouteParam(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] ?? '' : value ?? '';
+}
+
+function useDebouncedValue(value: string, delay: number): string {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const timeout = setTimeout(() => setDebouncedValue(value), delay);
+
+    return () => clearTimeout(timeout);
+  }, [delay, value]);
+
+  return debouncedValue;
+}
+
+function SearchUserRow({
+  user,
+  onSelect
+}: {
+  user: User;
+  onSelect: (user: User) => void;
+}): JSX.Element {
+  const { hideBskySocialSuffix } = useTheme();
+  const displayUsername = formatAtprotoDisplayIdentifier(user.username, {
+    hideBskySocialSuffix
+  });
+
+  return (
+    <button
+      className='accent-tab hover-card flex w-full items-start gap-3 px-4 py-3 text-left'
+      type='button'
+      onClick={(): void => onSelect(user)}
+    >
+      <NextImage
+        className='w-10 shrink-0'
+        imgClassName='rounded-full'
+        width={40}
+        height={40}
+        src={user.photoURL}
+        alt={user.name}
+        useSkeleton
+      />
+      <span className='min-w-0 flex-1'>
+        <span className='flex min-w-0 items-center gap-1 text-[15px] font-bold leading-5'>
+          <span className='truncate'>{user.name}</span>
+          {user.verified && (
+            <CustomIcon
+              className='h-4 w-4 shrink-0'
+              iconName='TwitterVerifiedIcon'
+            />
+          )}
+        </span>
+        <span className='block truncate text-[15px] leading-5 text-light-secondary dark:text-dark-secondary'>
+          {displayUsername}
+        </span>
+        {user.bio && (
+          <span
+            className='mt-0.5 block overflow-hidden text-[15px] leading-5 [display:-webkit-box]
+                       [-webkit-box-orient:vertical] [-webkit-line-clamp:2]'
+          >
+            {user.bio}
+          </span>
+        )}
+      </span>
+    </button>
+  );
 }
 
 export function SearchBar({
@@ -36,9 +109,24 @@ export function SearchBar({
 
   const inputRef = useRef<HTMLInputElement>(null);
   const blurTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const { hideBskySocialSuffix } = useTheme();
   const trimmedInput = inputValue.trim();
   const profileActor = normalizeProfileSearchActor(trimmedInput);
-  const profileActorLabel = formatAtprotoDisplayIdentifier(profileActor);
+  const profileActorLabel = formatAtprotoDisplayIdentifier(profileActor, {
+    hideBskySocialSuffix
+  });
+  const debouncedInput = useDebouncedValue(trimmedInput, typeaheadDelayMs);
+  const {
+    data: usersData,
+    loading: usersLoading,
+    error: usersError
+  } = useSearchUsers(
+    debouncedInput,
+    { disabled: !withDropdown || !focused || !debouncedInput },
+    { revalidateOnFocus: false }
+  );
+  const users = usersData?.users.slice(0, typeaheadUserLimit) ?? [];
+  const typeaheadLoading = trimmedInput !== debouncedInput || usersLoading;
 
   useEffect(() => {
     setInputValue(getRouteParam(query.q));
@@ -63,6 +151,10 @@ export function SearchBar({
     if (!profileActor) return;
 
     void push(getUserPath(profileActor));
+  };
+
+  const handleUserSelect = (user: User): void => {
+    void push(getUserPath(user.username));
   };
 
   const clearInputValue = (focus?: boolean) => (): void => {
@@ -135,10 +227,23 @@ export function SearchBar({
       {withDropdown && focused && (
         <div
           className='menu-container absolute top-full left-0 right-0 mt-2 overflow-hidden
-                     rounded-2xl bg-main-background py-3'
+                     rounded-2xl bg-main-background py-2'
+          onMouseDown={(event): void => event.preventDefault()}
         >
           {trimmedInput ? (
             <>
+              <button
+                className='accent-tab hover-card flex w-full items-center gap-3 px-4 py-3 text-left'
+                type='submit'
+              >
+                <HeroIcon
+                  className='h-5 w-5 text-light-secondary dark:text-dark-secondary'
+                  iconName='MagnifyingGlassIcon'
+                />
+                <span className='min-w-0 truncate'>
+                  Search for &quot;{trimmedInput}&quot;
+                </span>
+              </button>
               {profileActor && (
                 <button
                   className='accent-tab hover-card flex w-full items-center gap-3 px-4 py-3 text-left'
@@ -154,18 +259,31 @@ export function SearchBar({
                   </span>
                 </button>
               )}
-              <button
-                className='accent-tab hover-card flex w-full items-center gap-3 px-4 py-3 text-left'
-                type='submit'
-              >
-                <HeroIcon
-                  className='h-5 w-5 text-light-secondary dark:text-dark-secondary'
-                  iconName='MagnifyingGlassIcon'
-                />
-                <span className='min-w-0 truncate'>
-                  Search for &quot;{trimmedInput}&quot;
-                </span>
-              </button>
+              {typeaheadLoading ? (
+                <div className='flex items-center gap-3 px-4 py-3 text-light-secondary dark:text-dark-secondary'>
+                  <HeroIcon
+                    className='h-5 w-5 animate-spin text-main-accent'
+                    iconName='ArrowPathIcon'
+                  />
+                  <span className='text-[15px] leading-5'>Searching...</span>
+                </div>
+              ) : usersError ? (
+                <p className='px-4 py-3 text-[15px] leading-5 text-light-secondary dark:text-dark-secondary'>
+                  Something went wrong. Try searching again.
+                </p>
+              ) : users.length ? (
+                users.map((user) => (
+                  <SearchUserRow
+                    user={user}
+                    onSelect={handleUserSelect}
+                    key={user.id}
+                  />
+                ))
+              ) : (
+                <p className='px-4 py-3 text-[15px] leading-5 text-light-secondary dark:text-dark-secondary'>
+                  No people found for &quot;{trimmedInput}&quot;
+                </p>
+              )}
             </>
           ) : (
             <p className='px-8 py-5 text-center text-[15px] text-light-secondary dark:text-dark-secondary'>

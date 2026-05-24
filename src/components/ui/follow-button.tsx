@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import { toast } from 'react-hot-toast';
+import { formatAtprotoDisplayIdentifier } from '@lib/atproto/identity';
 import { useAuth } from '@lib/context/auth-context';
+import { useTheme } from '@lib/context/theme-context';
 import { useModal } from '@lib/hooks/useModal';
 import { manageBlock, manageFollow } from '@lib/atproto/utils';
 import { preventBubbling } from '@lib/utils';
@@ -29,8 +31,12 @@ export function FollowButton({
   userTargetBlockingByListName
 }: FollowButtonProps): JSX.Element | null {
   const { user } = useAuth();
+  const { hideBskySocialSuffix } = useTheme();
   const { push } = useRouter();
   const { open, openModal, closeModal } = useModal();
+  const displayUsername = formatAtprotoDisplayIdentifier(userTargetUsername, {
+    hideBskySocialSuffix
+  });
 
   const { id: userId, following } = user ?? {};
   const serverFollowing = useMemo(
@@ -46,8 +52,9 @@ export function FollowButton({
   const [updatingFollow, setUpdatingFollow] = useState(false);
 
   useEffect(() => {
+    if (updatingFollow) return;
     setOptimisticFollowing(serverFollowing);
-  }, [serverFollowing]);
+  }, [serverFollowing, updatingFollow]);
 
   const handleLoggedOutFollow = (): void => {
     void push('/');
@@ -88,13 +95,7 @@ export function FollowButton({
     } finally {
       setUpdatingFollow(false);
     }
-  }, [
-    closeModal,
-    optimisticFollowing,
-    updatingFollow,
-    userId,
-    userTargetId
-  ]);
+  }, [closeModal, optimisticFollowing, updatingFollow, userId, userTargetId]);
 
   const handleUnblock = async (): Promise<void> => {
     await manageBlock('unblock', userId as string, userTargetId);
@@ -137,7 +138,7 @@ export function FollowButton({
           closeModal={closeModal}
         >
           <ActionModal
-            title={`Unblock @${userTargetUsername}?`}
+            title={`Unblock ${displayUsername}?`}
             description='They will be able to follow you and view your Tweets.'
             mainBtnLabel='Unblock'
             action={handleUnblock}
@@ -163,7 +164,7 @@ export function FollowButton({
         closeModal={closeModal}
       >
         <ActionModal
-          title={`Unfollow @${userTargetUsername}?`}
+          title={`Unfollow ${displayUsername}?`}
           description='Their Tweets will no longer show up in your home timeline. You can still view their profile, unless their Tweets are protected.'
           mainBtnLabel='Unfollow'
           action={handleUnfollow}

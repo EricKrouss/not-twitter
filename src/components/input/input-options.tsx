@@ -121,7 +121,7 @@ export function InputOptions({
   return (
     <motion.div className='flex justify-between' {...variants}>
       <div
-        className='flex text-main-accent xs:[&>button:nth-child(n+6)]:hidden 
+        className='flex gap-1 text-main-accent xs:[&>button:nth-child(n+6)]:hidden
                    md:[&>button]:!block [&>button:nth-child(n+4)]:hidden'
       >
         <input
@@ -135,7 +135,7 @@ export function InputOptions({
         {filteredOptions.map(({ name, iconName, disabled, picker }, index) => {
           return (
             <Button
-              className='accent-tab accent-bg-tab group relative rounded-full p-2
+              className='accent-tab accent-bg-tab group relative h-9 w-9 rounded-full p-0
                          hover:bg-main-accent/10 active:bg-main-accent/20'
               ref={
                 picker
@@ -198,7 +198,7 @@ export function InputOptions({
         </motion.div>
         <Button
           type='submit'
-          className='accent-tab bg-main-accent px-4 py-1.5 font-bold text-white
+          className='accent-tab h-9 bg-main-accent px-4 py-0 text-[15px] font-bold leading-5 text-white
                      enabled:hover:bg-main-accent/90
                      enabled:active:bg-main-accent/75'
           disabled={!isValidTweet}

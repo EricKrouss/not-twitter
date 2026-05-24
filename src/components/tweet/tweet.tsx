@@ -3,7 +3,9 @@ import { useRouter } from 'next/router';
 import { useCallback, useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import cn from 'clsx';
+import { formatAtprotoDisplayIdentifier } from '@lib/atproto/identity';
 import { useAuth } from '@lib/context/auth-context';
+import { useTheme } from '@lib/context/theme-context';
 import { useModal } from '@lib/hooks/useModal';
 import { getTweetPath, getUserPath } from '@lib/routes';
 import { createYouTubeCardFromText } from '@lib/youtube';
@@ -22,9 +24,18 @@ import { TweetStats } from './tweet-stats';
 import { TweetDate } from './tweet-date';
 import { TweetText } from './tweet-text';
 import { TweetTranslation } from './tweet-translation';
+import { TweetReplyRestrictionIndicator } from './tweet-reply-restriction';
+import {
+  TweetTombstone,
+  isViewableTweetTombstoneKind
+} from './tweet-tombstone';
 import type { Variants } from 'framer-motion';
 import type { KeyboardEvent, MouseEvent } from 'react';
-import type { Tweet, TweetWithUser } from '@lib/types/tweet';
+import type {
+  Tweet,
+  TweetTombstoneKind,
+  TweetWithUser
+} from '@lib/types/tweet';
 import type { User } from '@lib/types/user';
 
 export type TweetProps = Tweet & {
@@ -33,6 +44,7 @@ export type TweetProps = Tweet & {
   pinned?: boolean;
   profile?: User | null;
   parentTweet?: boolean;
+  conversationTweet?: boolean;
   onReplySent?: (tweet: TweetWithUser) => void;
   onTweetSent?: (tweet: TweetWithUser) => void;
 };
@@ -57,36 +69,56 @@ function eventStartedInInteractiveTweetChild(
   return !!interactiveChild && interactiveChild !== currentTarget;
 }
 
+function ThreadRail({ className }: { className?: string }): JSX.Element {
+  return (
+    <div className={cn('flex w-10 justify-center', className)}>
+      <i className='h-full w-0.5 bg-light-line-reply dark:bg-dark-line-reply' />
+    </div>
+  );
+}
+
 function BlockedTweetPlaceholder({
-  username,
-  blockedBy,
-  parentTweet
+  unavailable,
+  tombstoneKind,
+  onView,
+  parentTweet,
+  conversationTweet
 }: {
-  username: string;
-  blockedBy: boolean;
+  unavailable?: Tweet['unavailable'];
+  tombstoneKind?: TweetTombstoneKind | null;
+  onView?: () => void;
   parentTweet?: boolean;
+  conversationTweet?: boolean;
 }): JSX.Element {
+  const isConversationTweet = !!parentTweet || !!conversationTweet;
+  const resolvedTombstoneKind =
+    tombstoneKind ??
+    (unavailable === 'not-found' || unavailable === 'unknown'
+      ? 'unavailable'
+      : 'limited-visibility');
+  const tombstone = (
+    <TweetTombstone
+      kind={resolvedTombstoneKind}
+      onView={
+        isViewableTweetTombstoneKind(resolvedTombstoneKind) ? onView : undefined
+      }
+    />
+  );
+
   return (
     <motion.article
       {...variants}
       className={cn(
-        'px-4 py-3',
+        'px-4',
+        isConversationTweet ? 'py-2.5' : 'py-3',
         !parentTweet && 'border-b border-light-border dark:border-dark-border'
       )}
     >
-      <div
-        className='rounded-2xl border border-light-border px-4 py-3 text-[15px]
-                   dark:border-dark-border'
-      >
-        <p className='font-bold text-light-primary dark:text-dark-primary'>
-          {blockedBy ? 'This Tweet is unavailable' : `You blocked @${username}`}
-        </p>
-        <p className='mt-1 text-light-secondary dark:text-dark-secondary'>
-          {blockedBy
-            ? `You can’t view this Tweet because @${username} blocked you.`
-            : 'This Tweet is from an account you blocked.'}
-        </p>
-      </div>
+      {parentTweet ? (
+        <div className='flex flex-col'>{tombstone}</div>
+      ) : (
+        tombstone
+      )}
     </motion.article>
   );
 }
@@ -109,9 +141,14 @@ export function Tweet(tweet: TweetProps): JSX.Element {
     createdAt,
     bookmarkCount,
     parentTweet,
+    conversationTweet,
     userReplies,
     userQuotes = 0,
     userRetweets,
+    tombstone,
+    replySetting,
+    viewerCanReply,
+    unavailable,
     user: tweetUserData,
     onReplySent,
     onTweetSent
@@ -121,11 +158,12 @@ export function Tweet(tweet: TweetProps): JSX.Element {
 
   const router = useRouter();
   const { user } = useAuth();
+  const { hideBskySocialSuffix } = useTheme();
 
   const { open, openModal, closeModal } = useModal();
-  const [optimisticReplyCount, setOptimisticReplyCount] =
-    useState(userReplies);
+  const [optimisticReplyCount, setOptimisticReplyCount] = useState(userReplies);
   const [optimisticQuoteCount, setOptimisticQuoteCount] = useState(userQuotes);
+  const [tombstoneRevealed, setTombstoneRevealed] = useState(false);
 
   const tweetLink = getTweetPath(tweetId, username);
   const displayCard = card ?? createYouTubeCardFromText(text);
@@ -134,10 +172,21 @@ export function Tweet(tweet: TweetProps): JSX.Element {
   const userId = user?.id ?? '';
 
   const isOwner = userId === createdBy;
+  const mutedAccountTombstone: Tweet['tombstone'] =
+    !isOwner && (tweetUserData.muting || tweetUserData.mutingByListName)
+      ? 'muted-account'
+      : null;
+  const tweetTombstoneKind: Tweet['tombstone'] =
+    tombstone ?? mutedAccountTombstone;
   const tweetIsHiddenByBlock =
-    !isOwner && (tweetUserData.blocking || tweetUserData.blockedBy);
+    !!unavailable ||
+    (!isOwner && (tweetUserData.blocking || tweetUserData.blockedBy));
+  const tweetIsHiddenByTombstone = !!tweetTombstoneKind && !tombstoneRevealed;
 
   const { id: parentId, username: parentUsername = username } = parent ?? {};
+  const parentDisplayUsername = formatAtprotoDisplayIdentifier(parentUsername, {
+    hideBskySocialSuffix
+  });
 
   const {
     id: profileId,
@@ -155,6 +204,15 @@ export function Tweet(tweet: TweetProps): JSX.Element {
   useEffect(() => {
     setOptimisticQuoteCount(userQuotes);
   }, [userQuotes]);
+
+  useEffect(() => {
+    setTombstoneRevealed(false);
+  }, [
+    tweetId,
+    tombstone,
+    tweetUserData.muting,
+    tweetUserData.mutingByListName
+  ]);
 
   const handleReplySent = useCallback(
     (replyTweet: TweetWithUser): void => {
@@ -196,9 +254,19 @@ export function Tweet(tweet: TweetProps): JSX.Element {
   if (tweetIsHiddenByBlock)
     return (
       <BlockedTweetPlaceholder
-        username={username}
-        blockedBy={tweetUserData.blockedBy}
+        unavailable={unavailable}
         parentTweet={parentTweet}
+        conversationTweet={conversationTweet}
+      />
+    );
+
+  if (tweetIsHiddenByTombstone)
+    return (
+      <BlockedTweetPlaceholder
+        tombstoneKind={tweetTombstoneKind}
+        onView={(): void => setTombstoneRevealed(true)}
+        parentTweet={parentTweet}
+        conversationTweet={conversationTweet}
       />
     );
 
@@ -214,7 +282,7 @@ export function Tweet(tweet: TweetProps): JSX.Element {
     >
       <Modal
         className='flex items-start justify-center'
-        modalClassName='bg-main-background rounded-2xl max-w-xl w-full my-8 overflow-hidden'
+        modalClassName='bg-main-background rounded-2xl max-w-xl w-full my-8'
         open={open}
         closeModal={closeModal}
       >
@@ -260,9 +328,7 @@ export function Tweet(tweet: TweetProps): JSX.Element {
             <UserTooltip avatar modal={modal} {...tweetUserData}>
               <UserAvatar src={photoURL} alt={name} username={username} />
             </UserTooltip>
-            {parentTweet && (
-              <i className='hover-animation h-full w-0.5 bg-light-line-reply dark:bg-dark-line-reply' />
-            )}
+            {parentTweet && <ThreadRail className='h-full' />}
           </div>
           <div className='flex min-w-0 flex-col'>
             <div className='flex justify-between gap-2 text-light-secondary dark:text-dark-secondary'>
@@ -309,7 +375,7 @@ export function Tweet(tweet: TweetProps): JSX.Element {
                 Replying to{' '}
                 <Link href={getUserPath(parentUsername)}>
                   <a className='custom-underline text-main-accent'>
-                    @{parentUsername}
+                    {parentDisplayUsername}
                   </a>
                 </Link>
               </p>
@@ -335,6 +401,11 @@ export function Tweet(tweet: TweetProps): JSX.Element {
                 quotedTweet={quotedTweet}
                 hideQuotedTweetMedia={hideQuotedTweetMedia}
               />
+              <TweetReplyRestrictionIndicator
+                replySetting={replySetting}
+                viewerCanReply={viewerCanReply}
+                username={username}
+              />
               {!modal && (
                 <TweetStats
                   userId={userId}
@@ -346,6 +417,7 @@ export function Tweet(tweet: TweetProps): JSX.Element {
                   userReplies={optimisticReplyCount}
                   userQuotes={optimisticQuoteCount}
                   userRetweets={userRetweets}
+                  viewerCanReply={viewerCanReply}
                   openModal={openModal}
                   onQuoteTweetSent={handleQuoteTweetSent}
                 />

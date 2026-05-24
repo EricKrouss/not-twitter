@@ -10,11 +10,17 @@ import { ViewTweetStats } from '@components/view/view-tweet-stats';
 import { TweetOption } from './tweet-option';
 import { TweetRetweetMenu } from './tweet-retweet-menu';
 import { TweetShare } from './tweet-share';
+import { useOptimisticReactionIds } from './use-optimistic-reaction-ids';
 import type { Tweet, TweetWithUser } from '@lib/types/tweet';
 
 type TweetStatsProps = Pick<
   Tweet,
-  'userLikes' | 'userRetweets' | 'userReplies' | 'userQuotes' | 'bookmarkCount'
+  | 'userLikes'
+  | 'userRetweets'
+  | 'userReplies'
+  | 'userQuotes'
+  | 'bookmarkCount'
+  | 'viewerCanReply'
 > & {
   userId: string;
   tweetId: string;
@@ -34,6 +40,7 @@ export function TweetStats({
   viewTweet,
   userRetweets,
   bookmarkCount,
+  viewerCanReply,
   userReplies: totalReplies,
   userQuotes: totalQuotes,
   openModal,
@@ -45,8 +52,18 @@ export function TweetStats({
   const totalTweets = userRetweets.length;
   const tweetIsBookmarked = !!userBookmarks?.some(({ id }) => id === tweetId);
 
-  const [optimisticLikes, setOptimisticLikes] = useState(userLikes);
-  const [optimisticRetweets, setOptimisticRetweets] = useState(userRetweets);
+  const {
+    optimisticIds: optimisticLikes,
+    active: tweetIsLiked,
+    applyOptimisticActive: applyOptimisticLike,
+    rollbackOptimisticIds: rollbackOptimisticLikes
+  } = useOptimisticReactionIds(userLikes, userId);
+  const {
+    optimisticIds: optimisticRetweets,
+    active: tweetIsRetweeted,
+    applyOptimisticActive: applyOptimisticRetweet,
+    rollbackOptimisticIds: rollbackOptimisticRetweets
+  } = useOptimisticReactionIds(userRetweets, userId);
   const [optimisticBookmarked, setOptimisticBookmarked] =
     useState(tweetIsBookmarked);
   const [optimisticBookmarkCount, setOptimisticBookmarkCount] = useState(
@@ -61,34 +78,6 @@ export function TweetStats({
   const currentTweets = optimisticRetweets.length;
   const currentQuotes = totalQuotes;
   const currentBookmarks = optimisticBookmarkCount;
-
-  useEffect(() => {
-    setOptimisticLikes((current) => {
-      if (!userId) return userLikes;
-      const wasLiked = current.includes(userId);
-      const isLikedInProp = userLikes.includes(userId);
-      if (wasLiked && !isLikedInProp) {
-        return [userId, ...userLikes.filter((id) => id !== userId)];
-      } else if (!wasLiked && isLikedInProp) {
-        return userLikes.filter((id) => id !== userId);
-      }
-      return userLikes;
-    });
-  }, [userLikes, userId]);
-
-  useEffect(() => {
-    setOptimisticRetweets((current) => {
-      if (!userId) return userRetweets;
-      const wasRetweeted = current.includes(userId);
-      const isRetweetedInProp = userRetweets.includes(userId);
-      if (wasRetweeted && !isRetweetedInProp) {
-        return [userId, ...userRetweets.filter((id) => id !== userId)];
-      } else if (!wasRetweeted && isRetweetedInProp) {
-        return userRetweets.filter((id) => id !== userId);
-      }
-      return userRetweets;
-    });
-  }, [userRetweets, userId]);
 
   useEffect(() => {
     setOptimisticBookmarked(tweetIsBookmarked);
@@ -122,15 +111,16 @@ export function TweetStats({
     [bookmarkCount, currentBookmarks]
   );
 
-  const tweetIsLiked = optimisticLikes.includes(userId);
-  const tweetIsRetweeted = optimisticRetweets.includes(userId);
-
   const isStatsVisible = !!(
     currentReplies ||
     currentTweets ||
     currentQuotes ||
     currentLikes
   );
+  const replyDisabled = !!userId && viewerCanReply === false;
+  const replyTip = replyDisabled
+    ? 'You cannot reply to this conversation'
+    : 'Reply';
   const iconSizeClassName = viewTweet
     ? 'h-[22.5px] w-[22.5px]'
     : 'h-[18.75px] w-[18.75px]';
@@ -151,11 +141,7 @@ export function TweetStats({
     const previousRetweets = optimisticRetweets;
 
     setUpdatingRetweet(true);
-    setOptimisticRetweets((currentRetweets) =>
-      shouldRetweet
-        ? [userId, ...currentRetweets.filter((id) => id !== userId)]
-        : currentRetweets.filter((id) => id !== userId)
-    );
+    applyOptimisticRetweet(shouldRetweet);
 
     try {
       await manageRetweet(
@@ -164,14 +150,16 @@ export function TweetStats({
         tweetId
       )();
     } catch {
-      setOptimisticRetweets(previousRetweets);
+      rollbackOptimisticRetweets(previousRetweets);
       toast.error('Tweet could not be retweeted');
     } finally {
       setUpdatingRetweet(false);
     }
   }, [
     optimisticRetweets,
+    applyOptimisticRetweet,
     redirectToLogin,
+    rollbackOptimisticRetweets,
     tweetId,
     tweetIsRetweeted,
     updatingRetweet,
@@ -190,23 +178,21 @@ export function TweetStats({
     const previousLikes = optimisticLikes;
 
     setUpdatingLike(true);
-    setOptimisticLikes((currentLikes) =>
-      shouldLike
-        ? [userId, ...currentLikes.filter((id) => id !== userId)]
-        : currentLikes.filter((id) => id !== userId)
-    );
+    applyOptimisticLike(shouldLike);
 
     try {
       await manageLike(shouldLike ? 'like' : 'unlike', userId, tweetId)();
     } catch {
-      setOptimisticLikes(previousLikes);
+      rollbackOptimisticLikes(previousLikes);
       toast.error('Tweet could not be liked');
     } finally {
       setUpdatingLike(false);
     }
   }, [
     optimisticLikes,
+    applyOptimisticLike,
     redirectToLogin,
+    rollbackOptimisticLikes,
     tweetId,
     tweetIsLiked,
     updatingLike,
@@ -282,16 +268,27 @@ export function TweetStats({
         )}
       >
         <TweetOption
-          className='hover:text-accent-blue focus-visible:text-accent-blue'
-          iconClassName='group-hover:bg-accent-blue/10 group-active:bg-accent-blue/20 
-                         group-focus-visible:bg-accent-blue/10 group-focus-visible:ring-accent-blue/80'
-          tip='Reply'
+          className={cn(
+            replyDisabled
+              ? 'text-light-secondary/60 dark:text-dark-secondary/70'
+              : 'hover:text-accent-blue focus-visible:text-accent-blue'
+          )}
+          iconClassName={cn(
+            replyDisabled
+              ? 'group-focus-visible:ring-light-secondary/50 dark:group-focus-visible:ring-dark-secondary/60'
+              : `group-hover:bg-accent-blue/10 group-active:bg-accent-blue/20
+                 group-focus-visible:bg-accent-blue/10 group-focus-visible:ring-accent-blue/80`
+          )}
+          tip={replyTip}
           move={replyMove}
           stats={currentReplies}
-          iconName='TwitterReplyIcon'
+          iconName={replyDisabled ? 'TwitterReplyOffIcon' : 'TwitterReplyIcon'}
           viewTweet={viewTweet}
           iconSizeClassName={iconSizeClassName}
-          onClick={userId ? openModal : redirectToLogin}
+          onClick={
+            replyDisabled ? undefined : userId ? openModal : redirectToLogin
+          }
+          disabled={replyDisabled}
         />
         <TweetRetweetMenu
           className={cn(
@@ -322,6 +319,8 @@ export function TweetStats({
           move={likeMove}
           stats={currentLikes}
           iconName={tweetIsLiked ? 'TwitterLikeFilledIcon' : 'TwitterLikeIcon'}
+          actionEffect='like'
+          active={tweetIsLiked}
           viewTweet={viewTweet}
           iconSizeClassName={iconSizeClassName}
           onClick={handleLike}

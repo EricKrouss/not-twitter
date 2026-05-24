@@ -145,7 +145,7 @@ export function LiveUpdatesProvider({
       refreshSoon,
       LIVE_UPDATES_REFRESH_INTERVAL_MS
     );
-    const unsubscribe = subscribeBackend(refreshSoon);
+    const unsubscribe = subscribeBackend(refreshSoon, ['content']);
 
     window.addEventListener('focus', refreshSoon);
     document.addEventListener('visibilitychange', refreshSoon);

@@ -25,8 +25,10 @@ import {
   type ChatBskyActorDeclaration,
   type ChatBskyConvoDefs,
   type ComAtprotoModerationDefs,
+  type ModerationCause,
   type ModerationOpts
 } from '@atproto/api';
+import { TID, type JsonValue } from '@atproto/common-web';
 import {
   BlobRef as AtprotoBlobRef,
   jsonToLex as atprotoJsonToLex
@@ -45,7 +47,6 @@ import {
 } from './identity';
 import { Timestamp } from './timestamp';
 import type { BlobRef as LexiconBlobRef } from '@atproto/lexicon';
-import type { JsonValue } from '@atproto/common-web';
 import type { OAuthSession } from '@atproto/oauth-client';
 import type { Bookmark } from '@lib/types/bookmark';
 import type { ImagesPreview, FilesWithId } from '@lib/types/file';
@@ -56,9 +57,11 @@ import type {
   TweetCard,
   TweetMediaWarning,
   TweetReplySetting,
+  TweetTombstoneKind,
+  TweetUnavailableReason,
   TweetWithUser
 } from '@lib/types/tweet';
-import type { User } from '@lib/types/user';
+import type { User, UserKnownFollower } from '@lib/types/user';
 
 const OAUTH_SUB_KEY = 'twitter-clone:bsky-oauth-sub';
 const OAUTH_ACCOUNTS_KEY = 'twitter-clone:bsky-oauth-accounts';
@@ -167,8 +170,11 @@ const PUBLIC_BSKY_APPVIEW_METHODS = new Set([
   'app.bsky.feed.getRepostedBy',
   'app.bsky.graph.getFollowers',
   'app.bsky.graph.getFollows',
+  'app.bsky.graph.getKnownFollowers',
+  'app.bsky.graph.getActorStarterPacks',
   'app.bsky.graph.getList',
   'app.bsky.graph.getLists',
+  'app.bsky.graph.getStarterPack',
   'app.bsky.labeler.getServices'
 ]);
 
@@ -261,6 +267,12 @@ type PostRef = {
   cid: string;
 };
 
+type ViewerReactionKind = 'like' | 'repost';
+
+type ViewerReactionState = {
+  active: boolean;
+};
+
 type PostReplyRef = {
   root: PostRef;
   parent: PostRef;
@@ -278,6 +290,13 @@ export type TweetThreadParentsPage = {
   parents: TweetWithUser[];
   cursor: string | null;
 };
+
+type ThreadItem =
+  | AppBskyFeedDefs.ThreadViewPost
+  | AppBskyFeedDefs.BlockedPost
+  | AppBskyFeedDefs.NotFoundPost;
+
+type HiddenThreadAuthors = Map<string, TweetUnavailableReason>;
 
 type BookmarkView = {
   subject?: PostRef;
@@ -336,6 +355,10 @@ type AppViewFeedGeneratorResponse = {
 type AppViewFeedGeneratorsResponse = {
   feeds: AppBskyFeedDefs.GeneratorView[];
 };
+type AppViewFeedGeneratorSearchResponse = {
+  cursor?: string;
+  feeds: AppBskyFeedDefs.GeneratorView[];
+};
 type AppViewPostsResponse = {
   posts: AppBskyFeedDefs.PostView[];
 };
@@ -349,6 +372,22 @@ type AppViewNotificationsResponse = {
   notifications: AppBskyNotificationListNotifications.Notification[];
   priority?: boolean;
   seenAt?: string;
+};
+type AppViewListsResponse = {
+  cursor?: string;
+  lists: AppBskyGraphDefs.ListView[];
+};
+type AppViewListResponse = {
+  cursor?: string;
+  list: AppBskyGraphDefs.ListView;
+  items: AppBskyGraphDefs.ListItemView[];
+};
+type AppViewActorStarterPacksResponse = {
+  cursor?: string;
+  starterPacks: AppBskyGraphDefs.StarterPackViewBasic[];
+};
+type AppViewStarterPackResponse = {
+  starterPack: AppBskyGraphDefs.StarterPackView;
 };
 type ActorProfileView =
   | AppBskyActorDefs.ProfileViewBasic
@@ -380,6 +419,19 @@ export type SubscribedHomeFeed = {
   creatorName: string;
   creatorUsername: string;
   pinned: boolean;
+};
+
+export type FeedBrowserFeed = SubscribedHomeFeed & {
+  editable: boolean;
+  href: string;
+  indexedAt: string | null;
+  likeCount: number;
+  saved: boolean;
+};
+
+export type FeedSearchPage = {
+  feeds: FeedBrowserFeed[];
+  cursor: string | null;
 };
 
 export type TweetStatsType = 'retweets' | 'likes' | 'quotes';
@@ -426,6 +478,31 @@ export type UserListsPage = {
   lists: UserList[];
 };
 
+export type ProfileListsPage = {
+  lists: UserList[];
+  cursor: string | null;
+};
+
+export type ProfileStarterPack = {
+  uri: string;
+  url: string;
+  name: string;
+  description: string | null;
+  creatorName: string;
+  creatorUsername: string;
+  creatorAvatar: string;
+  listItemCount: number;
+  feedCount: number;
+  joinedWeekCount: number;
+  joinedAllTimeCount: number;
+  indexedAt: string;
+};
+
+export type ProfileStarterPacksPage = {
+  starterPacks: ProfileStarterPack[];
+  cursor: string | null;
+};
+
 export type NotificationReason =
   | 'like'
   | 'repost'
@@ -434,6 +511,12 @@ export type NotificationReason =
   | 'reply'
   | 'quote'
   | 'starterpack-joined'
+  | 'verified'
+  | 'unverified'
+  | 'like-via-repost'
+  | 'repost-via-repost'
+  | 'subscribed-post'
+  | 'contact-match'
   | string;
 
 export type NotificationItem = {
@@ -644,16 +727,30 @@ const tweetCache = new Map<string, Tweet>();
 const locallyCreatedTweets = new Map<string, Tweet>();
 const localQuoteTargetIds = new Map<string, string>();
 const locallyDeletedTweetIds = new Set<string>();
+const locallyReportedTweetIds = new Set<string>();
 const postRefCache = new Map<string, PostRef>();
 const postReplyRefCache = new Map<string, PostReplyRef>();
 const followUriCache = new Map<string, string>();
+const localViewerFollowOverrides = new Map<string, boolean>();
+const localViewerLikeOverrides = new Map<string, ViewerReactionState>();
+const localViewerRepostOverrides = new Map<string, ViewerReactionState>();
+const localViewerLikeUriCache = new Map<string, string>();
+const localViewerRepostUriCache = new Map<string, string>();
 const blockUriCache = new Map<string, string>();
 const detailedUserCache = new Set<string>();
 const profileRecordHydratedUsers = new Set<string>();
 const chatDeclarationHydratedUsers = new Set<string>();
 const didPdsEndpointCache = new Map<string, string | null>();
 const stagedImages = new Map<string, UploadedImage[]>();
-const listeners = new Set<() => void>();
+export type BackendChangeType =
+  | 'auth'
+  | 'content'
+  | 'reaction'
+  | 'relationship';
+
+type BackendListener = (changeType: BackendChangeType) => void;
+
+const listeners = new Map<BackendListener, Set<BackendChangeType> | null>();
 const serviceAuthTokenCache = new Map<
   string,
   { token: string; expiresAt: number }
@@ -661,7 +758,9 @@ const serviceAuthTokenCache = new Map<
 
 let agent: Agent | null = null;
 let credentialAgent: AtpAgent | null = null;
+let publicAppViewAgent: Agent | null = null;
 let oauthClientPromise: Promise<BrowserOAuthClient> | null = null;
+let oauthClientRedirectUri: string | null = null;
 let oauthSession: OAuthSession | null = null;
 let oauthInitPromise: Promise<AuthUser | null> | null = null;
 let sessionDid: string | null = null;
@@ -730,6 +829,13 @@ function getConfiguredAtprotoServiceUrls(): string[] {
 
 function getPrimaryAtprotoServiceUrl(): string {
   return getConfiguredAtprotoServiceUrls()[0] ?? DEFAULT_ATPROTO_PDS_URL;
+}
+
+function getConfiguredBasePath(): string {
+  const rawBasePath = process.env.NEXT_PUBLIC_BASE_PATH?.trim() ?? '';
+  const basePath = rawBasePath.replace(/^\/+|\/+$/g, '');
+
+  return basePath ? `/${basePath}` : '';
 }
 
 function usesHttpAtprotoService(): boolean {
@@ -1026,10 +1132,15 @@ function clearActiveAuthState(): void {
   malformedMediaRepairPromise = null;
   clearModerationSettingsCache();
   followUriCache.clear();
+  localViewerFollowOverrides.clear();
   blockUriCache.clear();
   locallyCreatedTweets.clear();
   localQuoteTargetIds.clear();
   locallyDeletedTweetIds.clear();
+  localViewerLikeOverrides.clear();
+  localViewerRepostOverrides.clear();
+  localViewerLikeUriCache.clear();
+  localViewerRepostUriCache.clear();
   serviceAuthTokenCache.clear();
 
   if (hasStorage()) window.localStorage.removeItem(OAUTH_SUB_KEY);
@@ -1074,6 +1185,21 @@ function getLoopbackRedirectUri(): string {
   return `${protocol}//${redirectHost}${redirectPort}${pathname}`;
 }
 
+function redirectToCanonicalLoopbackHost(): Promise<never> | null {
+  if (
+    process.env.NEXT_PUBLIC_ATPROTO_CLIENT_ID ||
+    window.location.hostname !== 'localhost'
+  )
+    return null;
+
+  const canonicalUrl = new URL(window.location.href);
+  canonicalUrl.hostname = '127.0.0.1';
+
+  window.location.replace(canonicalUrl.href);
+
+  return new Promise<never>(() => undefined);
+}
+
 function isLoopbackHost(hostname: string): boolean {
   return (
     hostname === 'localhost' ||
@@ -1084,17 +1210,29 @@ function isLoopbackHost(hostname: string): boolean {
 }
 
 function getHostedOAuthClientId(): string {
-  const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
+  const basePath = getConfiguredBasePath();
 
   return `${window.location.origin}${basePath}/oauth/client-metadata.json`;
 }
 
 async function getOAuthClient(): Promise<BrowserOAuthClient> {
-  if (typeof window === 'undefined') {
+  if (typeof window === 'undefined')
     throw new Error('Bluesky OAuth is only available in the browser.');
-  }
+
+  const loopbackRedirect = redirectToCanonicalLoopbackHost();
+  if (loopbackRedirect) return loopbackRedirect;
+
+  const nextRedirectUri =
+    !process.env.NEXT_PUBLIC_ATPROTO_CLIENT_ID &&
+    isLoopbackHost(window.location.hostname)
+      ? getLoopbackRedirectUri()
+      : null;
+
+  if (oauthClientPromise && oauthClientRedirectUri !== nextRedirectUri)
+    oauthClientPromise = null;
 
   if (!oauthClientPromise) {
+    oauthClientRedirectUri = nextRedirectUri;
     oauthClientPromise = (async (): Promise<BrowserOAuthClient> => {
       const configuredClientId = process.env.NEXT_PUBLIC_ATPROTO_CLIENT_ID;
       const oauthOptions = {
@@ -1120,7 +1258,7 @@ async function getOAuthClient(): Promise<BrowserOAuthClient> {
         ...oauthOptions,
         clientMetadata: buildAtprotoLoopbackClientMetadata({
           scope: OAUTH_SCOPE,
-          redirect_uris: [getLoopbackRedirectUri() as never]
+          redirect_uris: [nextRedirectUri as never]
         })
       });
     })();
@@ -1294,6 +1432,13 @@ function createAuthenticatedServiceAgent(service: BskyServiceConfig): Agent {
   });
 }
 
+function getPublicAppViewAgent(): Agent {
+  if (!publicAppViewAgent)
+    publicAppViewAgent = new Agent(PUBLIC_BSKY_APPVIEW_URL);
+
+  return publicAppViewAgent;
+}
+
 function configureModerationLabelers(api: Agent): Agent {
   if (moderationLabelerDids.length)
     api.configureLabelers(moderationLabelerDids);
@@ -1306,6 +1451,8 @@ function getAppViewAgent(): Agent {
     return configureModerationLabelers(
       createAuthenticatedServiceAgent(BSKY_APPVIEW_CONFIG)
     );
+
+  if (!agent) return configureModerationLabelers(getPublicAppViewAgent());
 
   return configureModerationLabelers(
     getAgent().withProxy(BSKY_APPVIEW_SERVICE, BSKY_APPVIEW_DID)
@@ -2823,17 +2970,21 @@ async function getSafeModerationOpts(): Promise<ModerationOpts | null> {
   }
 }
 
-type LabelModerationCause = {
-  type: 'label';
-  label: { val: string };
-  labelDef: {
-    locales?: { lang?: string; name?: string; description?: string }[];
-    behaviors?: { content?: Record<string, string | undefined> };
-  };
-  target?: string;
-  setting?: SettingsLabelPreference;
-  noOverride?: boolean;
-};
+type LabelModerationCause = Extract<ModerationCause, { type: 'label' }>;
+
+type ContentListModerationCause = Extract<
+  ModerationCause,
+  {
+    type:
+      | 'blocking'
+      | 'blocked-by'
+      | 'block-other'
+      | 'muted'
+      | 'mute-word'
+      | 'hidden'
+      | 'label';
+  }
+>;
 
 const MEDIA_WARNING_LABEL_FALLBACKS: Partial<
   Record<SettingsContentLabel, string>
@@ -2903,6 +3054,110 @@ function isMediaOnlyContentLabelCause(cause: unknown): boolean {
   );
 }
 
+const ADULT_TOMBSTONE_LABELS = new Set<string>([
+  'porn',
+  'sexual',
+  'nudity',
+  'sexual-figurative'
+]);
+
+const RULE_VIOLATION_TOMBSTONE_LABELS = new Set<string>([
+  'extremist',
+  'intolerant',
+  'threat',
+  'illicit',
+  'security',
+  'unsafe-link',
+  'impersonation',
+  'misinformation',
+  'scam',
+  'engagement-farming',
+  'spam',
+  'rumor',
+  'misleading',
+  'inauthentic'
+]);
+
+function isContentListModerationCause(
+  cause: unknown
+): cause is ContentListModerationCause {
+  if (isLabelModerationCause(cause)) return true;
+
+  return (
+    isPlainObject(cause) &&
+    typeof cause.type === 'string' &&
+    [
+      'blocking',
+      'blocked-by',
+      'block-other',
+      'muted',
+      'mute-word',
+      'hidden'
+    ].includes(cause.type)
+  );
+}
+
+function getLabelTombstoneKind(
+  cause: LabelModerationCause
+): TweetTombstoneKind {
+  const { val } = cause.label;
+
+  if (
+    cause.noOverride ||
+    cause.labelDef.flags?.includes('adult') ||
+    ADULT_TOMBSTONE_LABELS.has(val)
+  )
+    return 'age-restricted';
+
+  if (RULE_VIOLATION_TOMBSTONE_LABELS.has(val)) return 'rules-violation';
+
+  return 'sensitive';
+}
+
+function getPostContentListFilterCause(
+  post: AppBskyFeedDefs.PostView,
+  opts: ModerationOpts | null
+): ContentListModerationCause | null {
+  try {
+    if (!opts) return null;
+
+    const contentUi = moderatePost(post, opts).ui('contentList');
+
+    return (
+      contentUi.filters.find(
+        (cause): cause is ContentListModerationCause =>
+          !isMediaOnlyContentLabelCause(cause) &&
+          isContentListModerationCause(cause)
+      ) ?? null
+    );
+  } catch {
+    return null;
+  }
+}
+
+function getPostTombstoneKind(
+  post: AppBskyFeedDefs.PostView,
+  opts: ModerationOpts | null = activeModerationOpts
+): TweetTombstoneKind | null {
+  if (locallyReportedTweetIds.has(postIdFromUri(post.uri))) return 'reported';
+
+  const cause = getPostContentListFilterCause(post, opts);
+  if (!cause) return null;
+
+  switch (cause.type) {
+    case 'muted':
+      return 'muted-account';
+    case 'mute-word':
+      return 'muted-word';
+    case 'hidden':
+      return 'reported';
+    case 'label':
+      return getLabelTombstoneKind(cause);
+    default:
+      return null;
+  }
+}
+
 function getMediaModerationWarning(
   post: AppBskyFeedDefs.PostView,
   opts: ModerationOpts | null = activeModerationOpts,
@@ -2938,17 +3193,16 @@ function isModerationFilteredPost(
   post: AppBskyFeedDefs.PostView,
   opts: ModerationOpts | null
 ): boolean {
-  try {
-    if (!opts) return false;
+  return !!getPostContentListFilterCause(post, opts);
+}
 
-    const contentUi = moderatePost(post, opts).ui('contentList');
-
-    return contentUi.filters.some(
-      (cause) => !isMediaOnlyContentLabelCause(cause)
-    );
-  } catch {
-    return false;
-  }
+function isModerationFilteredWithoutTombstone(
+  post: AppBskyFeedDefs.PostView,
+  opts: ModerationOpts | null
+): boolean {
+  return (
+    isModerationFilteredPost(post, opts) && !getPostTombstoneKind(post, opts)
+  );
 }
 
 function isModerationFilteredNotification(
@@ -2971,7 +3225,11 @@ function filterVisiblePostViews<T extends AppBskyFeedDefs.PostView>(
 ): T[] {
   if (!opts) return posts;
 
-  return posts.filter((post) => !isModerationFilteredPost(post, opts));
+  return posts.filter(
+    (post) =>
+      !isModerationFilteredPost(post, opts) ||
+      !!getPostTombstoneKind(post, opts)
+  );
 }
 
 function filterVisibleFeedItems<T extends ActorFeedPost>(
@@ -2980,14 +3238,88 @@ function filterVisibleFeedItems<T extends ActorFeedPost>(
 ): T[] {
   if (!opts) return items;
 
-  return items.filter(({ post }) => !isModerationFilteredPost(post, opts));
+  return items.filter(
+    ({ post }) =>
+      !isModerationFilteredPost(post, opts) ||
+      !!getPostTombstoneKind(post, opts)
+  );
 }
 
 function isVisibleThreadPost(
   thread: AppBskyFeedDefs.ThreadViewPost,
   opts: ModerationOpts | null
 ): boolean {
-  return !isModerationFilteredPost(thread.post, opts);
+  if (
+    thread.post.author.viewer?.blocking ||
+    thread.post.author.viewer?.blockingByList ||
+    thread.post.author.viewer?.blockedBy
+  )
+    return true;
+
+  return (
+    !isModerationFilteredPost(thread.post, opts) ||
+    !!getPostTombstoneKind(thread.post, opts)
+  );
+}
+
+function isThreadRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object';
+}
+
+function isThreadViewItem(
+  item: unknown
+): item is AppBskyFeedDefs.ThreadViewPost {
+  return (
+    AppBskyFeedDefs.isThreadViewPost(item) &&
+    isThreadRecord(item) &&
+    'post' in item
+  );
+}
+
+function isBlockedThreadItem(
+  item: unknown
+): item is AppBskyFeedDefs.BlockedPost {
+  const record = item as { uri?: unknown; author?: unknown };
+
+  return (
+    AppBskyFeedDefs.isBlockedPost(item) &&
+    isThreadRecord(item) &&
+    typeof record.uri === 'string' &&
+    record.author !== undefined
+  );
+}
+
+function isNotFoundThreadItem(
+  item: unknown
+): item is AppBskyFeedDefs.NotFoundPost {
+  const record = item as { uri?: unknown };
+
+  return (
+    AppBskyFeedDefs.isNotFoundPost(item) &&
+    isThreadRecord(item) &&
+    typeof record.uri === 'string'
+  );
+}
+
+function isUnavailableThreadItem(
+  item: unknown
+): item is AppBskyFeedDefs.BlockedPost | AppBskyFeedDefs.NotFoundPost {
+  return isBlockedThreadItem(item) || isNotFoundThreadItem(item);
+}
+
+function isThreadItem(item: unknown): item is ThreadItem {
+  return isThreadViewItem(item) || isUnavailableThreadItem(item);
+}
+
+function isVisibleThreadItem(
+  item: ThreadItem,
+  opts: ModerationOpts | null,
+  hiddenAuthors?: HiddenThreadAuthors
+): boolean {
+  if (isThreadViewItem(item) && hiddenAuthors?.has(item.post.author.did))
+    return true;
+
+  return isThreadViewItem(item) ? isVisibleThreadPost(item, opts) : true;
 }
 
 function getRuleType(rule: unknown): string | null {
@@ -3009,6 +3341,43 @@ function getDefaultReplyFromRules(
   if (ruleType === 'app.bsky.feed.threadgate#mentionRule') return 'mentioned';
 
   return 'custom';
+}
+
+function getReplySettingFromThreadgate(
+  threadgate?: AppBskyFeedDefs.ThreadgateView
+): TweetReplySetting | null {
+  const record = threadgate?.record;
+
+  if (!isPlainObject(record)) return 'everyone';
+  if (!('allow' in record)) return 'everyone';
+
+  const { allow } = record;
+
+  if (!Array.isArray(allow)) return null;
+  if (allow.length === 0) return 'none';
+
+  const ruleTypes = allow.map(getRuleType);
+
+  if (ruleTypes.includes('app.bsky.feed.threadgate#followingRule'))
+    return 'following';
+  if (ruleTypes.includes('app.bsky.feed.threadgate#followerRule'))
+    return 'followers';
+  if (ruleTypes.includes('app.bsky.feed.threadgate#mentionRule'))
+    return 'mentioned';
+
+  return null;
+}
+
+function getViewerCanReplyToPost(
+  post: AppBskyFeedDefs.PostView,
+  replySetting: TweetReplySetting | null
+): boolean | null {
+  if (sessionDid && post.author.did === sessionDid) return true;
+  if (typeof post.viewer?.replyDisabled === 'boolean')
+    return !post.viewer.replyDisabled;
+  if (replySetting === 'none') return false;
+
+  return null;
 }
 
 function getReplyRulesFromDefault(
@@ -3340,19 +3709,37 @@ export async function setDefaultQuoteSetting(
   return getBlueskySettings();
 }
 
-export async function setInterestsSetting(
-  tags: string[]
-): Promise<BlueskySettings> {
-  const safeTags = Array.from(
+function normalizeInterestTags(tags: string[]): string[] {
+  return Array.from(
     new Set(
       tags
         .map((tag) => tag.trim().replace(/^#/, '').toLowerCase())
         .filter((tag) => /^[a-z0-9][a-z0-9-]{0,63}$/.test(tag))
     )
   ).slice(0, 20);
+}
+
+export async function getInterestsSetting(): Promise<string[]> {
+  const prefs = await getAgent().getPreferences();
+
+  return prefs.interests.tags;
+}
+
+export async function updateInterestsSetting(
+  tags: string[]
+): Promise<string[]> {
+  const safeTags = normalizeInterestTags(tags);
 
   await getAgent().setInterestsPref({ tags: safeTags });
   notify();
+
+  return safeTags;
+}
+
+export async function setInterestsSetting(
+  tags: string[]
+): Promise<BlueskySettings> {
+  await updateInterestsSetting(tags);
 
   return getBlueskySettings();
 }
@@ -3437,13 +3824,21 @@ export async function setSettingsNotificationPreference(
   return getBlueskySettings();
 }
 
-function notify(): void {
-  listeners.forEach((listener) => listener());
+function notify(changeType: BackendChangeType = 'content'): void {
+  listeners.forEach((changeTypes, listener) => {
+    if (!changeTypes || changeTypes.has(changeType)) listener(changeType);
+  });
 }
 
-export function subscribeBackend(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
+export function subscribeBackend(
+  listener: () => void,
+  changeTypes?: BackendChangeType[]
+): () => void {
+  const backendListener: BackendListener = () => listener();
+  listeners.set(backendListener, changeTypes ? new Set(changeTypes) : null);
+  return () => {
+    listeners.delete(backendListener);
+  };
 }
 
 function safeAtob(value: string): string {
@@ -3484,6 +3879,132 @@ function compactArray(count: number, ownerId?: string): string[] {
   );
 
   return ownerId && safeCount === 0 ? [ownerId] : placeholders;
+}
+
+function getViewerReactionOverrideMap(
+  kind: ViewerReactionKind
+): Map<string, ViewerReactionState> {
+  return kind === 'like'
+    ? localViewerLikeOverrides
+    : localViewerRepostOverrides;
+}
+
+function getViewerReactionUriCache(
+  kind: ViewerReactionKind
+): Map<string, string> {
+  return kind === 'like' ? localViewerLikeUriCache : localViewerRepostUriCache;
+}
+
+function getViewerReactionOverride(
+  kind: ViewerReactionKind,
+  tweetId: string
+): ViewerReactionState | undefined {
+  return getViewerReactionOverrideMap(kind).get(tweetId);
+}
+
+function setViewerReactionOverride(
+  kind: ViewerReactionKind,
+  tweetId: string,
+  state: ViewerReactionState
+): void {
+  getViewerReactionOverrideMap(kind).set(tweetId, state);
+}
+
+function clearViewerReactionOverride(
+  kind: ViewerReactionKind,
+  tweetId: string
+): void {
+  getViewerReactionOverrideMap(kind).delete(tweetId);
+}
+
+function cacheViewerReactionUri(
+  kind: ViewerReactionKind,
+  tweetId: string,
+  uri: string | null | undefined
+): void {
+  if (uri) getViewerReactionUriCache(kind).set(tweetId, uri);
+}
+
+function getCachedViewerReactionUri(
+  kind: ViewerReactionKind,
+  tweetId: string
+): string | null {
+  return getViewerReactionUriCache(kind).get(tweetId) ?? null;
+}
+
+function deleteCachedViewerReactionUri(
+  kind: ViewerReactionKind,
+  tweetId: string
+): void {
+  getViewerReactionUriCache(kind).delete(tweetId);
+}
+
+function getViewerReactionCollection(kind: ViewerReactionKind): string {
+  return kind === 'like' ? 'app.bsky.feed.like' : 'app.bsky.feed.repost';
+}
+
+function getPostViewerReactionUri(
+  post: AppBskyFeedDefs.PostView,
+  kind: ViewerReactionKind
+): string | null {
+  return kind === 'like'
+    ? post.viewer?.like ?? null
+    : post.viewer?.repost ?? null;
+}
+
+function getViewerReactionField(
+  kind: ViewerReactionKind
+): 'userLikes' | 'userRetweets' {
+  return kind === 'like' ? 'userLikes' : 'userRetweets';
+}
+
+function getEffectiveViewerReaction(
+  kind: ViewerReactionKind,
+  tweetId: string,
+  serverActive: boolean,
+  serverUri: string | null | undefined,
+  serverCount: number
+): { active: boolean; count: number } {
+  cacheViewerReactionUri(kind, tweetId, serverUri);
+
+  const override = sessionDid
+    ? getViewerReactionOverride(kind, tweetId)
+    : undefined;
+
+  if (override && override.active === serverActive) {
+    if (serverUri) cacheViewerReactionUri(kind, tweetId, serverUri);
+    clearViewerReactionOverride(kind, tweetId);
+  }
+
+  const activeOverride = sessionDid
+    ? getViewerReactionOverride(kind, tweetId)
+    : undefined;
+  const active = activeOverride ? activeOverride.active : serverActive;
+  let count = Math.max(0, serverCount);
+
+  if (activeOverride?.active && !serverActive) count += 1;
+  if (activeOverride && !activeOverride.active && serverActive)
+    count = Math.max(0, count - 1);
+
+  return { active, count };
+}
+
+function updateCachedTweetViewerReaction(
+  tweetId: string,
+  kind: ViewerReactionKind,
+  active: boolean
+): void {
+  if (!sessionDid) return;
+
+  const tweet = tweetCache.get(tweetId) ?? locallyCreatedTweets.get(tweetId);
+  if (!tweet) return;
+
+  const field = getViewerReactionField(kind);
+  const currentValues = tweet[field];
+
+  tweet[field] = active
+    ? [sessionDid, ...currentValues.filter((id) => id !== sessionDid)]
+    : currentValues.filter((id) => id !== sessionDid);
 }
 
 function getThemeOverride(did: string): Partial<User> {
@@ -3593,6 +4114,19 @@ function hasProfileVerification(profile: ActorProfileView): boolean {
   );
 }
 
+function mapKnownFollowerProfile(profile: ActorProfileView): UserKnownFollower {
+  const existing = userCache.get(profile.did);
+  const displayName = profile.displayName?.trim();
+
+  return {
+    id: profile.did,
+    name: displayName ? displayName : existing?.name ?? profile.handle,
+    username: profile.handle,
+    photoURL: profile.avatar ?? existing?.photoURL ?? DEFAULT_PROFILE_PHOTO_URL,
+    verified: existing?.verified === true || hasProfileVerification(profile)
+  };
+}
+
 function getCachedUser(actor: string): User | null {
   return userCache.get(actor) ?? userHandleCache.get(actor) ?? null;
 }
@@ -3643,6 +4177,9 @@ function mapProfile(profile: ActorProfileView): User {
   const currentDid = sessionDid ?? '';
   const targetFollowsViewer = !!detailedProfile.viewer?.followedBy;
   const viewerFollowsTarget = !!detailedProfile.viewer?.following;
+  const localViewerFollowsTarget = localViewerFollowOverrides.get(did);
+  const effectiveViewerFollowsTarget =
+    localViewerFollowsTarget ?? viewerFollowsTarget;
   const hasViewerState = !!detailedProfile.viewer;
   const viewerBlockingUri =
     typeof detailedProfile.viewer?.blocking === 'string'
@@ -3667,18 +4204,41 @@ function mapProfile(profile: ActorProfileView): User {
     ? detailedProfile.viewer?.mutedByList?.name ?? null
     : existing?.mutingByListName ?? null;
   const isCurrentUser = currentUser?.id === did;
+  const existingFollowing = existing?.following ?? [];
+  const existingFollowers = existing?.followers ?? [];
   const following = isCurrentUser
     ? Array.from(currentFollowing)
     : targetFollowsViewer && currentDid
-    ? [currentDid]
-    : existing?.following ?? [];
+    ? [currentDid, ...existingFollowing.filter((id) => id !== currentDid)]
+    : hasViewerState && currentDid
+    ? existingFollowing.filter((id) => id !== currentDid)
+    : existingFollowing;
   const followers =
-    viewerFollowsTarget && currentDid
-      ? [currentDid]
-      : existing?.followers ?? [];
+    effectiveViewerFollowsTarget && currentDid
+      ? [currentDid, ...existingFollowers.filter((id) => id !== currentDid)]
+      : hasViewerState && currentDid
+      ? existingFollowers.filter((id) => id !== currentDid)
+      : existingFollowers;
+  const viewerKnownFollowers = detailedProfile.viewer?.knownFollowers;
+  const knownFollowers = isCurrentUser
+    ? []
+    : viewerKnownFollowers
+    ? viewerKnownFollowers.followers.map(mapKnownFollowerProfile)
+    : hasViewerState
+    ? []
+    : existing?.knownFollowers ?? [];
+  const knownFollowersCount = isCurrentUser
+    ? 0
+    : viewerKnownFollowers
+    ? viewerKnownFollowers.count
+    : hasViewerState
+    ? 0
+    : existing?.knownFollowersCount ?? knownFollowers.length;
 
   if (detailedProfile.viewer?.following) {
     followUriCache.set(did, detailedProfile.viewer.following);
+  } else if (hasViewerState && !effectiveViewerFollowsTarget) {
+    followUriCache.delete(did);
   }
   if (blockingUri) {
     blockUriCache.set(did, blockingUri);
@@ -3722,14 +4282,21 @@ function mapProfile(profile: ActorProfileView): User {
     verified: (existing?.verified ?? false) || hasProfileVerification(profile),
     following,
     followers,
-    followingCount:
-      detailedProfile.followsCount ??
-      existing?.followingCount ??
-      following.length,
+    followingCount: isCurrentUser
+      ? existing?.followingCount ??
+        detailedProfile.followsCount ??
+        following.length
+      : detailedProfile.followsCount ??
+        existing?.followingCount ??
+        following.length,
     followersCount:
-      detailedProfile.followersCount ??
-      existing?.followersCount ??
-      followers.length,
+      localViewerFollowsTarget !== undefined && existing
+        ? existing.followersCount
+        : detailedProfile.followersCount ??
+          existing?.followersCount ??
+          followers.length,
+    knownFollowers,
+    knownFollowersCount,
     muting,
     mutingByListName,
     blocking,
@@ -3782,6 +4349,43 @@ async function hydrateProfiles(profiles: ActorProfileView[]): Promise<User[]> {
   return profiles.map(
     (profile) => getCachedUser(profile.did) ?? mapProfile(profile)
   );
+}
+
+async function hydrateKnownFollowersUserData(actor: string): Promise<void> {
+  if (!sessionDid) return;
+
+  const normalizedActor = normalizeAtIdentifier(actor);
+  if (!normalizedActor || normalizedActor === sessionDid) return;
+
+  const response = await getAppViewAgent()
+    .app.bsky.graph.getKnownFollowers({
+      actor: normalizedActor,
+      limit: 3
+    })
+    .catch(() => null);
+
+  if (!response) return;
+
+  const subject = mapProfile(response.data.subject);
+  const knownFollowerProfiles = response.data.subject.viewer?.knownFollowers
+    ?.followers.length
+    ? response.data.subject.viewer.knownFollowers.followers
+    : response.data.followers;
+  const knownFollowers = knownFollowerProfiles.map(mapKnownFollowerProfile);
+  const knownFollowersCount =
+    response.data.subject.viewer?.knownFollowers?.count ??
+    response.data.followers.length;
+  const cachedSubject = userCache.get(subject.id) ?? subject;
+
+  cachedSubject.knownFollowers = knownFollowers;
+  cachedSubject.knownFollowersCount = Math.max(
+    knownFollowersCount,
+    knownFollowers.length
+  );
+  userCache.set(cachedSubject.id, cachedSubject);
+  userHandleCache.set(cachedSubject.username, cachedSubject);
+
+  await hydrateProfiles(response.data.followers);
 }
 
 function getPostText(record: unknown): string | null {
@@ -3938,6 +4542,12 @@ function getStarterPackDescription(record: unknown): string | null {
     return null;
   const description = (record as { description?: unknown }).description;
   return typeof description === 'string' && description ? description : null;
+}
+
+function getStarterPackRecordFeedCount(record: unknown): number {
+  if (!record || typeof record !== 'object' || !('feeds' in record)) return 0;
+  const feeds = (record as { feeds?: unknown }).feeds;
+  return Array.isArray(feeds) ? feeds.length : 0;
 }
 
 function mapRecordSummaryCard(
@@ -4137,6 +4747,26 @@ function getEmbeddedRecordMediaWarning(
   );
 }
 
+function getEmbeddedRecordTombstone(
+  record: AppBskyEmbedRecord.ViewRecord,
+  author: User
+): TweetTombstoneKind | null {
+  if (author.muting || author.mutingByListName) return 'muted-account';
+
+  return getPostTombstoneKind(
+    {
+      uri: record.uri,
+      cid: record.cid,
+      author: record.author,
+      record: record.value,
+      embed: record.embeds?.[0] as AppBskyFeedDefs.PostView['embed'],
+      labels: record.labels,
+      indexedAt: record.indexedAt
+    },
+    activeModerationOpts
+  );
+}
+
 function mapEmbeddedRecord(
   record: AppBskyEmbedRecord.View['record']
 ): EmbeddedTweet | null {
@@ -4144,6 +4774,9 @@ function mapEmbeddedRecord(
     const id = postIdFromUri(record.uri);
     const author = mapProfile(record.author);
     const images = mapFirstEmbeddedMedia(record.embeds);
+
+    if (author.blocking || author.blockedBy)
+      return mapUnavailableEmbeddedTweet('blocked', record.uri);
 
     postRefCache.set(id, { uri: record.uri, cid: record.cid });
     cachePostReplyRef(id, record.value);
@@ -4159,7 +4792,8 @@ function mapEmbeddedRecord(
       createdAt: getPostCreatedAt(record.value, record.indexedAt),
       images,
       mediaWarning: getEmbeddedRecordMediaWarning(record, images),
-      card: mapFirstEmbeddedCard(record.embeds)
+      card: mapFirstEmbeddedCard(record.embeds),
+      tombstone: getEmbeddedRecordTombstone(record, author)
     };
   }
 
@@ -4204,6 +4838,23 @@ function mapPost(
   const id = postIdFromUri(post.uri);
   const currentDid = sessionDid;
   const images = mapMedia(post.embed);
+  const replySetting = getReplySettingFromThreadgate(post.threadgate);
+  const viewerLikeUri = getPostViewerReactionUri(post, 'like');
+  const viewerRepostUri = getPostViewerReactionUri(post, 'repost');
+  const likeState = getEffectiveViewerReaction(
+    'like',
+    id,
+    !!viewerLikeUri,
+    viewerLikeUri,
+    post.likeCount ?? 0
+  );
+  const repostState = getEffectiveViewerReaction(
+    'repost',
+    id,
+    !!viewerRepostUri,
+    viewerRepostUri,
+    post.repostCount ?? 0
+  );
   const tweet: Tweet = {
     id,
     text: getPostText(post.record),
@@ -4216,21 +4867,24 @@ function mapPost(
     ),
     card: mapCard(post.embed),
     quotedTweet: mapQuotedTweet(post.embed),
+    tombstone: getPostTombstoneKind(post, activeModerationOpts),
     parent: parent ?? null,
     userLikes: compactArray(
-      post.likeCount ?? 0,
-      post.viewer?.like && currentDid ? currentDid : undefined
+      likeState.count,
+      likeState.active && currentDid ? currentDid : undefined
     ),
     createdBy: post.author.did,
     createdAt: getPostCreatedAt(post.record, post.indexedAt),
     updatedAt: null,
     userReplies: post.replyCount ?? 0,
     userRetweets: compactArray(
-      post.repostCount ?? 0,
-      post.viewer?.repost && currentDid ? currentDid : undefined
+      repostState.count,
+      repostState.active && currentDid ? currentDid : undefined
     ),
     userQuotes: post.quoteCount ?? 0,
-    bookmarkCount: getPostBookmarkCount(post)
+    bookmarkCount: getPostBookmarkCount(post),
+    replySetting,
+    viewerCanReply: getViewerCanReplyToPost(post, replySetting)
   };
 
   postRefCache.set(id, { uri: post.uri, cid: post.cid });
@@ -4246,7 +4900,7 @@ function getThreadParent(
 ): { id: string; username: string } | null {
   const { parent } = thread;
 
-  return AppBskyFeedDefs.isThreadViewPost(parent)
+  return isThreadViewItem(parent)
     ? {
         id: postIdFromUri(parent.post.uri),
         username: parent.post.author.handle
@@ -4254,21 +4908,252 @@ function getThreadParent(
     : null;
 }
 
-function mapThreadPost(thread: AppBskyFeedDefs.ThreadViewPost): TweetWithUser {
+function getUnavailableThreadReason(
+  item: AppBskyFeedDefs.BlockedPost | AppBskyFeedDefs.NotFoundPost
+): TweetUnavailableReason {
+  if (isNotFoundThreadItem(item)) return 'not-found';
+  if (!isBlockedThreadItem(item)) return 'blocked';
+
+  return item.author.viewer?.blockedBy ? 'blocked-by' : 'blocked';
+}
+
+function getThreadPostUnavailableReason(
+  thread: AppBskyFeedDefs.ThreadViewPost
+): TweetUnavailableReason | null {
+  if (thread.post.author.viewer?.blockedBy) return 'blocked-by';
+  if (
+    thread.post.author.viewer?.blocking ||
+    thread.post.author.viewer?.blockingByList
+  )
+    return 'blocked';
+
+  return null;
+}
+
+function addHiddenThreadAuthor(
+  hiddenAuthors: HiddenThreadAuthors,
+  did: string | null,
+  reason: TweetUnavailableReason | null
+): void {
+  if (!did || !reason || reason === 'not-found' || reason === 'unknown') return;
+
+  const existingReason = hiddenAuthors.get(did);
+  if (existingReason === 'blocked-by') return;
+
+  if (!existingReason || reason === 'blocked-by')
+    hiddenAuthors.set(did, reason);
+}
+
+function collectHiddenThreadAuthors(
+  item: unknown,
+  hiddenAuthors: HiddenThreadAuthors = new Map()
+): HiddenThreadAuthors {
+  if (isBlockedThreadItem(item)) {
+    addHiddenThreadAuthor(
+      hiddenAuthors,
+      item.author.did,
+      getUnavailableThreadReason(item)
+    );
+    return hiddenAuthors;
+  }
+
+  if (!isThreadViewItem(item)) return hiddenAuthors;
+
+  addHiddenThreadAuthor(
+    hiddenAuthors,
+    item.post.author.did,
+    getThreadPostUnavailableReason(item)
+  );
+  collectHiddenThreadAuthors(item.parent, hiddenAuthors);
+  item.replies?.forEach((reply) =>
+    collectHiddenThreadAuthors(reply, hiddenAuthors)
+  );
+
+  return hiddenAuthors;
+}
+
+function getUnavailableThreadUser(
+  item: AppBskyFeedDefs.BlockedPost | AppBskyFeedDefs.NotFoundPost
+): User {
+  const authorDid = isBlockedThreadItem(item)
+    ? item.author.did
+    : `unknown:${item.uri}`;
+  const existing = getCachedUser(authorDid);
+
+  if (existing)
+    return {
+      ...existing,
+      blocking: isBlockedThreadItem(item)
+        ? !!item.author.viewer?.blocking || existing.blocking
+        : existing.blocking,
+      blockedBy: isBlockedThreadItem(item)
+        ? !!item.author.viewer?.blockedBy || existing.blockedBy
+        : existing.blockedBy
+    };
+
+  const now = Timestamp.now();
+
+  return {
+    id: authorDid,
+    bio: null,
+    pronouns: null,
+    birthday: null,
+    messageAllowIncoming: null,
+    name: 'Unavailable',
+    theme: null,
+    accent: null,
+    website: null,
+    username: 'unavailable',
+    photoURL: DEFAULT_PROFILE_PHOTO_URL,
+    verified: false,
+    following: [],
+    followers: [],
+    followingCount: 0,
+    followersCount: 0,
+    knownFollowers: [],
+    knownFollowersCount: 0,
+    muting: false,
+    mutingByListName: null,
+    blocking: isBlockedThreadItem(item)
+      ? !!item.author.viewer?.blocking
+      : false,
+    blockedBy: isBlockedThreadItem(item)
+      ? !!item.author.viewer?.blockedBy
+      : false,
+    blockingUri:
+      isBlockedThreadItem(item) &&
+      typeof item.author.viewer?.blocking === 'string'
+        ? item.author.viewer.blocking
+        : null,
+    blockingByListName: null,
+    createdAt: now,
+    updatedAt: null,
+    totalTweets: 0,
+    totalPhotos: 0,
+    pinnedTweet: null,
+    coverPhotoURL: DEFAULT_PROFILE_COVER_URL
+  };
+}
+
+function getUnavailableThreadParent(
+  parent: unknown
+): { id: string; username: string } | null {
+  if (!isThreadItem(parent)) return null;
+
+  return {
+    id: postIdFromUri(isThreadViewItem(parent) ? parent.post.uri : parent.uri),
+    username: isThreadViewItem(parent)
+      ? parent.post.author.handle
+      : 'unavailable'
+  };
+}
+
+function mapUnavailableThreadItem(
+  item: AppBskyFeedDefs.BlockedPost | AppBskyFeedDefs.NotFoundPost,
+  parent?: unknown
+): TweetWithUser {
+  const createdAt = Timestamp.now();
+  const unavailable = getUnavailableThreadReason(item);
+
+  return {
+    id: postIdFromUri(item.uri),
+    text: null,
+    langs: [],
+    images: null,
+    mediaWarning: null,
+    card: null,
+    quotedTweet: null,
+    parent: getUnavailableThreadParent(parent),
+    userLikes: [],
+    createdBy: isBlockedThreadItem(item)
+      ? item.author.did
+      : `unknown:${item.uri}`,
+    createdAt,
+    updatedAt: null,
+    userReplies: 0,
+    userRetweets: [],
+    userQuotes: 0,
+    bookmarkCount: 0,
+    replySetting: null,
+    viewerCanReply: false,
+    unavailable,
+    user: getUnavailableThreadUser(item)
+  };
+}
+
+function mapHiddenThreadPost(
+  thread: AppBskyFeedDefs.ThreadViewPost,
+  unavailable: TweetUnavailableReason
+): TweetWithUser {
+  const user = mapProfile(thread.post.author);
+
+  return {
+    id: postIdFromUri(thread.post.uri),
+    text: null,
+    langs: [],
+    images: null,
+    mediaWarning: null,
+    card: null,
+    quotedTweet: null,
+    parent: getThreadParent(thread),
+    userLikes: [],
+    createdBy: thread.post.author.did,
+    createdAt: getPostCreatedAt(thread.post.record, thread.post.indexedAt),
+    updatedAt: null,
+    userReplies: 0,
+    userRetweets: [],
+    userQuotes: 0,
+    bookmarkCount: 0,
+    replySetting: null,
+    viewerCanReply: false,
+    unavailable,
+    user: {
+      ...user,
+      blocking: unavailable === 'blocked' || user.blocking,
+      blockedBy: unavailable === 'blocked-by' || user.blockedBy
+    }
+  };
+}
+
+function mapThreadPost(
+  thread: AppBskyFeedDefs.ThreadViewPost,
+  hiddenAuthors?: HiddenThreadAuthors
+): TweetWithUser {
+  const unavailable =
+    hiddenAuthors?.get(thread.post.author.did) ??
+    getThreadPostUnavailableReason(thread);
+
+  if (unavailable) return mapHiddenThreadPost(thread, unavailable);
+
+  const user = mapProfile(thread.post.author);
+
   return {
     ...mapPost(thread.post, getThreadParent(thread)),
-    user: mapProfile(thread.post.author)
+    user
   };
+}
+
+function mapThreadItem(
+  item: ThreadItem,
+  parent?: unknown,
+  hiddenAuthors?: HiddenThreadAuthors
+): TweetWithUser {
+  if (isThreadViewItem(item)) return mapThreadPost(item, hiddenAuthors);
+  if (isUnavailableThreadItem(item))
+    return mapUnavailableThreadItem(item, parent);
+
+  throw new Error('Unsupported thread item.');
 }
 
 function getThreadParentPosts(
   thread: AppBskyFeedDefs.ThreadViewPost
-): AppBskyFeedDefs.ThreadViewPost[] {
-  const parents: AppBskyFeedDefs.ThreadViewPost[] = [];
+): ThreadItem[] {
+  const parents: ThreadItem[] = [];
   let currentParent = thread.parent;
 
-  while (AppBskyFeedDefs.isThreadViewPost(currentParent)) {
+  while (isThreadItem(currentParent)) {
     parents.unshift(currentParent);
+    if (!isThreadViewItem(currentParent)) break;
     currentParent = currentParent.parent;
   }
 
@@ -4276,26 +5161,34 @@ function getThreadParentPosts(
 }
 
 function mapVisibleThreadParents(
-  parents: AppBskyFeedDefs.ThreadViewPost[],
-  moderationOpts?: ModerationOpts | null
+  parents: ThreadItem[],
+  moderationOpts?: ModerationOpts | null,
+  hiddenAuthors?: HiddenThreadAuthors
 ): TweetWithUser[] {
   return filterDeletedTweets(
     parents
-      .filter((parent) => isVisibleThreadPost(parent, moderationOpts ?? null))
-      .map(mapThreadPost)
+      .filter((parent) =>
+        isVisibleThreadItem(parent, moderationOpts ?? null, hiddenAuthors)
+      )
+      .map((parent) => mapThreadItem(parent, undefined, hiddenAuthors))
   );
 }
 
 function mapThreadParentPage(
   thread: AppBskyFeedDefs.ThreadViewPost,
-  moderationOpts?: ModerationOpts | null
+  moderationOpts?: ModerationOpts | null,
+  hiddenAuthors?: HiddenThreadAuthors
 ): TweetThreadParentsPage {
   const parentPosts = getThreadParentPosts(thread);
   const hasMoreParents = parentPosts.length > BSKY_THREAD_PARENT_PAGE_SIZE;
   const visibleParentPosts = hasMoreParents
     ? parentPosts.slice(1)
     : parentPosts;
-  const parents = mapVisibleThreadParents(visibleParentPosts, moderationOpts);
+  const parents = mapVisibleThreadParents(
+    visibleParentPosts,
+    moderationOpts,
+    hiddenAuthors
+  );
 
   return {
     parents,
@@ -4305,42 +5198,78 @@ function mapThreadParentPage(
 
 function getVisibleThreadReplies(
   thread: AppBskyFeedDefs.ThreadViewPost,
-  moderationOpts?: ModerationOpts | null
-): AppBskyFeedDefs.ThreadViewPost[] {
-  return (thread.replies ?? [])
-    .filter(AppBskyFeedDefs.isThreadViewPost)
-    .filter((reply) => isVisibleThreadPost(reply, moderationOpts ?? null));
+  moderationOpts?: ModerationOpts | null,
+  hiddenAuthors?: HiddenThreadAuthors
+): ThreadItem[] {
+  const replies: ThreadItem[] = [];
+
+  for (const reply of thread.replies ?? []) {
+    if (!isThreadItem(reply)) continue;
+    if (!isVisibleThreadItem(reply, moderationOpts ?? null, hiddenAuthors))
+      continue;
+    replies.push(reply);
+  }
+
+  return replies;
 }
 
-function compareThreadPostsByCreatedAt(
-  a: AppBskyFeedDefs.ThreadViewPost,
-  b: AppBskyFeedDefs.ThreadViewPost
-): number {
-  const createdAtDifference =
-    getPostCreatedAt(a.post.record, a.post.indexedAt).toDate().getTime() -
-    getPostCreatedAt(b.post.record, b.post.indexedAt).toDate().getTime();
+function getThreadItemUri(item: ThreadItem): string {
+  return isThreadViewItem(item) ? item.post.uri : item.uri;
+}
 
-  return createdAtDifference || a.post.uri.localeCompare(b.post.uri);
+function getThreadItemAuthorDid(item: ThreadItem): string | null {
+  if (isThreadViewItem(item)) return item.post.author.did;
+  if (isBlockedThreadItem(item)) return item.author.did;
+
+  return null;
+}
+
+function getThreadItemCreatedAtTime(item: ThreadItem): number {
+  return isThreadViewItem(item)
+    ? getPostCreatedAt(item.post.record, item.post.indexedAt).toDate().getTime()
+    : Number.MAX_SAFE_INTEGER;
+}
+
+function compareThreadItemsByCreatedAt(a: ThreadItem, b: ThreadItem): number {
+  return (
+    getThreadItemCreatedAtTime(a) - getThreadItemCreatedAtTime(b) ||
+    getThreadItemUri(a).localeCompare(getThreadItemUri(b))
+  );
 }
 
 function collectAuthorThreadReplies(
   thread: AppBskyFeedDefs.ThreadViewPost,
   authorDid: string,
   seenUris: Set<string>,
-  moderationOpts?: ModerationOpts | null
-): AppBskyFeedDefs.ThreadViewPost[] {
-  const authorReplies = getVisibleThreadReplies(thread, moderationOpts)
-    .filter((reply) => reply.post.author.did === authorDid)
-    .sort(compareThreadPostsByCreatedAt);
-  const threadReplies: AppBskyFeedDefs.ThreadViewPost[] = [];
+  moderationOpts?: ModerationOpts | null,
+  hiddenAuthors?: HiddenThreadAuthors
+): ThreadItem[] {
+  const authorReplies = getVisibleThreadReplies(
+    thread,
+    moderationOpts,
+    hiddenAuthors
+  )
+    .filter((reply) => getThreadItemAuthorDid(reply) === authorDid)
+    .sort(compareThreadItemsByCreatedAt);
+  const threadReplies: ThreadItem[] = [];
 
   authorReplies.forEach((reply) => {
-    if (seenUris.has(reply.post.uri)) return;
+    const uri = getThreadItemUri(reply);
 
-    seenUris.add(reply.post.uri);
+    if (seenUris.has(uri)) return;
+
+    seenUris.add(uri);
     threadReplies.push(
       reply,
-      ...collectAuthorThreadReplies(reply, authorDid, seenUris, moderationOpts)
+      ...(isThreadViewItem(reply)
+        ? collectAuthorThreadReplies(
+            reply,
+            authorDid,
+            seenUris,
+            moderationOpts,
+            hiddenAuthors
+          )
+        : [])
     );
   });
 
@@ -4349,7 +5278,8 @@ function collectAuthorThreadReplies(
 
 function mapThreadReplies(
   thread: AppBskyFeedDefs.ThreadViewPost,
-  moderationOpts?: ModerationOpts | null
+  moderationOpts?: ModerationOpts | null,
+  hiddenAuthors?: HiddenThreadAuthors
 ): {
   threadReplies: TweetWithUser[];
   replies: TweetWithUser[];
@@ -4359,16 +5289,37 @@ function mapThreadReplies(
     thread,
     thread.post.author.did,
     threadReplyUris,
-    moderationOpts
+    moderationOpts,
+    hiddenAuthors
   );
-  const replies = getVisibleThreadReplies(thread, moderationOpts).filter(
-    (reply) => !threadReplyUris.has(reply.post.uri)
-  );
+  const replies = getVisibleThreadReplies(
+    thread,
+    moderationOpts,
+    hiddenAuthors
+  ).filter((reply) => !threadReplyUris.has(getThreadItemUri(reply)));
 
   return {
-    threadReplies: authorThreadReplies.map(mapThreadPost),
-    replies: replies.map(mapThreadPost)
+    threadReplies: authorThreadReplies.map((reply) =>
+      mapThreadItem(reply, thread, hiddenAuthors)
+    ),
+    replies: replies.map((reply) => mapThreadItem(reply, thread, hiddenAuthors))
   };
+}
+
+async function getThreadWithPublicSkeleton(
+  thread: unknown,
+  hiddenAuthors: HiddenThreadAuthors,
+  params: { uri: string; depth: number; parentHeight: number }
+): Promise<unknown> {
+  if (!hiddenAuthors.size) return thread;
+
+  const publicThread = (
+    await getPublicAppViewAgent()
+      .getPostThread(params)
+      .catch(() => null)
+  )?.data.thread;
+
+  return isThreadItem(publicThread) ? publicThread : thread;
 }
 
 function postHasVisibleMedia(post: AppBskyFeedDefs.PostView): boolean {
@@ -4631,6 +5582,40 @@ function mapGraphList(
   };
 }
 
+async function getRealListItemCount(listUri: string): Promise<number | null> {
+  let cursor: string | undefined;
+  let itemCount = 0;
+
+  do {
+    const response = await callPublicFallbackAppQueryXrpc<AppViewListResponse>(
+      'app.bsky.graph.getList',
+      {
+        list: listUri,
+        cursor,
+        limit: 100
+      }
+    );
+
+    if (typeof response.list.listItemCount === 'number')
+      return response.list.listItemCount;
+
+    itemCount += response.items.length;
+    cursor = response.cursor;
+  } while (cursor);
+
+  return itemCount;
+}
+
+async function hydrateGraphListCount(
+  list: AppBskyGraphDefs.ListView
+): Promise<AppBskyGraphDefs.ListView> {
+  if (typeof list.listItemCount === 'number') return list;
+
+  const listItemCount = await getRealListItemCount(list.uri).catch(() => null);
+
+  return typeof listItemCount === 'number' ? { ...list, listItemCount } : list;
+}
+
 function mergeUserLists(lists: UserList[]): UserList[] {
   const mergedLists = new Map<string, UserList>();
 
@@ -4652,6 +5637,91 @@ function mergeUserLists(lists: UserList[]): UserList[] {
   return Array.from(mergedLists.values()).sort((a, b) =>
     a.name.localeCompare(b.name)
   );
+}
+
+type ProfileStarterPackView =
+  | AppBskyGraphDefs.StarterPackViewBasic
+  | AppBskyGraphDefs.StarterPackView;
+
+function getStarterPackListItemCount(
+  starterPack: ProfileStarterPackView
+): number {
+  if (
+    'list' in starterPack &&
+    typeof starterPack.list?.listItemCount === 'number'
+  )
+    return starterPack.list.listItemCount;
+
+  if (
+    'listItemCount' in starterPack &&
+    typeof starterPack.listItemCount === 'number'
+  )
+    return starterPack.listItemCount;
+
+  return 0;
+}
+
+function getStarterPackFeedCount(starterPack: ProfileStarterPackView): number {
+  if ('feeds' in starterPack && Array.isArray(starterPack.feeds))
+    return starterPack.feeds.length;
+
+  return getStarterPackRecordFeedCount(starterPack.record);
+}
+
+async function hydrateStarterPackCount(
+  starterPack: AppBskyGraphDefs.StarterPackViewBasic
+): Promise<ProfileStarterPackView> {
+  if (typeof starterPack.listItemCount === 'number') return starterPack;
+
+  const hydratedStarterPack =
+    await callPublicFallbackAppQueryXrpc<AppViewStarterPackResponse>(
+      'app.bsky.graph.getStarterPack',
+      {
+        starterPack: starterPack.uri
+      }
+    )
+      .then(({ starterPack }) => starterPack)
+      .catch(() => starterPack as ProfileStarterPackView);
+
+  if (
+    'list' in hydratedStarterPack &&
+    hydratedStarterPack.list &&
+    typeof hydratedStarterPack.list.listItemCount !== 'number'
+  ) {
+    const listItemCount = await getRealListItemCount(
+      hydratedStarterPack.list.uri
+    ).catch(() => null);
+
+    if (typeof listItemCount === 'number')
+      return {
+        ...hydratedStarterPack,
+        list: { ...hydratedStarterPack.list, listItemCount }
+      };
+  }
+
+  return hydratedStarterPack;
+}
+
+function mapStarterPack(
+  starterPack: ProfileStarterPackView
+): ProfileStarterPack {
+  const creatorName =
+    starterPack.creator.displayName ?? starterPack.creator.handle;
+
+  return {
+    uri: starterPack.uri,
+    url: getBskyWebUrl(starterPack.uri),
+    name: getStarterPackName(starterPack.record) ?? 'Starter Pack',
+    description: getStarterPackDescription(starterPack.record),
+    creatorName,
+    creatorUsername: starterPack.creator.handle,
+    creatorAvatar: starterPack.creator.avatar ?? DEFAULT_PROFILE_PHOTO_URL,
+    listItemCount: getStarterPackListItemCount(starterPack),
+    feedCount: getStarterPackFeedCount(starterPack),
+    joinedWeekCount: starterPack.joinedWeekCount ?? 0,
+    joinedAllTimeCount: starterPack.joinedAllTimeCount ?? 0,
+    indexedAt: starterPack.indexedAt
+  };
 }
 
 export async function getUserLists(tab: UserListTab): Promise<UserListsPage> {
@@ -4692,6 +5762,53 @@ export async function getUserLists(tab: UserListTab): Promise<UserListsPage> {
   };
 }
 
+export async function getProfileLists(
+  actor: string,
+  cursor?: string,
+  limit = 50
+): Promise<ProfileListsPage> {
+  const response = await callPublicFallbackAppQueryXrpc<AppViewListsResponse>(
+    'app.bsky.graph.getLists',
+    {
+      actor,
+      cursor,
+      limit: clampAppViewLimit(limit)
+    }
+  );
+  const lists = await Promise.all(response.lists.map(hydrateGraphListCount));
+
+  return {
+    lists: lists.map((list) => mapGraphList(list)),
+    cursor: response.cursor ?? null
+  };
+}
+
+export async function getProfileStarterPacks(
+  actor: string,
+  cursor?: string,
+  limit = 50
+): Promise<ProfileStarterPacksPage> {
+  const response =
+    await callPublicFallbackAppQueryXrpc<AppViewActorStarterPacksResponse>(
+      'app.bsky.graph.getActorStarterPacks',
+      {
+        actor,
+        cursor,
+        limit: clampAppViewLimit(limit)
+      }
+    );
+  const starterPacks = await Promise.all(
+    response.starterPacks.map(hydrateStarterPackCount)
+  );
+
+  return {
+    starterPacks: starterPacks.map((starterPack) =>
+      mapStarterPack(starterPack)
+    ),
+    cursor: response.cursor ?? null
+  };
+}
+
 export async function getFeedGeneratorPage(
   actor: string,
   rkey: string,
@@ -4724,14 +5841,16 @@ export async function getFeedGeneratorPage(
   };
 }
 
+const DISCOVER_HOME_FEED_ACTOR = 'bsky.app';
 const DISCOVER_HOME_FEED_RKEY = 'whats-hot';
+export const DISCOVER_HOME_FEED_HREF = `/profile/${DISCOVER_HOME_FEED_ACTOR}/feed/${DISCOVER_HOME_FEED_RKEY}`;
 
 export async function getDiscoverHomeFeedPage(
   cursor?: string,
   limit = 30
 ): Promise<HomeFeedPage> {
   const page = await getFeedGeneratorPage(
-    'bsky.app',
+    DISCOVER_HOME_FEED_ACTOR,
     DISCOVER_HOME_FEED_RKEY,
     cursor,
     limit
@@ -4747,6 +5866,10 @@ function isFeedGeneratorUri(uri: string): boolean {
   return /^at:\/\/[^/]+\/app\.bsky\.feed\.generator\/[^/]+$/.test(uri);
 }
 
+function isFeedListUri(uri: string): boolean {
+  return /^at:\/\/[^/]+\/app\.bsky\.graph\.list\/[^/]+$/.test(uri);
+}
+
 function getFeedGeneratorFallbackName(uri: string): string {
   const rkey = getRkeyFromAtUri(uri);
   if (!rkey) return 'Feed';
@@ -4754,6 +5877,36 @@ function getFeedGeneratorFallbackName(uri: string): string {
   return rkey
     .replace(/[-_]+/g, ' ')
     .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function isReservedHomeFeed(
+  savedFeed: AppBskyActorDefs.SavedFeed,
+  generator?: AppBskyFeedDefs.GeneratorView
+): boolean {
+  if (savedFeed.type === 'timeline') return true;
+  if (savedFeed.type !== 'feed') return false;
+
+  if (getRkeyFromAtUri(savedFeed.value) !== DISCOVER_HOME_FEED_RKEY)
+    return false;
+
+  return (
+    generator?.creator.handle === DISCOVER_HOME_FEED_ACTOR ||
+    getRepoFromAtUri(savedFeed.value) === DISCOVER_HOME_FEED_ACTOR
+  );
+}
+
+function getFeedGeneratorHref(
+  feedUri: string,
+  generator?: AppBskyFeedDefs.GeneratorView
+): string {
+  const actor = generator?.creator.handle ?? getRepoFromAtUri(feedUri);
+  const rkey = getRkeyFromAtUri(feedUri);
+
+  if (!actor || !rkey) return getBskyWebUrl(feedUri);
+
+  return `/profile/${encodeURIComponent(actor)}/feed/${encodeURIComponent(
+    rkey
+  )}`;
 }
 
 function mapSubscribedHomeFeed(
@@ -4787,6 +5940,55 @@ function mapSubscribedHomeFeed(
   };
 }
 
+function mapFeedBrowserFeed(
+  savedFeed: AppBskyActorDefs.SavedFeed | null,
+  generator: AppBskyFeedDefs.GeneratorView
+): FeedBrowserFeed {
+  const feedId = savedFeed?.id ?? generator.uri;
+  const pinned = savedFeed?.pinned ?? false;
+  const reserved = savedFeed ? isReservedHomeFeed(savedFeed, generator) : false;
+
+  return {
+    id: feedId,
+    type: 'feed',
+    uri: generator.uri,
+    displayName: generator.displayName,
+    description: generator.description ?? null,
+    avatar: generator.avatar ?? null,
+    creatorName: generator.creator.displayName ?? generator.creator.handle,
+    creatorUsername: generator.creator.handle,
+    pinned,
+    editable: !!savedFeed && !reserved,
+    href: getFeedGeneratorHref(generator.uri, generator),
+    indexedAt: generator.indexedAt ?? null,
+    likeCount: generator.likeCount ?? 0,
+    saved: !!savedFeed
+  };
+}
+
+function mapSavedFeedBrowserFallback(
+  savedFeed: AppBskyActorDefs.SavedFeed
+): FeedBrowserFeed {
+  const displayName = getFeedGeneratorFallbackName(savedFeed.value);
+
+  return {
+    id: savedFeed.id,
+    type: 'feed',
+    uri: savedFeed.value,
+    displayName,
+    description: null,
+    avatar: null,
+    creatorName: 'Bluesky',
+    creatorUsername: getRepoFromAtUri(savedFeed.value) ?? 'bsky.app',
+    pinned: savedFeed.pinned,
+    editable: !isReservedHomeFeed(savedFeed),
+    href: getFeedGeneratorHref(savedFeed.value),
+    indexedAt: null,
+    likeCount: 0,
+    saved: true
+  };
+}
+
 async function getFeedGeneratorsByUri(
   feedUris: string[]
 ): Promise<Map<string, AppBskyFeedDefs.GeneratorView>> {
@@ -4812,18 +6014,35 @@ async function getFeedGeneratorsByUri(
   return generators;
 }
 
-function getLegacySavedHomeFeed(
+function getLegacySavedFeed(
   uri: string,
   pinned: boolean
 ): AppBskyActorDefs.SavedFeed | null {
-  if (!isFeedGeneratorUri(uri)) return null;
+  const type = isFeedGeneratorUri(uri)
+    ? 'feed'
+    : isFeedListUri(uri)
+    ? 'list'
+    : null;
+
+  if (!type) return null;
 
   return {
     id: uri,
-    type: 'feed',
+    type,
     value: uri,
     pinned
   };
+}
+
+function isSavedFeedItem(value: unknown): value is AppBskyActorDefs.SavedFeed {
+  if (!isPlainObject(value)) return false;
+
+  return (
+    typeof value.id === 'string' &&
+    typeof value.type === 'string' &&
+    typeof value.value === 'string' &&
+    typeof value.pinned === 'boolean'
+  );
 }
 
 function isSavedFeedsPrefV2Preference(
@@ -4847,43 +6066,144 @@ function isSavedFeedsPrefPreference(
   );
 }
 
+function findLastSavedFeedsPrefV2(
+  preferences: AppBskyActorDefs.Preferences
+): AppBskyActorDefs.SavedFeedsPrefV2 | null {
+  for (let index = preferences.length - 1; index >= 0; index -= 1) {
+    const preference = preferences[index];
+
+    if (isSavedFeedsPrefV2Preference(preference)) return preference;
+  }
+
+  return null;
+}
+
+function findLastSavedFeedsPref(
+  preferences: AppBskyActorDefs.Preferences
+): AppBskyActorDefs.SavedFeedsPref | null {
+  for (let index = preferences.length - 1; index >= 0; index -= 1) {
+    const preference = preferences[index];
+
+    if (isSavedFeedsPrefPreference(preference)) return preference;
+  }
+
+  return null;
+}
+
+function uniqueSavedFeedItems(
+  items: AppBskyActorDefs.SavedFeed[]
+): AppBskyActorDefs.SavedFeed[] {
+  const seenIds = new Set<string>();
+  const seenValues = new Set<string>();
+  const savedFeeds: AppBskyActorDefs.SavedFeed[] = [];
+
+  for (const item of items) {
+    if (seenIds.has(item.id) || seenValues.has(item.value)) continue;
+
+    seenIds.add(item.id);
+    seenValues.add(item.value);
+    savedFeeds.push(item);
+  }
+
+  return savedFeeds;
+}
+
+function getSavedFeedItemsFromPreferences(
+  preferences: AppBskyActorDefs.Preferences
+): AppBskyActorDefs.SavedFeed[] {
+  const v2Preference = findLastSavedFeedsPrefV2(preferences);
+
+  if (v2Preference)
+    return uniqueSavedFeedItems(v2Preference.items.filter(isSavedFeedItem));
+
+  const legacyPreference = findLastSavedFeedsPref(preferences);
+  if (!legacyPreference) return [];
+
+  const legacyFeeds = [
+    ...legacyPreference.pinned.map((uri) => getLegacySavedFeed(uri, true)),
+    ...legacyPreference.saved.map((uri) =>
+      getLegacySavedFeed(uri, legacyPreference.pinned.includes(uri))
+    )
+  ].filter((feed): feed is AppBskyActorDefs.SavedFeed => !!feed);
+
+  return uniqueSavedFeedItems(legacyFeeds);
+}
+
 function getSavedHomeFeedsFromPreferences(
   preferences: AppBskyActorDefs.Preferences
 ): AppBskyActorDefs.SavedFeed[] {
-  const savedFeeds: AppBskyActorDefs.SavedFeed[] = [];
-  const legacyPinnedUris: string[] = [];
-  const legacySavedUris: string[] = [];
-  const seenFeedUris = new Set<string>();
-  const appendFeed = (feed: AppBskyActorDefs.SavedFeed): void => {
-    if (feed.type !== 'feed' || !isFeedGeneratorUri(feed.value)) return;
-    if (seenFeedUris.has(feed.value)) return;
+  return getSavedFeedItemsFromPreferences(preferences).filter(
+    (feed) => feed.type === 'feed' && isFeedGeneratorUri(feed.value)
+  );
+}
 
-    seenFeedUris.add(feed.value);
-    savedFeeds.push(feed);
+async function getSavedFeedState(): Promise<{
+  items: AppBskyActorDefs.SavedFeed[];
+  preferences: AppBskyActorDefs.Preferences;
+}> {
+  const response = await getAgent().app.bsky.actor.getPreferences();
+  const preferences = response.data.preferences;
+
+  return {
+    items: getSavedFeedItemsFromPreferences(preferences),
+    preferences
   };
+}
 
-  for (const preference of preferences) {
-    if (isSavedFeedsPrefV2Preference(preference)) {
-      preference.items.forEach(appendFeed);
-      continue;
-    }
+function getSavedFeedUriArrays(items: AppBskyActorDefs.SavedFeed[]): {
+  pinned: string[];
+  saved: string[];
+} {
+  const pinned: string[] = [];
+  const saved: string[] = [];
 
-    if (isSavedFeedsPrefPreference(preference)) {
-      legacyPinnedUris.push(...preference.pinned);
-      legacySavedUris.push(...preference.saved);
-    }
+  for (const item of items) {
+    if (item.type !== 'feed' && item.type !== 'list') continue;
+
+    saved.push(item.value);
+    if (item.pinned) pinned.push(item.value);
   }
 
-  legacyPinnedUris.forEach((uri) => {
-    const feed = getLegacySavedHomeFeed(uri, true);
-    if (feed) appendFeed(feed);
-  });
-  legacySavedUris.forEach((uri) => {
-    const feed = getLegacySavedHomeFeed(uri, legacyPinnedUris.includes(uri));
-    if (feed) appendFeed(feed);
-  });
+  return { pinned, saved };
+}
 
-  return savedFeeds;
+async function putSavedFeedItems(
+  preferences: AppBskyActorDefs.Preferences,
+  items: AppBskyActorDefs.SavedFeed[]
+): Promise<void> {
+  const savedFeedsPrefV2: AppBskyActorDefs.SavedFeedsPrefV2 = {
+    $type: 'app.bsky.actor.defs#savedFeedsPrefV2',
+    items: uniqueSavedFeedItems(items)
+  };
+  const savedFeedsPref = findLastSavedFeedsPref(preferences);
+  const updatedPreferences: AppBskyActorDefs.Preferences = [
+    ...preferences.filter(
+      (preference) => !isSavedFeedsPrefV2Preference(preference)
+    ),
+    savedFeedsPrefV2 as AppBskyActorDefs.Preferences[number]
+  ];
+
+  if (savedFeedsPref) {
+    const v1Preference: AppBskyActorDefs.SavedFeedsPref = {
+      ...savedFeedsPref,
+      ...getSavedFeedUriArrays(savedFeedsPrefV2.items)
+    };
+    const nextPreferences: AppBskyActorDefs.Preferences = [
+      ...updatedPreferences.filter(
+        (preference) => !isSavedFeedsPrefPreference(preference)
+      ),
+      v1Preference as AppBskyActorDefs.Preferences[number]
+    ];
+
+    await getAgent().app.bsky.actor.putPreferences({
+      preferences: nextPreferences
+    });
+    return;
+  }
+
+  await getAgent().app.bsky.actor.putPreferences({
+    preferences: updatedPreferences
+  });
 }
 
 export async function getSubscribedHomeFeeds(): Promise<SubscribedHomeFeed[]> {
@@ -4897,6 +6217,159 @@ export async function getSubscribedHomeFeeds(): Promise<SubscribedHomeFeed[]> {
   return savedFeeds.map((savedFeed) =>
     mapSubscribedHomeFeed(savedFeed, generators.get(savedFeed.value))
   );
+}
+
+export async function getFeedBrowserFeeds(): Promise<FeedBrowserFeed[]> {
+  const { items } = await getSavedFeedState();
+  const savedFeeds = items.filter(
+    (feed) => feed.type === 'feed' && isFeedGeneratorUri(feed.value)
+  );
+  const generators = await getFeedGeneratorsByUri(
+    Array.from(new Set(savedFeeds.map(({ value }) => value)))
+  );
+
+  return savedFeeds.map((savedFeed) => {
+    const generator = generators.get(savedFeed.value);
+
+    return generator
+      ? mapFeedBrowserFeed(savedFeed, generator)
+      : mapSavedFeedBrowserFallback(savedFeed);
+  });
+}
+
+export async function searchFeedGenerators(
+  searchQuery = '',
+  cursor?: string,
+  limit = 25
+): Promise<FeedSearchPage> {
+  const [{ items }, response] = await Promise.all([
+    getSavedFeedState(),
+    callAppQueryXrpc<AppViewFeedGeneratorSearchResponse>(
+      'app.bsky.unspecced.getPopularFeedGenerators',
+      {
+        query: searchQuery.trim() || undefined,
+        cursor,
+        limit: clampAppViewLimit(limit)
+      }
+    )
+  ]);
+  const savedFeedsByUri = new Map(
+    items
+      .filter((feed) => feed.type === 'feed')
+      .map((feed) => [feed.value, feed])
+  );
+
+  return {
+    feeds: response.feeds.map((generator) =>
+      mapFeedBrowserFeed(savedFeedsByUri.get(generator.uri) ?? null, generator)
+    ),
+    cursor: response.cursor ?? null
+  };
+}
+
+export async function addSavedHomeFeed(
+  feedUri: string
+): Promise<FeedBrowserFeed[]> {
+  if (!isFeedGeneratorUri(feedUri)) throw new Error('Choose a valid feed.');
+
+  const { items, preferences } = await getSavedFeedState();
+
+  if (!items.some((item) => item.type === 'feed' && item.value === feedUri)) {
+    const generators = await getFeedGeneratorsByUri([feedUri]);
+    if (!generators.has(feedUri))
+      throw new Error('This feed is not available right now.');
+
+    await putSavedFeedItems(preferences, [
+      ...items,
+      {
+        id: TID.nextStr(),
+        type: 'feed',
+        value: feedUri,
+        pinned: true
+      }
+    ]);
+    notify();
+  }
+
+  return getFeedBrowserFeeds();
+}
+
+export async function removeSavedHomeFeed(
+  feedId: string
+): Promise<FeedBrowserFeed[]> {
+  const { items, preferences } = await getSavedFeedState();
+  const feed = items.find((item) => item.id === feedId);
+
+  if (!feed || feed.type !== 'feed') return getFeedBrowserFeeds();
+
+  const generators = await getFeedGeneratorsByUri([feed.value]);
+
+  if (isReservedHomeFeed(feed, generators.get(feed.value)))
+    throw new Error('For you and Following stay fixed on Home.');
+
+  await putSavedFeedItems(
+    preferences,
+    items.filter((item) => item.id !== feedId)
+  );
+  notify();
+
+  return getFeedBrowserFeeds();
+}
+
+export async function reorderSavedHomeFeeds(
+  feedIds: string[]
+): Promise<FeedBrowserFeed[]> {
+  const { items, preferences } = await getSavedFeedState();
+  const savedFeedUris = items
+    .filter((item) => item.type === 'feed')
+    .map(({ value }) => value);
+  const generators = await getFeedGeneratorsByUri(
+    Array.from(new Set(savedFeedUris))
+  );
+  const editableFeeds = items.filter(
+    (item) =>
+      item.type === 'feed' &&
+      isFeedGeneratorUri(item.value) &&
+      !isReservedHomeFeed(item, generators.get(item.value))
+  );
+  const editableFeedsById = new Map(
+    editableFeeds.map((feed) => [feed.id, feed])
+  );
+  const requestedIds = Array.from(new Set(feedIds));
+
+  if (requestedIds.length !== editableFeeds.length)
+    throw new Error('Feed order is out of date. Refresh and try again.');
+
+  const orderedEditableFeeds = requestedIds.map((feedId) => {
+    const feed = editableFeedsById.get(feedId);
+
+    if (!feed)
+      throw new Error('Feed order is out of date. Refresh and try again.');
+
+    return feed;
+  });
+  const editableIds = new Set(editableFeeds.map(({ id }) => id));
+  const nextItems: AppBskyActorDefs.SavedFeed[] = [];
+  let insertedEditableFeeds = false;
+
+  for (const item of items) {
+    if (!editableIds.has(item.id)) {
+      nextItems.push(item);
+      continue;
+    }
+
+    if (!insertedEditableFeeds) {
+      nextItems.push(...orderedEditableFeeds);
+      insertedEditableFeeds = true;
+    }
+  }
+
+  if (!insertedEditableFeeds) nextItems.push(...orderedEditableFeeds);
+
+  await putSavedFeedItems(preferences, nextItems);
+  notify();
+
+  return getFeedBrowserFeeds();
 }
 
 export async function getSubscribedHomeFeedPage(
@@ -4992,7 +6465,7 @@ async function getNotificationTweetByUri(
       const response = await fetchAppViewPosts(uris.slice(index, index + 25));
 
       response.posts.forEach((post) => {
-        if (isModerationFilteredPost(post, moderationOpts)) {
+        if (isModerationFilteredWithoutTombstone(post, moderationOpts)) {
           hiddenUris.add(post.uri);
           return;
         }
@@ -5032,7 +6505,9 @@ function mapNotification(
 
   if (
     targetPostId &&
-    ['mention', 'reply', 'quote'].includes(notification.reason)
+    ['mention', 'reply', 'quote', 'subscribed-post'].includes(
+      notification.reason
+    )
   ) {
     postRefCache.set(targetPostId, {
       uri: notification.uri,
@@ -5056,9 +6531,16 @@ function mapNotification(
 
 export async function listNotificationsPage(
   cursor?: string,
-  options?: { mentionsOnly?: boolean; limit?: number }
+  options?: {
+    mentionsOnly?: boolean;
+    reasons?: NotificationReason[];
+    limit?: number;
+  }
 ): Promise<NotificationsPage> {
   const moderationOpts = await getSafeModerationOpts();
+  const reasons =
+    options?.reasons ??
+    (options?.mentionsOnly ? ['mention', 'reply', 'quote'] : undefined);
 
   await ensureAppViewAccessScope('app.bsky.notification.listNotifications');
 
@@ -5067,7 +6549,7 @@ export async function listNotificationsPage(
     {
       cursor,
       limit: clampAppViewLimit(options?.limit ?? 30),
-      reasons: options?.mentionsOnly ? ['mention', 'reply', 'quote'] : undefined
+      reasons
     }
   );
   const responseNotifications = Array.isArray(response.notifications)
@@ -5634,6 +7116,7 @@ async function activateOAuthSession(
       locallyCreatedTweets.clear();
       localQuoteTargetIds.clear();
       locallyDeletedTweetIds.clear();
+      localViewerFollowOverrides.clear();
     }
     agent = new Agent(nextSession);
 
@@ -5642,7 +7125,7 @@ async function activateOAuthSession(
 
     if (hasStorage()) window.localStorage.setItem(OAUTH_SUB_KEY, did);
     writeCredentialSession();
-    notify();
+    notify('auth');
 
     return user
       ? { uid: user.id, displayName: user.name, photoURL: user.photoURL }
@@ -5686,6 +7169,7 @@ async function activateCredentialAgent(
       locallyCreatedTweets.clear();
       localQuoteTargetIds.clear();
       locallyDeletedTweetIds.clear();
+      localViewerFollowOverrides.clear();
     }
 
     const user = await refreshCurrentUser();
@@ -5695,7 +7179,7 @@ async function activateCredentialAgent(
       nextAgent.session,
       getCredentialAgentServiceUrl(nextAgent, getPrimaryAtprotoServiceUrl())
     );
-    if (shouldNotify) notify();
+    if (shouldNotify) notify('auth');
 
     return user
       ? { uid: user.id, displayName: user.name, photoURL: user.photoURL }
@@ -5726,14 +7210,33 @@ async function resumeCredentialAuthUser(): Promise<AuthUser | null> {
   }
 }
 
+function isUnknownOAuthAuthorizationSession(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.message.startsWith('Unknown authorization session ')
+  );
+}
+
+async function initOAuthSession(
+  client: BrowserOAuthClient
+): Promise<OAuthSession | null> {
+  try {
+    return (await client.init())?.session ?? null;
+  } catch (error) {
+    if (!isUnknownOAuthAuthorizationSession(error)) throw error;
+
+    return (await client.initRestore().catch(() => undefined))?.session ?? null;
+  }
+}
+
 export async function resumeAuthUser(): Promise<AuthUser | null> {
   if (oauthInitPromise) return oauthInitPromise;
 
   oauthInitPromise = (async (): Promise<AuthUser | null> => {
     const client = await getOAuthClient();
-    const result = await client.init();
+    const session = await initOAuthSession(client);
 
-    if (result?.session) return activateOAuthSession(result.session);
+    if (session) return activateOAuthSession(session);
 
     const storedSub = getStoredOAuthSub();
     if (storedSub) {
@@ -5752,7 +7255,10 @@ export async function resumeAuthUser(): Promise<AuthUser | null> {
     }
 
     return resumeCredentialAuthUser();
-  })();
+  })().catch((error) => {
+    oauthInitPromise = null;
+    throw error;
+  });
 
   return oauthInitPromise;
 }
@@ -5822,7 +7328,7 @@ export async function switchBlueskyAccount(id: string): Promise<AuthUser> {
     return user;
   } catch (error) {
     removeSavedAccount(accountId);
-    notify();
+    notify('auth');
 
     throw new Error(
       error instanceof Error ? error.message : 'Unable to switch accounts.'
@@ -5847,7 +7353,7 @@ export async function removeBlueskyAccount(id: string): Promise<void> {
   }
 
   removeSavedAccount(accountId);
-  notify();
+  notify('auth');
 }
 
 export async function signOut(): Promise<void> {
@@ -5871,7 +7377,7 @@ export async function signOut(): Promise<void> {
   const restoredUser = await restoreFirstSavedAccount();
   if (restoredUser) return;
 
-  notify();
+  notify('auth');
 }
 
 export function getCurrentUser(): User | null {
@@ -5929,7 +7435,7 @@ function sortByCreatedAt<T extends { createdAt: Timestamp }>(data: T[]): T[] {
 }
 
 function normalizeAtIdentifier(actor: string): string | null {
-  return normalizeAtprotoIdentifier(actor);
+  return normalizeAtprotoIdentifier(actor.replace(/^@+/, ''));
 }
 
 export async function getUser(actor: string): Promise<User | null> {
@@ -5942,6 +7448,8 @@ export async function getUser(actor: string): Promise<User | null> {
     cachedUser?.id === sessionDid ||
     currentUser?.username === normalizedActor;
 
+  if (isCurrentUserProfile && currentUser) return currentUser;
+
   if (isCurrentUserProfile) {
     const refreshedUser = await refreshCurrentUser().catch(() => null);
     if (refreshedUser) return refreshedUser;
@@ -5950,7 +7458,8 @@ export async function getUser(actor: string): Promise<User | null> {
   if (cachedUser && detailedUserCache.has(cachedUser.id)) {
     await Promise.all([
       hydrateProfileRecordUserData(cachedUser.id).catch(() => undefined),
-      hydrateChatDeclarationUserData(cachedUser.id).catch(() => undefined)
+      hydrateChatDeclarationUserData(cachedUser.id).catch(() => undefined),
+      hydrateKnownFollowersUserData(cachedUser.id).catch(() => undefined)
     ]);
     return userCache.get(cachedUser.id) ?? cachedUser;
   }
@@ -5963,7 +7472,8 @@ export async function getUser(actor: string): Promise<User | null> {
 
     await Promise.all([
       hydrateProfileRecordUserData(user.id).catch(() => undefined),
-      hydrateChatDeclarationUserData(user.id).catch(() => undefined)
+      hydrateChatDeclarationUserData(user.id).catch(() => undefined),
+      hydrateKnownFollowersUserData(user.id).catch(() => undefined)
     ]);
 
     return userCache.get(user.id) ?? user;
@@ -5971,6 +7481,44 @@ export async function getUser(actor: string): Promise<User | null> {
     if (isRecordNotFoundError(error)) return null;
     throw error;
   }
+}
+
+export async function getKnownFollowers(
+  actor: string,
+  limit = 50
+): Promise<User[]> {
+  if (!sessionDid) return [];
+
+  const normalizedActor = normalizeAtIdentifier(actor);
+  if (!normalizedActor) return [];
+  if (normalizedActor === sessionDid) return [];
+
+  const response = await getAppViewAgent()
+    .app.bsky.graph.getKnownFollowers({
+      actor: normalizedActor,
+      limit: clampAppViewLimit(limit)
+    })
+    .catch(() => null);
+
+  if (!response) return [];
+
+  const subject = mapProfile(response.data.subject);
+  const users = await hydrateProfiles(response.data.followers);
+  const knownFollowers = response.data.followers.map(mapKnownFollowerProfile);
+  const knownFollowersCount =
+    response.data.subject.viewer?.knownFollowers?.count ??
+    response.data.followers.length;
+  const cachedSubject = userCache.get(subject.id) ?? subject;
+
+  cachedSubject.knownFollowers = knownFollowers;
+  cachedSubject.knownFollowersCount = Math.max(
+    knownFollowersCount,
+    knownFollowers.length
+  );
+  userCache.set(cachedSubject.id, cachedSubject);
+  userHandleCache.set(cachedSubject.username, cachedSubject);
+
+  return users;
 }
 
 export async function getTweet(id: string): Promise<Tweet | null> {
@@ -5984,7 +7532,8 @@ export async function getTweet(id: string): Promise<Tweet | null> {
   const response = await getAppViewAgent().getPosts({ uris: [uri] });
   const post = response.data.posts[0];
 
-  if (!post || isModerationFilteredPost(post, moderationOpts)) return null;
+  if (!post || isModerationFilteredWithoutTombstone(post, moderationOpts))
+    return null;
 
   return mapPost(post);
 }
@@ -5998,23 +7547,47 @@ export async function getTweetThread(
 
   const uri = uriFromPostId(id);
   const moderationOpts = await getSafeModerationOpts();
+  const threadParams = {
+    uri,
+    depth: BSKY_THREAD_REPLY_DEPTH,
+    parentHeight: BSKY_THREAD_PARENT_PAGE_SIZE + 1
+  };
 
   try {
-    const response = await getAppViewAgent().getPostThread({
-      uri,
-      depth: BSKY_THREAD_REPLY_DEPTH,
-      parentHeight: BSKY_THREAD_PARENT_PAGE_SIZE + 1
-    });
-    const { thread } = response.data;
+    const response = await getAppViewAgent().getPostThread(threadParams);
+    const hiddenAuthors = collectHiddenThreadAuthors(response.data.thread);
+    const thread = await getThreadWithPublicSkeleton(
+      response.data.thread,
+      hiddenAuthors,
+      threadParams
+    );
 
-    if (!AppBskyFeedDefs.isThreadViewPost(thread)) return null;
-    if (!isVisibleThreadPost(thread, moderationOpts)) return null;
+    if (isBlockedThreadItem(thread))
+      return {
+        tweet: mapThreadItem(thread, undefined, hiddenAuthors),
+        parents: [],
+        parentCursor: null,
+        threadReplies: [],
+        replies: []
+      };
 
-    const tweet = mapThreadPost(thread);
+    if (!isThreadViewItem(thread)) return null;
+    if (!isVisibleThreadItem(thread, moderationOpts, hiddenAuthors))
+      return null;
+
+    const tweet = mapThreadPost(thread, hiddenAuthors);
     if (locallyDeletedTweetIds.has(tweet.id)) return null;
 
-    const { threadReplies, replies } = mapThreadReplies(thread, moderationOpts);
-    const parentPage = mapThreadParentPage(thread, moderationOpts);
+    const { threadReplies, replies } = mapThreadReplies(
+      thread,
+      moderationOpts,
+      hiddenAuthors
+    );
+    const parentPage = mapThreadParentPage(
+      thread,
+      moderationOpts,
+      hiddenAuthors
+    );
 
     return {
       tweet,
@@ -6041,21 +7614,26 @@ export async function getTweetThreadParentsPage(
 
   const uri = uriFromPostId(id);
   const moderationOpts = await getSafeModerationOpts();
+  const threadParams = {
+    uri,
+    depth: 0,
+    parentHeight: BSKY_THREAD_PARENT_PAGE_SIZE + 1
+  };
 
   try {
-    const response = await getAppViewAgent().getPostThread({
-      uri,
-      depth: 0,
-      parentHeight: BSKY_THREAD_PARENT_PAGE_SIZE + 1
-    });
-    const { thread } = response.data;
+    const response = await getAppViewAgent().getPostThread(threadParams);
+    const hiddenAuthors = collectHiddenThreadAuthors(response.data.thread);
+    const thread = await getThreadWithPublicSkeleton(
+      response.data.thread,
+      hiddenAuthors,
+      threadParams
+    );
 
-    if (!AppBskyFeedDefs.isThreadViewPost(thread))
-      return { parents: [], cursor: null };
-    if (!isVisibleThreadPost(thread, moderationOpts))
+    if (!isThreadViewItem(thread)) return { parents: [], cursor: null };
+    if (!isVisibleThreadItem(thread, moderationOpts, hiddenAuthors))
       return { parents: [], cursor: null };
 
-    return mapThreadParentPage(thread, moderationOpts);
+    return mapThreadParentPage(thread, moderationOpts, hiddenAuthors);
   } catch (error) {
     if (isRecordNotFoundError(error)) return { parents: [], cursor: null };
     throw error;
@@ -6235,7 +7813,9 @@ async function getAuthorFeed(
     filter: options?.includeReplies ? 'posts_with_replies' : 'posts_no_replies'
   });
   const tweets = response.data.feed
-    .filter((item) => !isModerationFilteredPost(item.post, moderationOpts))
+    .filter(
+      (item) => !isModerationFilteredWithoutTombstone(item.post, moderationOpts)
+    )
     .filter((item) => item.post.author.did === actor)
     .map(mapFeedItem);
   const mergedTweets = mergeLocalCreatedTweets(
@@ -6256,7 +7836,9 @@ async function getRepostedFeed(actor: string): Promise<Tweet[]> {
   });
 
   return response.data.feed
-    .filter((item) => !isModerationFilteredPost(item.post, moderationOpts))
+    .filter(
+      (item) => !isModerationFilteredWithoutTombstone(item.post, moderationOpts)
+    )
     .filter(
       (item) =>
         item.post.author.did !== actor &&
@@ -6297,7 +7879,9 @@ async function getThreadReplies(id: string): Promise<Tweet[]> {
   if (!AppBskyFeedDefs.isThreadViewPost(thread)) return [];
   if (!isVisibleThreadPost(thread, moderationOpts)) return [];
 
-  const replies = getVisibleThreadReplies(thread, moderationOpts);
+  const replies = getVisibleThreadReplies(thread, moderationOpts).filter(
+    isThreadViewItem
+  );
   return mergeLocalCreatedTweets(
     replies.map((reply) =>
       mapPost(reply.post, {
@@ -6333,6 +7917,17 @@ async function queryUsers(constraints: BackendConstraint[]): Promise<User[]> {
     });
     return hydrateProfiles(response.data.followers);
   }
+
+  const knownFollowersFilter = getWhere(
+    constraints,
+    'knownFollowers',
+    'array-contains'
+  );
+  if (typeof knownFollowersFilter?.value === 'string')
+    return getKnownFollowers(
+      knownFollowersFilter.value,
+      getLimit(constraints) ?? 50
+    );
 
   const response = await getAppViewAgent().getSuggestions({
     limit: getLimit(constraints) ?? 20
@@ -6403,7 +7998,7 @@ async function readBookmarks(_userId: string): Promise<Bookmark[]> {
       if (AppBskyFeedDefs.isPostView(item)) {
         const postItem = item as AppBskyFeedDefs.PostView;
 
-        if (!isModerationFilteredPost(postItem, moderationOpts))
+        if (!isModerationFilteredWithoutTombstone(postItem, moderationOpts))
           mapPost(postItem);
       }
       bookmarks.push({
@@ -6425,7 +8020,8 @@ export async function queryCollection<T>(
   constraints: BackendConstraint[],
   ownerId?: string
 ): Promise<T[]> {
-  if (!agent) return [];
+  if (!agent && collectionName !== 'users' && collectionName !== 'tweets')
+    return [];
 
   if (collectionName === 'users')
     return (await queryUsers(constraints)) as unknown as T[];
@@ -6446,7 +8042,8 @@ export async function getDocument<T>(
   id: string,
   ownerId?: string
 ): Promise<T | null> {
-  if (!agent) return null;
+  if (!agent && collectionName !== 'users' && collectionName !== 'tweets')
+    return null;
 
   if (collectionName === 'users')
     return (await getUser(id)) as unknown as T | null;
@@ -6916,7 +8513,9 @@ export async function addTweet(data: AddTweetData): Promise<Tweet> {
     userReplies: 0,
     userRetweets: [],
     userQuotes: data.userQuotes ?? 0,
-    bookmarkCount: data.bookmarkCount ?? 0
+    bookmarkCount: data.bookmarkCount ?? 0,
+    replySetting: data.replySetting ?? 'everyone',
+    viewerCanReply: true
   };
   let visibleTweet = localTweet;
 
@@ -7205,11 +8804,24 @@ export async function followUser(targetDid: string): Promise<void> {
   const targetUser = userCache.get(targetDid);
   if (targetUser?.blocking || targetUser?.blockedBy) return;
 
+  const previousOverride = localViewerFollowOverrides.get(targetDid);
   const wasFollowing =
     currentFollowing.has(targetDid) ||
     !!(targetUser && sessionDid && targetUser.followers.includes(sessionDid));
 
-  await getAgent().follow(targetDid);
+  try {
+    const followRef = await getAgent().follow(targetDid);
+    if (followRef.uri) followUriCache.set(targetDid, followRef.uri);
+  } catch (error) {
+    if (previousOverride === undefined) {
+      localViewerFollowOverrides.delete(targetDid);
+    } else {
+      localViewerFollowOverrides.set(targetDid, previousOverride);
+    }
+    throw error;
+  }
+
+  localViewerFollowOverrides.set(targetDid, true);
   currentFollowing.add(targetDid);
   if (currentUser) {
     currentUser.following = Array.from(currentFollowing);
@@ -7221,7 +8833,7 @@ export async function followUser(targetDid: string): Promise<void> {
     targetUser.followersCount += 1;
   }
 
-  notify();
+  notify('relationship');
 }
 
 function applyLocalFollowRemoval(targetDid: string): void {
@@ -7232,6 +8844,7 @@ function applyLocalFollowRemoval(targetDid: string): void {
 
   currentFollowing.delete(targetDid);
   followUriCache.delete(targetDid);
+  localViewerFollowOverrides.set(targetDid, false);
 
   if (currentUser) {
     currentUser.following = Array.from(currentFollowing);
@@ -7393,19 +9006,76 @@ export async function reportPost(
       },
       modTool: getModerationReportModTool('post')
     });
+
+  locallyReportedTweetIds.add(tweetId);
+  const cachedTweet = tweetCache.get(tweetId);
+  if (cachedTweet)
+    tweetCache.set(tweetId, { ...cachedTweet, tombstone: 'reported' });
+  notify();
+}
+
+async function resolveFollowUri(targetDid: string): Promise<string | null> {
+  const cachedFollowUri = followUriCache.get(targetDid);
+  if (cachedFollowUri) return cachedFollowUri;
+
+  const viewerFollowUri =
+    (
+      await getAppViewAgent()
+        .getProfile({ actor: targetDid })
+        .catch(() => null)
+    )?.data.viewer?.following ?? null;
+
+  if (viewerFollowUri) {
+    followUriCache.set(targetDid, viewerFollowUri);
+    return viewerFollowUri;
+  }
+
+  if (!sessionDid) return null;
+
+  let cursor: string | undefined;
+
+  do {
+    const response = await getAgent().com.atproto.repo.listRecords({
+      repo: sessionDid,
+      collection: 'app.bsky.graph.follow',
+      limit: 100,
+      cursor
+    });
+
+    for (const record of response.data.records) {
+      if (isPlainObject(record.value) && record.value.subject === targetDid) {
+        followUriCache.set(targetDid, record.uri);
+        return record.uri;
+      }
+    }
+
+    cursor = response.data.cursor;
+  } while (cursor);
+
+  return null;
 }
 
 export async function unfollowUser(targetDid: string): Promise<void> {
   const targetUser = userCache.get(targetDid);
+  const previousOverride = localViewerFollowOverrides.get(targetDid);
   const wasFollowing =
     currentFollowing.has(targetDid) ||
     !!(targetUser && sessionDid && targetUser.followers.includes(sessionDid));
-  const followUri =
-    followUriCache.get(targetDid) ??
-    (await getAppViewAgent().getProfile({ actor: targetDid })).data.viewer
-      ?.following;
 
-  if (followUri) await getAgent().deleteFollow(followUri);
+  localViewerFollowOverrides.set(targetDid, false);
+
+  try {
+    const followUri = await resolveFollowUri(targetDid);
+    if (followUri) await getAgent().deleteFollow(followUri);
+  } catch (error) {
+    if (previousOverride === undefined) {
+      localViewerFollowOverrides.delete(targetDid);
+    } else {
+      localViewerFollowOverrides.set(targetDid, previousOverride);
+    }
+    throw error;
+  }
+
   currentFollowing.delete(targetDid);
   followUriCache.delete(targetDid);
   if (currentUser) {
@@ -7425,7 +9095,118 @@ export async function unfollowUser(targetDid: string): Promise<void> {
     }
   }
 
-  notify();
+  notify('relationship');
+}
+
+async function findViewerReactionUriInRepo(
+  kind: ViewerReactionKind,
+  ref: PostRef
+): Promise<string | null> {
+  if (!sessionDid) return null;
+
+  const collection = getViewerReactionCollection(kind);
+  let cursor: string | undefined;
+
+  do {
+    const response = await getAgent().com.atproto.repo.listRecords({
+      repo: sessionDid,
+      collection,
+      limit: 100,
+      cursor
+    });
+
+    for (const record of response.data.records) {
+      const { value } = record;
+      const subject = isPlainObject(value) ? value.subject : null;
+
+      if (isPlainObject(subject) && subject.uri === ref.uri) {
+        return record.uri;
+      }
+    }
+
+    cursor = response.data.cursor;
+  } while (cursor);
+
+  return null;
+}
+
+async function resolveViewerReactionUri(
+  kind: ViewerReactionKind,
+  tweetId: string,
+  ref: PostRef
+): Promise<string | null> {
+  const cachedUri = getCachedViewerReactionUri(kind, tweetId);
+  if (cachedUri) return cachedUri;
+
+  const post = (
+    await getAppViewAgent()
+      .getPosts({ uris: [ref.uri] })
+      .catch(() => null)
+  )?.data.posts[0];
+  const viewerUri = post ? getPostViewerReactionUri(post, kind) : null;
+
+  if (viewerUri) {
+    cacheViewerReactionUri(kind, tweetId, viewerUri);
+    return viewerUri;
+  }
+
+  const repoUri = await findViewerReactionUriInRepo(kind, ref);
+  cacheViewerReactionUri(kind, tweetId, repoUri);
+  return repoUri;
+}
+
+async function createViewerReaction(
+  kind: ViewerReactionKind,
+  tweetId: string,
+  ref: PostRef
+): Promise<void> {
+  try {
+    const result =
+      kind === 'like'
+        ? await getAgent().like(ref.uri, ref.cid)
+        : await getAgent().repost(ref.uri, ref.cid);
+
+    cacheViewerReactionUri(kind, tweetId, result.uri);
+  } catch (error) {
+    const existingUri = await resolveViewerReactionUri(
+      kind,
+      tweetId,
+      ref
+    ).catch(() => null);
+
+    if (existingUri) return;
+    throw error;
+  }
+}
+
+async function deleteViewerReaction(
+  kind: ViewerReactionKind,
+  tweetId: string,
+  ref: PostRef
+): Promise<void> {
+  const reactionUri = await resolveViewerReactionUri(kind, tweetId, ref);
+
+  if (!reactionUri) return;
+
+  try {
+    if (kind === 'like') await getAgent().deleteLike(reactionUri);
+    else await getAgent().deleteRepost(reactionUri);
+  } catch (error) {
+    if (!isRecordNotFoundError(error)) throw error;
+  }
+
+  deleteCachedViewerReactionUri(kind, tweetId);
+}
+
+function isViewerReactionActive(
+  kind: ViewerReactionKind,
+  tweetId: string,
+  tweet: Tweet
+): boolean {
+  const override = getViewerReactionOverride(kind, tweetId);
+  if (override) return override.active;
+  if (!sessionDid) return false;
+  return tweet[getViewerReactionField(kind)].includes(sessionDid);
 }
 
 export async function likePost(
@@ -7436,21 +9217,17 @@ export async function likePost(
   const ref = postRefCache.get(tweetId);
   if (!tweet || !ref || !sessionDid) return;
 
-  const liked = tweet.userLikes.includes(sessionDid);
+  const liked = isViewerReactionActive('like', tweetId, tweet);
   const shouldLike = type ? type === 'like' : !liked;
   if (shouldLike === liked) return;
 
-  if (!shouldLike) {
-    const post = (await getAppViewAgent().getPosts({ uris: [ref.uri] })).data
-      .posts[0];
-    if (post?.viewer?.like) await getAgent().deleteLike(post.viewer.like);
-    tweet.userLikes = tweet.userLikes.filter((id) => id !== sessionDid);
-  } else {
-    await getAgent().like(ref.uri, ref.cid);
-    tweet.userLikes = [sessionDid, ...tweet.userLikes];
-  }
+  if (!shouldLike) await deleteViewerReaction('like', tweetId, ref);
+  else await createViewerReaction('like', tweetId, ref);
 
-  notify();
+  setViewerReactionOverride('like', tweetId, {
+    active: shouldLike
+  });
+  updateCachedTweetViewerReaction(tweetId, 'like', shouldLike);
 }
 
 export async function repostPost(
@@ -7461,21 +9238,17 @@ export async function repostPost(
   const ref = postRefCache.get(tweetId);
   if (!tweet || !ref || !sessionDid) return;
 
-  const reposted = tweet.userRetweets.includes(sessionDid);
+  const reposted = isViewerReactionActive('repost', tweetId, tweet);
   const shouldRepost = type ? type === 'retweet' : !reposted;
   if (shouldRepost === reposted) return;
 
-  if (!shouldRepost) {
-    const post = (await getAppViewAgent().getPosts({ uris: [ref.uri] })).data
-      .posts[0];
-    if (post?.viewer?.repost) await getAgent().deleteRepost(post.viewer.repost);
-    tweet.userRetweets = tweet.userRetweets.filter((id) => id !== sessionDid);
-  } else {
-    await getAgent().repost(ref.uri, ref.cid);
-    tweet.userRetweets = [sessionDid, ...tweet.userRetweets];
-  }
+  if (!shouldRepost) await deleteViewerReaction('repost', tweetId, ref);
+  else await createViewerReaction('repost', tweetId, ref);
 
-  notify();
+  setViewerReactionOverride('repost', tweetId, {
+    active: shouldRepost
+  });
+  updateCachedTweetViewerReaction(tweetId, 'repost', shouldRepost);
 }
 
 export async function deletePost(tweetId: string): Promise<void> {

@@ -2,14 +2,32 @@ import type { Timestamp, DataConverter } from '@lib/atproto/store';
 import type { ImagesPreview } from './file';
 import type { User } from './user';
 
-export type TweetAudience = 'everyone';
-
 export type TweetReplySetting =
   | 'everyone'
   | 'following'
   | 'followers'
   | 'mentioned'
   | 'none';
+
+export type TweetUnavailableReason =
+  | 'blocked'
+  | 'blocked-by'
+  | 'not-found'
+  | 'unknown';
+
+export type TweetTombstoneKind =
+  | 'limited-visibility'
+  | 'sensitive'
+  | 'sensitive-media'
+  | 'age-restricted'
+  | 'rules-violation'
+  | 'suspended'
+  | 'withheld'
+  | 'reported'
+  | 'muted-account'
+  | 'muted-word'
+  | 'no-longer-exists'
+  | 'unavailable';
 
 export type TweetCard = {
   type: 'external' | 'summary' | 'youtube';
@@ -39,6 +57,7 @@ export type EmbeddedTweet = {
   images: ImagesPreview | null;
   mediaWarning: TweetMediaWarning | null;
   card: TweetCard | null;
+  tombstone?: TweetTombstoneKind | null;
   unavailable?: 'not-found' | 'blocked' | 'detached' | 'unknown';
 };
 
@@ -59,6 +78,10 @@ export type Tweet = {
   userRetweets: string[];
   userQuotes: number;
   bookmarkCount: number;
+  replySetting?: TweetReplySetting | null;
+  viewerCanReply?: boolean | null;
+  unavailable?: TweetUnavailableReason;
+  tombstone?: TweetTombstoneKind | null;
 };
 
 export type TweetWithUser = Tweet & { user: User };

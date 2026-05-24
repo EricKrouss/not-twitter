@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react';
 import { Dialog } from '@headlessui/react';
 import cn from 'clsx';
 import { toast } from 'react-hot-toast';
+import { formatAtprotoDisplayIdentifier } from '@lib/atproto/identity';
+import { useTheme } from '@lib/context/theme-context';
 import { Button } from '@components/ui/button';
 import { HeroIcon } from '@components/ui/hero-icon';
 import type { ModerationReportReason } from '@lib/atproto/backend';
@@ -116,9 +118,13 @@ export function ReportModal({
   const [details, setDetails] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [loading, setLoading] = useState(false);
+  const { hideBskySocialSuffix } = useTheme();
   const detailsCount = Array.from(details).length;
+  const displayUsername =
+    formatAtprotoDisplayIdentifier(username, { hideBskySocialSuffix }) ||
+    'account';
   const title =
-    target === 'tweet' ? 'Report Tweet' : `Report @${username ?? 'account'}`;
+    target === 'tweet' ? 'Report Tweet' : `Report ${displayUsername}`;
 
   const options = useMemo(
     () =>

@@ -3,6 +3,8 @@ import { useRouter } from 'next/router';
 import { AnimatePresence } from 'framer-motion';
 import useSWR from 'swr';
 import { getFeedGeneratorPage } from '@lib/atproto/backend';
+import { formatAtprotoDisplayIdentifier } from '@lib/atproto/identity';
+import { useTheme } from '@lib/context/theme-context';
 import { formatNumber } from '@lib/date';
 import { getFeedRouteParams } from '@lib/static-routes';
 import {
@@ -31,10 +33,14 @@ function getRouteParam(value: string | string[] | undefined): string | null {
 }
 
 export default function FeedPage(): JSX.Element {
+  const { hideBskySocialSuffix } = useTheme();
   const { asPath, back, isReady, query } = useRouter();
   const staticParams = getFeedRouteParams(asPath);
   const actor = getRouteParam(query.actor) ?? staticParams?.actor ?? null;
   const rkey = getRouteParam(query.rkey) ?? staticParams?.rkey ?? null;
+  const displayActor = formatAtprotoDisplayIdentifier(actor, {
+    hideBskySocialSuffix
+  });
   const [feed, setFeed] = useState<TweetWithUser[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -108,7 +114,7 @@ export default function FeedPage(): JSX.Element {
                   </h1>
                   {actor && (
                     <p className='truncate text-light-secondary dark:text-dark-secondary'>
-                      @{actor}
+                      {displayActor}
                     </p>
                   )}
                 </div>

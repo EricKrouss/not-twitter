@@ -9,6 +9,7 @@ import { TweetText } from '@components/tweet/tweet-text';
 import { UserAvatar } from './user-avatar';
 import { UserName } from './user-name';
 import { UserFollowing } from './user-following';
+import { UserKnownFollowers } from './user-known-followers';
 import { UserUsername } from './user-username';
 import type { ReactNode } from 'react';
 import type { User } from '@lib/types/user';
@@ -25,6 +26,8 @@ type UserTooltipProps = Pick<
   | 'followers'
   | 'followingCount'
   | 'followersCount'
+  | 'knownFollowers'
+  | 'knownFollowersCount'
   | 'blocking'
   | 'blockedBy'
   | 'blockingByListName'
@@ -51,6 +54,8 @@ export function UserTooltip({
   followers,
   followingCount,
   followersCount,
+  knownFollowers,
+  knownFollowersCount,
   blocking,
   blockedBy,
   blockingByListName,
@@ -157,6 +162,13 @@ export function UserTooltip({
               </Link>
             ))}
           </div>
+          <UserKnownFollowers
+            className='-mt-0.5'
+            id={id}
+            username={username}
+            knownFollowers={knownFollowers}
+            knownFollowersCount={knownFollowersCount}
+          />
         </div>
       </div>
     </div>

@@ -2,6 +2,8 @@ import { useState } from 'react';
 import cn from 'clsx';
 import useSWR from 'swr';
 import { getUserLists } from '@lib/atproto/backend';
+import { formatAtprotoDisplayIdentifier } from '@lib/atproto/identity';
+import { useTheme } from '@lib/context/theme-context';
 import { formatNumber } from '@lib/date';
 import { HomeLayout, ProtectedLayout } from '@components/layout/common-layout';
 import { MainLayout } from '@components/layout/main-layout';
@@ -120,6 +122,7 @@ function ListStatus({
 }
 
 function ListRow({ list }: { list: UserList }): JSX.Element {
+  const { hideBskySocialSuffix } = useTheme();
   const {
     url,
     name,
@@ -135,6 +138,10 @@ function ListRow({ list }: { list: UserList }): JSX.Element {
   const memberLabel = `${formatNumber(listItemCount)} ${
     listItemCount === 1 ? 'member' : 'members'
   }`;
+  const displayCreatorUsername = formatAtprotoDisplayIdentifier(
+    creatorUsername,
+    { hideBskySocialSuffix }
+  );
 
   return (
     <a
@@ -150,7 +157,7 @@ function ListRow({ list }: { list: UserList }): JSX.Element {
           <div className='min-w-0'>
             <p className='truncate text-[15px] font-bold leading-5'>{name}</p>
             <p className='truncate text-sm text-light-secondary dark:text-dark-secondary'>
-              {memberLabel} · @{creatorUsername}
+              {memberLabel} · {displayCreatorUsername}
             </p>
           </div>
           <ListStatus

@@ -1,12 +1,14 @@
 import Link from 'next/link';
 import cn from 'clsx';
+import { formatAtprotoDisplayIdentifier } from '@lib/atproto/identity';
+import { useTheme } from '@lib/context/theme-context';
 import { getUserPath } from '@lib/routes';
 import {
   getHashtagSearchQuery,
   normalizeHashtag,
   normalizeMention
 } from '@lib/hashtags';
-import type { MouseEvent } from 'react';
+import type { CSSProperties, MouseEvent } from 'react';
 
 type TweetTextProps = {
   text: string;
@@ -14,6 +16,7 @@ type TweetTextProps = {
   linkClassName?: string;
   tag?: 'p' | 'span' | 'div';
   disableLinks?: boolean;
+  style?: CSSProperties;
 };
 
 type TextPart =
@@ -146,8 +149,10 @@ export function TweetText({
   className,
   linkClassName,
   tag,
-  disableLinks
+  disableLinks,
+  style
 }: TweetTextProps): JSX.Element {
+  const { hideBskySocialSuffix } = useTheme();
   const stopEntityClick = (event: MouseEvent<HTMLAnchorElement>): void => {
     event.stopPropagation();
   };
@@ -156,7 +161,10 @@ export function TweetText({
     linkClassName ?? 'custom-underline text-main-accent outline-none';
 
   return (
-    <Tag className={cn('whitespace-pre-line break-words', className)}>
+    <Tag
+      className={cn('whitespace-pre-line break-words', className)}
+      style={style}
+    >
       {getTextParts(text).map((part, index) =>
         disableLinks ? (
           <span key={`${part.value}-${index}`}>{part.value}</span>
@@ -192,7 +200,9 @@ export function TweetText({
             key={`${part.value}-${index}`}
           >
             <a className={entityClassName} onClick={stopEntityClick}>
-              {part.value}
+              {formatAtprotoDisplayIdentifier(part.username, {
+                hideBskySocialSuffix
+              })}
             </a>
           </Link>
         ) : (

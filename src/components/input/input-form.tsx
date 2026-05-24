@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import TextArea from 'react-textarea-autosize';
 import { AnimatePresence, motion } from 'framer-motion';
+import cn from 'clsx';
 import { useModal } from '@lib/hooks/useModal';
 import {
   getActiveHashtag,
@@ -23,7 +24,7 @@ import type {
   ClipboardEvent
 } from 'react';
 import type { Variants } from 'framer-motion';
-import type { TweetAudience, TweetReplySetting } from '@lib/types/tweet';
+import type { TweetReplySetting } from '@lib/types/tweet';
 
 type InputFormProps = {
   modal?: boolean;
@@ -35,12 +36,10 @@ type InputFormProps = {
   children: ReactNode;
   inputRef: RefObject<HTMLTextAreaElement>;
   inputValue: string;
-  audience: TweetAudience;
   replySetting: TweetReplySetting;
   replyModal?: boolean;
   isValidTweet: boolean;
   isUploadingImages: boolean;
-  setAudience: Dispatch<SetStateAction<TweetAudience>>;
   setReplySetting: Dispatch<SetStateAction<TweetReplySetting>>;
   sendTweet: () => Promise<void>;
   handleHashtagSelect: (tag: string, hashtag: ActiveHashtag) => void;
@@ -69,20 +68,6 @@ const variants: Variants[] = [
 ];
 
 export const [fromTop, fromBottom] = variants;
-
-const audienceOptions: Readonly<
-  {
-    value: TweetAudience;
-    label: string;
-    iconName: 'GlobeAmericasIcon';
-  }[]
-> = [
-  {
-    value: 'everyone',
-    label: 'Everyone',
-    iconName: 'GlobeAmericasIcon'
-  }
-];
 
 const replyOptions: Readonly<
   {
@@ -149,11 +134,9 @@ export function InputForm({
   inputRef,
   replyModal,
   inputValue,
-  audience,
   replySetting,
   isValidTweet,
   isUploadingImages,
-  setAudience,
   setReplySetting,
   sendTweet,
   handleHashtagSelect,
@@ -170,25 +153,50 @@ export function InputForm({
   const [activeMention, setActiveMention] = useState<ActiveMention | null>(
     null
   );
-  const [audienceMenuOpen, setAudienceMenuOpen] = useState(false);
   const [replyMenuOpen, setReplyMenuOpen] = useState(false);
+  const replyMenuRef = useRef<HTMLDivElement>(null);
 
-  const selectedAudience = audienceOptions.find(
-    ({ value }) => value === audience
-  ) as typeof audienceOptions[number];
   const selectedReplyOption = replyOptions.find(
     ({ value }) => value === replySetting
   ) as typeof replyOptions[number];
   const isVisibilityShown = visited && !reply && !replyModal && !loading;
+  const textareaMinRows =
+    loading || reply || replyModal
+      ? 1
+      : modal && !isUploadingImages && !quote
+      ? 4
+      : 1;
 
   useEffect(() => handleShowHideNav(true), []);
 
   useEffect(() => {
-    if (!isVisibilityShown) {
-      setAudienceMenuOpen(false);
-      setReplyMenuOpen(false);
-    }
+    if (!isVisibilityShown) setReplyMenuOpen(false);
   }, [isVisibilityShown]);
+
+  useEffect(() => {
+    if (!replyMenuOpen) return;
+
+    const closeReplyMenuOnOutsidePointerDown = ({
+      target
+    }: PointerEvent): void => {
+      if (
+        target instanceof Node &&
+        !replyMenuRef.current?.contains(target)
+      )
+        setReplyMenuOpen(false);
+    };
+
+    document.addEventListener(
+      'pointerdown',
+      closeReplyMenuOnOutsidePointerDown
+    );
+
+    return () =>
+      document.removeEventListener(
+        'pointerdown',
+        closeReplyMenuOnOutsidePointerDown
+      );
+  }, [replyMenuOpen]);
 
   useEffect(() => {
     const input = inputRef.current;
@@ -286,11 +294,6 @@ export function InputForm({
     closeModal();
   };
 
-  const selectAudience = (nextAudience: TweetAudience) => (): void => {
-    setAudience(nextAudience);
-    setAudienceMenuOpen(false);
-  };
-
   const selectReplySetting =
     (nextReplySetting: TweetReplySetting) => (): void => {
       setReplySetting(nextReplySetting);
@@ -298,7 +301,12 @@ export function InputForm({
     };
 
   return (
-    <div className='flex min-h-[48px] w-full min-w-0 flex-col justify-center gap-4'>
+    <div
+      className={cn(
+        'flex min-h-[48px] w-full min-w-0 flex-col justify-center',
+        quote ? 'gap-2.5' : 'gap-3'
+      )}
+    >
       <Modal
         modalClassName='max-w-xs bg-main-background w-full p-8 rounded-2xl'
         open={open}
@@ -313,72 +321,12 @@ export function InputForm({
           closeModal={closeModal}
         />
       </Modal>
-      <div className='flex min-w-0 flex-col gap-6'>
-        {isVisibilityShown && (
-          <motion.div className='relative self-start' {...fromTop}>
-            <button
-              type='button'
-              className='custom-button accent-tab accent-bg-tab flex items-center gap-1
-                         border border-light-line-reply py-0 px-3 text-main-accent
-                         hover:bg-main-accent/10 active:bg-main-accent/20 dark:border-light-secondary'
-              aria-haspopup='menu'
-              aria-expanded={audienceMenuOpen}
-              onClick={(): void => {
-                setAudienceMenuOpen(!audienceMenuOpen);
-                setReplyMenuOpen(false);
-              }}
-            >
-              <p className='font-bold'>{selectedAudience.label}</p>
-              <HeroIcon className='h-4 w-4' iconName='ChevronDownIcon' />
-            </button>
-            <AnimatePresence>
-              {audienceMenuOpen && (
-                <motion.div
-                  className='menu-container absolute left-0 top-full z-20 mt-2 w-64 overflow-hidden rounded-2xl
-                             border border-light-line-reply bg-main-background py-2 shadow-xl
-                             dark:border-dark-border'
-                  role='menu'
-                  {...fromTop}
-                >
-                  {audienceOptions.map(({ value, label, iconName }) => {
-                    const selected = value === audience;
-
-                    return (
-                      <button
-                        type='button'
-                        className='accent-bg-tab flex w-full items-center gap-3 px-4 py-3 text-left
-                                   hover:bg-main-accent/10 active:bg-main-accent/20'
-                        role='menuitemradio'
-                        aria-checked={selected}
-                        onClick={selectAudience(value)}
-                        key={value}
-                      >
-                        <HeroIcon
-                          className='h-5 w-5 text-main-accent'
-                          iconName={iconName}
-                        />
-                        <span className='min-w-0 flex-1 font-bold'>
-                          {label}
-                        </span>
-                        {selected && (
-                          <HeroIcon
-                            className='h-5 w-5 text-main-accent'
-                            iconName='CheckIcon'
-                          />
-                        )}
-                      </button>
-                    );
-                  })}
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </motion.div>
-        )}
-        <div className='flex items-center gap-3'>
+      <div className={cn('flex min-w-0 flex-col', quote ? 'gap-3' : 'gap-6')}>
+        <div className='flex min-h-[48px] items-center gap-3'>
           <div className='relative min-w-0 flex-1'>
             <TextArea
               id={formId}
-              className='w-full min-w-0 resize-none bg-transparent text-xl outline-none
+              className='w-full min-w-0 resize-none bg-transparent text-[20px] leading-6 outline-none
                          placeholder:text-light-secondary dark:placeholder:text-dark-secondary'
               value={inputValue}
               placeholder={
@@ -389,7 +337,7 @@ export function InputForm({
                   : "What's happening?"
               }
               onBlur={handleShowHideNav(true)}
-              minRows={loading ? 1 : modal && !isUploadingImages ? 3 : 1}
+              minRows={textareaMinRows}
               maxRows={isUploadingImages ? 5 : 15}
               onFocus={handleFormFocus}
               onPaste={handleImageUpload}
@@ -429,16 +377,16 @@ export function InputForm({
           className='flex border-b border-light-border pb-2 dark:border-dark-border'
           {...fromBottom}
         >
-          <div className='relative'>
+          <div className='relative' ref={replyMenuRef}>
             <button
               type='button'
               className='custom-button accent-tab accent-bg-tab flex items-center gap-1 py-0
-                         px-3 text-main-accent hover:bg-main-accent/10 active:bg-main-accent/20'
+                         px-0 pr-2 text-[15px] leading-5 text-main-accent hover:bg-main-accent/10
+                         active:bg-main-accent/20'
               aria-haspopup='menu'
               aria-expanded={replyMenuOpen}
               onClick={(): void => {
                 setReplyMenuOpen(!replyMenuOpen);
-                setAudienceMenuOpen(false);
               }}
             >
               <HeroIcon

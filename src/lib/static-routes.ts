@@ -5,8 +5,11 @@ export type UserRouteView =
   | 'with_replies'
   | 'media'
   | 'likes'
+  | 'lists'
+  | 'starter-packs'
   | 'following'
-  | 'followers';
+  | 'followers'
+  | 'followers_you_follow';
 
 export type StaticRouteMatch =
   | {
@@ -29,8 +32,11 @@ const PROFILE_TABS = new Set<UserRouteView>([
   'with_replies',
   'media',
   'likes',
+  'lists',
+  'starter-packs',
   'following',
-  'followers'
+  'followers',
+  'followers_you_follow'
 ]);
 
 function getConfiguredBasePath(): string {

@@ -7,9 +7,14 @@ import { getProfileRouteId, getProfileRouteView } from '@lib/static-routes';
 type UserNavLinkProps = {
   name: string;
   path: string;
+  stationary?: boolean;
 };
 
-export function UserNavLink({ name, path }: UserNavLinkProps): JSX.Element {
+export function UserNavLink({
+  name,
+  path,
+  stationary
+}: UserNavLinkProps): JSX.Element {
   const {
     asPath,
     query: { id }
@@ -22,26 +27,58 @@ export function UserNavLink({ name, path }: UserNavLinkProps): JSX.Element {
   const active =
     currentPath === userPath ||
     (path ? routeView === path : routeView === 'tweets');
+  const minWidthClass = stationary
+    ? 'min-w-0'
+    : path === 'with_replies'
+    ? 'min-w-[152px]'
+    : path === 'starter-packs'
+    ? 'min-w-[136px]'
+    : 'min-w-[96px]';
+  const interactiveClass = stationary
+    ? cn(
+        'min-w-0 flex-1 px-2 transition-colors duration-150',
+        active
+          ? 'text-light-primary dark:text-dark-primary'
+          : 'text-light-secondary dark:text-dark-secondary'
+      )
+    : cn(
+        active
+          ? `flex-none px-4 text-light-primary
+             dark:text-dark-primary`
+          : `max-w-[160px] flex-1 px-3
+             text-light-secondary hover:max-w-none hover:flex-none
+             hover:px-4 focus-visible:max-w-none focus-visible:flex-none
+             focus-visible:px-4 dark:text-dark-secondary`
+      );
 
   return (
     <Link href={userPath} scroll={false}>
       <a
-        className='hover-animation main-tab dark-bg-tab flex flex-1 justify-center
-                   hover:bg-light-primary/10 dark:hover:bg-dark-primary/10'
+        className={cn(
+          `accent-tab hover-card group/tab relative flex h-[53px] items-center justify-center
+           text-[15px] font-bold outline-none transition-[max-width,padding] duration-150`,
+          interactiveClass,
+          minWidthClass
+        )}
+        role='tab'
+        aria-selected={active}
+        aria-label={name}
+        data-profile-tab={path || 'tweets'}
+        data-profile-tab-path={userPath}
+        draggable={false}
+        title={name}
       >
-        <div className='px-6 md:px-8'>
-          <p
-            className={cn(
-              'flex flex-col gap-3 whitespace-nowrap pt-3 font-bold transition-colors duration-200',
-              active
-                ? 'text-light-primary dark:text-dark-primary [&>i]:scale-100 [&>i]:opacity-100'
-                : 'text-light-secondary dark:text-dark-secondary'
-            )}
-          >
-            {name}
-            <i className='h-1 scale-50 rounded-full bg-main-accent opacity-0 transition duration-200' />
-          </p>
-        </div>
+        <span
+          className={cn(
+            'text-center leading-5',
+            !stationary && 'whitespace-nowrap'
+          )}
+        >
+          {name}
+        </span>
+        {active && (
+          <i className='absolute bottom-0 h-1 w-14 rounded-full bg-main-accent' />
+        )}
       </a>
     </Link>
   );

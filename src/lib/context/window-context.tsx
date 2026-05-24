@@ -12,6 +12,14 @@ type WindowContext = WindowSize & {
 
 export const WindowContext = createContext<WindowContext | null>(null);
 
+const mobileWidth = 640;
+const compactLandscapeMaxWidth = 900;
+const compactLandscapeMaxHeight = 560;
+const initialWindowSize: WindowSize = {
+  width: 0,
+  height: 0
+};
+
 type WindowContextProviderProps = {
   children: ReactNode;
 };
@@ -19,10 +27,7 @@ type WindowContextProviderProps = {
 export function WindowContextProvider({
   children
 }: WindowContextProviderProps): JSX.Element {
-  const [windowSize, setWindowSize] = useState<WindowSize>({
-    width: window.innerWidth,
-    height: window.innerHeight
-  });
+  const [windowSize, setWindowSize] = useState<WindowSize>(initialWindowSize);
 
   useEffect(() => {
     const handleResize = (): void =>
@@ -31,13 +36,17 @@ export function WindowContextProvider({
         height: window.innerHeight
       });
 
+    handleResize();
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
   const value: WindowContext = {
     ...windowSize,
-    isMobile: windowSize.width < 500
+    isMobile:
+      windowSize.width < mobileWidth ||
+      (windowSize.width < compactLandscapeMaxWidth &&
+        windowSize.height < compactLandscapeMaxHeight)
   };
 
   return (

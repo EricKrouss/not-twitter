@@ -1,4 +1,5 @@
 import { useAuth } from '@lib/context/auth-context';
+import { useWindow } from '@lib/context/window-context';
 import { useModal } from '@lib/hooks/useModal';
 import { Button } from '@components/ui/button';
 import { Modal } from '@components/modal/modal';
@@ -23,6 +24,7 @@ const variant: Variants = {
 
 export function MobileSidebar(): JSX.Element {
   const { user } = useAuth();
+  const { isMobile } = useWindow();
 
   const { photoURL, name } = user as User;
 
@@ -39,9 +41,11 @@ export function MobileSidebar(): JSX.Element {
       >
         <MobileSidebarModal {...(user as User)} closeModal={closeModal} />
       </Modal>
-      <Button className='accent-tab p-0 xs:hidden' onClick={openModal}>
-        <UserAvatar src={photoURL} alt={name} size={30} />
-      </Button>
+      {isMobile && (
+        <Button className='accent-tab p-0' onClick={openModal}>
+          <UserAvatar src={photoURL} alt={name} size={30} />
+        </Button>
+      )}
     </>
   );
 }

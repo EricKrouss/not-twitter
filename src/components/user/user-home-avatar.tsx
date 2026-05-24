@@ -16,12 +16,20 @@ export function UserHomeAvatar({
 
   return (
     <div className='mb-8 xs:mb-14 sm:mb-16'>
-      <Modal open={open} closeModal={closeModal}>
+      <Modal
+        className='!overflow-hidden !p-0'
+        modalClassName='h-screen w-screen'
+        open={open}
+        closeModal={closeModal}
+        closePanelOnClick
+      >
         <ImageModal
           imageData={
             { src: profileData?.src, alt: profileData?.alt } as ImageData
           }
           previewCount={1}
+          profileMediaKind='avatar'
+          closeModal={closeModal}
         />
       </Modal>
       <Button

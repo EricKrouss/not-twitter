@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter } from 'next/router';
 import { AnimatePresence, motion } from 'framer-motion';
 import cn from 'clsx';
 import useSWR from 'swr';
 import {
+  getDiscoverHomeFeedPage,
   getFollowingHomeFeedPage,
   getSubscribedHomeFeedPage,
   getSubscribedHomeFeeds,
@@ -27,7 +29,7 @@ import type { MouseEvent, PointerEvent, ReactElement, ReactNode } from 'react';
 import type { HomeFeedPage, SubscribedHomeFeed } from '@lib/atproto/backend';
 import type { TweetWithUser } from '@lib/types/tweet';
 
-type HomeFeedTab = 'following' | `feed:${string}`;
+type HomeFeedTab = 'for-you' | 'following' | `feed:${string}`;
 
 type HomeFeedTabData = {
   label: string;
@@ -35,6 +37,7 @@ type HomeFeedTabData = {
 };
 
 const HOME_FEED_REFRESH_INTERVAL_MS = 15000;
+const FOR_YOU_HOME_FEED_TAB = 'for-you';
 const FEED_TAB_PREFIX = 'feed:';
 type HomeFeedRefreshMode = 'banner' | 'replace';
 
@@ -42,6 +45,7 @@ async function getHomeFeedPage(
   tab: HomeFeedTab,
   cursor?: string
 ): Promise<HomeFeedPage> {
+  if (tab === FOR_YOU_HOME_FEED_TAB) return getDiscoverHomeFeedPage(cursor);
   if (tab === 'following') return getFollowingHomeFeedPage(cursor);
 
   return getSubscribedHomeFeedPage(tab.slice(FEED_TAB_PREFIX.length), cursor);
@@ -51,14 +55,14 @@ function normalizeFeedLabel(label: string): string {
   return label.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
-function isDiscoverFeed({ displayName }: SubscribedHomeFeed): boolean {
-  return normalizeFeedLabel(displayName) === 'discover';
-}
-
-function isDuplicateForYouFeed({ displayName }: SubscribedHomeFeed): boolean {
+function isFixedForYouDuplicate({ displayName }: SubscribedHomeFeed): boolean {
   const normalizedLabel = normalizeFeedLabel(displayName);
 
-  return normalizedLabel === 'for you' || normalizedLabel === 'for-you';
+  return (
+    normalizedLabel === 'discover' ||
+    normalizedLabel === 'for you' ||
+    normalizedLabel === 'for-you'
+  );
 }
 
 function getSubscribedFeedTab(
@@ -74,15 +78,13 @@ function getSubscribedFeedTab(
 function getHomeFeedTabs(
   subscribedFeeds: SubscribedHomeFeed[]
 ): HomeFeedTabData[] {
-  const discoverFeed = subscribedFeeds.find(isDiscoverFeed);
   const savedFeedTabs = subscribedFeeds
     .filter((feed) => feed.type === 'feed')
-    .filter((feed) => feed !== discoverFeed)
-    .filter((feed) => !isDuplicateForYouFeed(feed))
+    .filter((feed) => !isFixedForYouDuplicate(feed))
     .map((feed) => getSubscribedFeedTab(feed));
 
   return [
-    ...(discoverFeed ? [getSubscribedFeedTab(discoverFeed, 'For you')] : []),
+    { label: 'For you', value: FOR_YOU_HOME_FEED_TAB },
     { label: 'Following', value: 'following' },
     ...savedFeedTabs
   ];
@@ -235,9 +237,9 @@ function HomeTabs({
                   ? `min-w-[128px] flex-none px-5 text-light-primary
                      dark:text-dark-primary`
                   : `min-w-[128px] max-w-[170px] flex-1 px-4
-                     hover:max-w-none hover:flex-none hover:px-5
-                     focus-visible:max-w-none focus-visible:flex-none focus-visible:px-5
-                     text-light-secondary dark:text-dark-secondary`
+                     text-light-secondary hover:max-w-none hover:flex-none
+                     hover:px-5 focus-visible:max-w-none focus-visible:flex-none
+                     focus-visible:px-5 dark:text-dark-secondary`
               )}
               type='button'
               role='tab'
@@ -275,8 +277,9 @@ let lastActiveTab: HomeFeedTab | null = null;
 
 export default function Home(): JSX.Element {
   const { isMobile } = useWindow();
+  const { push } = useRouter();
   const { clearHomeBadge } = useLiveUpdates();
-  const [activeTab, setActiveTabState] = useState<HomeFeedTab>(lastActiveTab ?? 'following');
+  const [activeTab, setActiveTabState] = useState<HomeFeedTab>(lastActiveTab ?? FOR_YOU_HOME_FEED_TAB);
   const [feed, setFeed] = useState<TweetWithUser[]>([]);
   const [newTweets, setNewTweets] = useState<TweetWithUser[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -314,12 +317,12 @@ export default function Home(): JSX.Element {
   useEffect(() => {
     if (!adoptedInitialTabRef.current && subscribedFeeds) {
       adoptedInitialTabRef.current = true;
-      setActiveTab(homeFeedTabs[0]?.value ?? 'following');
+      setActiveTab(homeFeedTabs[0]?.value ?? FOR_YOU_HOME_FEED_TAB);
       return;
     }
 
     if (!homeFeedTabs.some(({ value }) => value === activeTab))
-      setActiveTab(homeFeedTabs[0]?.value ?? 'following');
+      setActiveTab(homeFeedTabs[0]?.value ?? FOR_YOU_HOME_FEED_TAB);
   }, [activeTab, homeFeedTabs, subscribedFeeds]);
 
   useEffect(() => {
@@ -391,9 +394,17 @@ export default function Home(): JSX.Element {
   const toggleTimelineSettings = (): void =>
     setTimelineSettingsOpen((open) => !open);
 
-  const switchToLatestTweets = (): void => {
-    setActiveTab('following');
+  const openFeedsBrowser = (): void => {
     setTimelineSettingsOpen(false);
+    void push('/feeds');
+  };
+
+  const openContentPreferences = (): void => {
+    setTimelineSettingsOpen(false);
+    void push({
+      pathname: '/settings',
+      query: { section: 'content' }
+    });
   };
 
   const showNewTweets = (): void => {
@@ -476,23 +487,28 @@ export default function Home(): JSX.Element {
                   <Button
                     className='accent-tab flex w-full items-center gap-3 rounded-none px-4 py-3
                                text-left hover:bg-light-primary/10 dark:hover:bg-dark-primary/10'
-                    onClick={switchToLatestTweets}
+                    onClick={openFeedsBrowser}
                   >
-                    <HeroIcon className='h-6 w-6' iconName='ArrowPathIcon' />
+                    <HeroIcon className='h-6 w-6' iconName='ListBulletIcon' />
                     <div>
-                      <p className='font-bold'>See latest Tweets instead</p>
+                      <p className='font-bold'>Manage feeds</p>
                       <p className='text-sm text-light-secondary dark:text-dark-secondary'>
-                        Show Tweets as they happen.
+                        Browse, add, and reorder Home timelines.
                       </p>
                     </div>
                   </Button>
                   <Button
-                    className='accent-tab flex w-full cursor-not-allowed items-center gap-3 rounded-none px-4 py-3
-                               text-left opacity-60 hover:bg-light-primary/10 dark:hover:bg-dark-primary/10'
-                    disabled
+                    className='accent-tab flex w-full items-center gap-3 rounded-none px-4 py-3
+                               text-left hover:bg-light-primary/10 dark:hover:bg-dark-primary/10'
+                    onClick={openContentPreferences}
                   >
                     <HeroIcon className='h-6 w-6' iconName='Cog6ToothIcon' />
-                    <p className='font-bold'>View content preferences</p>
+                    <div>
+                      <p className='font-bold'>View content preferences</p>
+                      <p className='text-sm text-light-secondary dark:text-dark-secondary'>
+                        Manage labels, interests, and feed filters.
+                      </p>
+                    </div>
                   </Button>
                 </motion.div>
               )}

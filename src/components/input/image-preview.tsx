@@ -12,6 +12,7 @@ import { Button } from '@components/ui/button';
 import { HeroIcon } from '@components/ui/hero-icon';
 import { ToolTip } from '@components/ui/tooltip';
 import { TwitterVideoPlayer } from '@components/ui/twitter-video-player';
+import { TweetTombstone } from '@components/tweet/tweet-tombstone';
 import type { MotionProps } from 'framer-motion';
 import type { CSSProperties, KeyboardEvent } from 'react';
 import type { ImagesPreview, ImageData } from '@lib/types/file';
@@ -284,6 +285,21 @@ export function ImagePreview({
   const currentImage = selectedImage ?? imagesPreview[selectedIndex];
   const shouldWarnMedia = !!moderationWarning && !warningRevealed;
 
+  if (shouldWarnMedia)
+    return (
+      <TweetTombstone
+        kind={
+          moderationWarning.noOverride ? 'age-restricted' : 'sensitive-media'
+        }
+        className='mt-2 w-full text-left'
+        onView={
+          moderationWarning.noOverride
+            ? undefined
+            : (): void => setWarningRevealed(true)
+        }
+      />
+    );
+
   return (
     <div
       className={cn(
@@ -354,8 +370,6 @@ export function ImagePreview({
               className={cn(
                 'accent-tab group relative overflow-hidden transition-shadow',
                 imageRadius,
-                shouldWarnMedia &&
-                  'pointer-events-none scale-[1.02] blur-lg brightness-75',
                 {
                   'col-span-1 row-span-1': visiblePreviewCount === 1,
                   'row-span-2':
@@ -363,8 +377,8 @@ export function ImagePreview({
                     (index === 0 && visiblePreviewCount === 3)
                 }
               )}
-              role={shouldWarnMedia || isGif ? undefined : 'button'}
-              tabIndex={shouldWarnMedia || isGif ? undefined : 0}
+              role={isGif ? undefined : 'button'}
+              tabIndex={isGif ? undefined : 0}
               aria-label={isGif ? undefined : `Open image ${index + 1}`}
               {...variants}
               onClick={isGif ? preventBubbling() : preventBubbling(openPreview)}
@@ -431,37 +445,6 @@ export function ImagePreview({
           );
         })}
       </AnimatePresence>
-      {shouldWarnMedia && (
-        <div
-          className='absolute inset-0 z-20 flex items-center justify-center bg-black/30
-                     px-6 text-center text-white'
-          onClick={preventBubbling(null, true)}
-        >
-          <div className='max-w-[285px]'>
-            <HeroIcon
-              className='mx-auto mb-2 h-6 w-6 text-white/90 drop-shadow-sm'
-              iconName='EyeSlashIcon'
-            />
-            <p className='text-[14px] font-bold leading-5 text-white drop-shadow-sm'>
-              Content warning: Sensitive content
-            </p>
-            <p className='mt-1 text-[13px] leading-5 text-white/80 drop-shadow-sm'>
-              {moderationWarning.description}
-            </p>
-            {!moderationWarning.noOverride && (
-              <button
-                className='mt-2 text-[13px] font-bold leading-5 text-white underline-offset-2
-                           hover:underline focus-visible:outline focus-visible:outline-2
-                           focus-visible:outline-offset-2 focus-visible:outline-white/80'
-                onClick={preventBubbling(() => setWarningRevealed(true))}
-                type='button'
-              >
-                View
-              </button>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

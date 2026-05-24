@@ -2,6 +2,7 @@ import { ensureValidDid, isValidHandle } from '@atproto/syntax';
 
 const DID_WEB_PREFIX = 'did:web:';
 const DID_PLC_PREFIX = 'did:plc:';
+const BSKY_SOCIAL_HANDLE_SUFFIX = '.bsky.social';
 const LOCALHOST_DID_WEB_PORT_PATTERN = /^localhost%3A\d+$/i;
 
 export type AtprotoIdentityDid = `did:plc:${string}` | `did:web:${string}`;
@@ -89,11 +90,32 @@ export function normalizeAtprotoLoginIdentifier(value: string): string {
   return normalizedIdentifier ?? value.trim();
 }
 
+export function formatAtprotoHandleForDisplay(
+  handle: string,
+  hideBskySocialSuffix = false
+): string {
+  const trimmedHandle = handle.trim();
+
+  if (
+    hideBskySocialSuffix &&
+    trimmedHandle.toLowerCase().endsWith(BSKY_SOCIAL_HANDLE_SUFFIX)
+  )
+    return trimmedHandle.slice(0, -BSKY_SOCIAL_HANDLE_SUFFIX.length);
+
+  return trimmedHandle;
+}
+
 export function formatAtprotoDisplayIdentifier(
-  value: string | null | undefined
+  value: string | null | undefined,
+  options?: { hideBskySocialSuffix?: boolean }
 ): string {
   const identifier = value?.trim();
   if (!identifier) return '';
 
-  return identifier.startsWith('did:') ? identifier : `@${identifier}`;
+  return identifier.startsWith('did:')
+    ? identifier
+    : `@${formatAtprotoHandleForDisplay(
+        identifier,
+        options?.hideBskySocialSuffix
+      )}`;
 }

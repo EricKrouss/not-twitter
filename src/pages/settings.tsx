@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/router';
 import cn from 'clsx';
 import useSWR from 'swr';
 import { toast } from 'react-hot-toast';
@@ -17,7 +18,6 @@ import {
   setDefaultQuoteSetting,
   setDefaultReplySetting,
   setFeedViewSetting,
-  setInterestsSetting,
   setSettingsChatAllowIncoming,
   setSettingsNotificationPreference,
   setThreadViewSetting,
@@ -35,7 +35,9 @@ import {
   type SettingsNotificationPreference,
   type SettingsThreadSort
 } from '@lib/atproto/backend';
+import { formatAtprotoDisplayIdentifier } from '@lib/atproto/identity';
 import { useAuth } from '@lib/context/auth-context';
+import { useTheme } from '@lib/context/theme-context';
 import { useWindow } from '@lib/context/window-context';
 import { useModal } from '@lib/hooks/useModal';
 import { MainLayout } from '@components/layout/main-layout';
@@ -102,6 +104,16 @@ const SETTINGS_NAV: SettingsNavItem[] = [
     iconName: 'PaintBrushIcon'
   }
 ];
+
+function getSettingsSection(
+  value: string | string[] | undefined
+): SettingsSection | null {
+  const section = Array.isArray(value) ? value[0] : value;
+
+  return SETTINGS_NAV.some(({ id }) => id === section)
+    ? (section as SettingsSection)
+    : null;
+}
 
 const CONTENT_LABELS: Readonly<
   { label: SettingsContentLabel; title: string; description: string }[]
@@ -210,8 +222,7 @@ const CONTENT_LABELS: Readonly<
   {
     label: 'spam',
     title: 'Spam',
-    description:
-      'Unwanted, repeated, or unrelated actions that bother users.'
+    description: 'Unwanted, repeated, or unrelated actions that bother users.'
   },
   {
     label: 'rumor',
@@ -453,6 +464,38 @@ function SettingsRow({
         </div>
       )}
     </div>
+  );
+}
+
+function SettingsLinkRow({
+  title,
+  description,
+  href,
+  meta
+}: {
+  title: string;
+  description?: string;
+  href: string;
+  meta?: string;
+}): JSX.Element {
+  return (
+    <Link href={href}>
+      <a className='hover-card block outline-none focus-visible:ring-2 focus-visible:ring-main-accent'>
+        <SettingsRow
+          title={title}
+          description={description}
+          childrenClassName='flex justify-end'
+        >
+          <span className='flex min-w-0 items-center justify-end gap-3 text-[15px] font-bold text-light-secondary dark:text-dark-secondary'>
+            {meta && <span className='truncate'>{meta}</span>}
+            <CustomIcon
+              className='h-4 w-4 shrink-0'
+              iconName='TwitterChevronRightIcon'
+            />
+          </span>
+        </SettingsRow>
+      </a>
+    </Link>
   );
 }
 
@@ -718,7 +761,9 @@ function SettingsPanelHeader({
 
 export default function Settings(): JSX.Element {
   const { user, signInWithBluesky } = useAuth();
+  const { hideBskySocialSuffix, toggleHideBskySocialSuffix } = useTheme();
   const { isMobile } = useWindow();
+  const router = useRouter();
   const displayModal = useModal();
   const [activeSection, setActiveSection] =
     useState<SettingsSection>('account');
@@ -736,7 +781,6 @@ export default function Settings(): JSX.Element {
   const [passwordResetToken, setPasswordResetToken] = useState('');
   const [newPasswordInput, setNewPasswordInput] = useState('');
   const [replyLikeCount, setReplyLikeCount] = useState(0);
-  const [interestInput, setInterestInput] = useState('');
   const [mutedWordValue, setMutedWordValue] = useState('');
   const [mutedTargets, setMutedTargets] = useState<SettingsMutedWordTarget[]>([
     'content',
@@ -767,8 +811,17 @@ export default function Settings(): JSX.Element {
       (currentEmail) => currentEmail || (settings.account.email ?? '')
     );
     setReplyLikeCount(settings.feedView.hideRepliesByLikeCount ?? 0);
-    setInterestInput(settings.interests.join(', '));
   }, [settings]);
+
+  useEffect(() => {
+    if (!router.isReady) return;
+
+    const section = getSettingsSection(router.query.section);
+    if (!section) return;
+
+    setActiveSection(section);
+    if (isMobile) setMobileDetailOpen(true);
+  }, [isMobile, router.isReady, router.query.section]);
 
   const activeTitle = useMemo(
     () => SETTINGS_NAV.find(({ id }) => id === activeSection)?.title ?? '',
@@ -815,6 +868,14 @@ export default function Settings(): JSX.Element {
   const handleSectionSelect = (section: SettingsSection): void => {
     setActiveSection(section);
     if (isMobile) setMobileDetailOpen(true);
+    void router.replace(
+      {
+        pathname: '/settings',
+        query: { section }
+      },
+      undefined,
+      { scroll: false, shallow: true }
+    );
   };
 
   const handleHandleSubmit = (event: FormEvent<HTMLFormElement>): void => {
@@ -905,13 +966,6 @@ export default function Settings(): JSX.Element {
     );
   };
 
-  const handleInterestsSubmit = (event: FormEvent<HTMLFormElement>): void => {
-    event.preventDefault();
-    const tags = interestInput.split(/[, ]+/).filter(Boolean);
-
-    void runUpdate('interests', () => setInterestsSetting(tags));
-  };
-
   const handleMutedTargetToggle = (target: SettingsMutedWordTarget): void => {
     setMutedTargets((currentTargets) =>
       currentTargets.includes(target)
@@ -969,7 +1023,11 @@ export default function Settings(): JSX.Element {
           title='Username'
           description='Your current Bluesky handle.'
         >
-          <ValuePill value={`@${settings.account.handle}`} />
+          <ValuePill
+            value={formatAtprotoDisplayIdentifier(settings.account.handle, {
+              hideBskySocialSuffix
+            })}
+          />
         </SettingsRow>
         <SettingsRow
           title='Account ID'
@@ -1561,28 +1619,16 @@ export default function Settings(): JSX.Element {
             }
           />
         </SettingsRow>
-        <form onSubmit={handleInterestsSubmit}>
-          <SettingsRow
-            title='Interests'
-            description='Comma-separated tags used by Bluesky preferences.'
-          >
-            <div className='flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end'>
-              <input
-                className={cn(fieldClassName, 'h-9 w-full text-sm sm:w-56')}
-                placeholder='music, tech, art'
-                value={interestInput}
-                onChange={(event): void => setInterestInput(event.target.value)}
-              />
-              <Button
-                className={compactButtonClassName}
-                loading={savingKey === 'interests'}
-                type='submit'
-              >
-                Save
-              </Button>
-            </div>
-          </SettingsRow>
-        </form>
+        <SettingsLinkRow
+          title='Interests'
+          description='Choose topics used by Bluesky preferences.'
+          href='/interests'
+          meta={
+            settings.interests.length
+              ? `${settings.interests.length} selected`
+              : 'Choose'
+          }
+        />
       </>
     );
   };
@@ -1699,6 +1745,16 @@ export default function Settings(): JSX.Element {
         >
           Open display
         </Button>
+      </SettingsRow>
+      <SettingsRow
+        title='Hide .bsky.social suffixes'
+        description='Shorten only generic Bluesky handles in visible usernames.'
+      >
+        <Toggle
+          checked={hideBskySocialSuffix}
+          label='Hide .bsky.social suffixes'
+          onChange={toggleHideBskySocialSuffix}
+        />
       </SettingsRow>
     </>
   );
