@@ -376,8 +376,9 @@ function QuotedTweetCard({
   const quotedTweetCard = hideMedia
     ? null
     : quotedTweet.card ?? createYouTubeCardFromText(quotedTweet.text);
-  const compactMedia = hideMedia ? quotedTweet.images?.[0] : null;
   const expandPreview = expanded && !hideMedia;
+  const compactMedia = !expandPreview ? quotedTweet.images?.[0] : null;
+  const quotedTweetCardPreview = compactMedia ? null : quotedTweetCard;
   const tweetHref = quotedTweet.id
     ? getTweetPath(quotedTweet.id, quotedTweet.authorUsername)
     : null;
@@ -468,7 +469,7 @@ function QuotedTweetCard({
             />
           </>
         ) : null}
-        {!hideMedia && quotedTweet.images && (
+        {!hideMedia && !compactMedia && quotedTweet.images && (
           <ImagePreview
             tweet
             imagesPreview={quotedTweet.images}
@@ -476,7 +477,9 @@ function QuotedTweetCard({
             moderationWarning={quotedTweet.mediaWarning}
           />
         )}
-        {quotedTweetCard && <TweetLinkCard card={quotedTweetCard} compact />}
+        {quotedTweetCardPreview && (
+          <TweetLinkCard card={quotedTweetCardPreview} compact />
+        )}
       </div>
     </CardShell>
   );
