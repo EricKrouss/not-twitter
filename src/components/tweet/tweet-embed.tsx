@@ -24,6 +24,7 @@ type TweetEmbedProps = {
   quotedTweet: EmbeddedTweet | null;
   viewTweet?: boolean;
   hideQuotedTweetMedia?: boolean;
+  expandQuotedTweet?: boolean;
 };
 
 type LinkCardProps = {
@@ -334,15 +335,22 @@ function QuotedTweetMediaThumbnail({
   );
 }
 
-function getQuotedTweetMaxHeightClassName(): string {
-  return 'max-h-[168px]';
+function getQuotedTweetMaxHeightClassName(expanded?: boolean): string {
+  return expanded ? '' : 'max-h-[168px]';
 }
 
-function getQuotedTweetCardClassName(viewTweet?: boolean): string {
-  return cn(viewTweet && 'mt-3', getQuotedTweetMaxHeightClassName());
+function getQuotedTweetCardClassName(
+  viewTweet?: boolean,
+  expanded?: boolean
+): string {
+  return cn(viewTweet && 'mt-3', getQuotedTweetMaxHeightClassName(expanded));
 }
 
-function getQuotedTweetTextClampStyle(): CSSProperties {
+function getQuotedTweetTextClampStyle(
+  expanded?: boolean
+): CSSProperties | undefined {
+  if (expanded) return undefined;
+
   return {
     ...quotedTweetPreviewTextStyleBase,
     WebkitLineClamp: 5
@@ -352,11 +360,13 @@ function getQuotedTweetTextClampStyle(): CSSProperties {
 function QuotedTweetCard({
   quotedTweet,
   viewTweet,
-  hideMedia
+  hideMedia,
+  expanded
 }: {
   quotedTweet: EmbeddedTweet;
   viewTweet?: boolean;
   hideMedia?: boolean;
+  expanded?: boolean;
 }): JSX.Element {
   const router = useRouter();
 
@@ -367,6 +377,7 @@ function QuotedTweetCard({
     ? null
     : quotedTweet.card ?? createYouTubeCardFromText(quotedTweet.text);
   const compactMedia = hideMedia ? quotedTweet.images?.[0] : null;
+  const expandPreview = expanded && !hideMedia;
   const tweetHref = quotedTweet.id
     ? getTweetPath(quotedTweet.id, quotedTweet.authorUsername)
     : null;
@@ -377,7 +388,7 @@ function QuotedTweetCard({
 
   return (
     <CardShell
-      className={getQuotedTweetCardClassName(viewTweet)}
+      className={getQuotedTweetCardClassName(viewTweet, expandPreview)}
       ariaLabel={`Tweet by ${quotedTweet.authorName ?? 'unknown user'}`}
       onClick={openTweet}
       onKeyDown={onEnterOrSpace(openTweet)}
@@ -385,7 +396,7 @@ function QuotedTweetCard({
       <div
         className={cn(
           'min-w-0 overflow-hidden px-3 py-2',
-          getQuotedTweetMaxHeightClassName()
+          getQuotedTweetMaxHeightClassName(expandPreview)
         )}
       >
         <div className='flex min-w-0 items-center gap-1 text-[15px]'>
@@ -447,7 +458,7 @@ function QuotedTweetCard({
           <>
             <TweetText
               className='mt-1 text-[15px] leading-5 text-light-primary dark:text-dark-primary'
-              style={getQuotedTweetTextClampStyle()}
+              style={getQuotedTweetTextClampStyle(expandPreview)}
               text={quotedTweet.text}
             />
             <TweetTranslation
@@ -475,7 +486,8 @@ export function TweetEmbed({
   card,
   quotedTweet,
   viewTweet,
-  hideQuotedTweetMedia
+  hideQuotedTweetMedia,
+  expandQuotedTweet
 }: TweetEmbedProps): JSX.Element | null {
   if (!card && !quotedTweet) return null;
 
@@ -487,6 +499,7 @@ export function TweetEmbed({
           quotedTweet={quotedTweet}
           viewTweet={viewTweet}
           hideMedia={hideQuotedTweetMedia}
+          expanded={expandQuotedTweet}
         />
       )}
     </>

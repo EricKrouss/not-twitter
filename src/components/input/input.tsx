@@ -468,6 +468,8 @@ export function Input({
   const quotedTweetPreview = quoteTweet
     ? getQuotedTweetPreview(quoteTweet)
     : null;
+  const shouldCompactQuotedTweetPreview =
+    isUploadingImages || !!activeExternalCard;
 
   const inputLength = useMemo(
     () =>
@@ -571,9 +573,8 @@ export function Input({
                 <TweetEmbed
                   card={null}
                   quotedTweet={quotedTweetPreview}
-                  hideQuotedTweetMedia={
-                    isUploadingImages || !!activeExternalCard
-                  }
+                  hideQuotedTweetMedia={shouldCompactQuotedTweetPreview}
+                  expandQuotedTweet={!shouldCompactQuotedTweetPreview}
                 />
               </div>
             )}

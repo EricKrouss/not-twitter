@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import TextArea from 'react-textarea-autosize';
 import { AnimatePresence, motion } from 'framer-motion';
+import cn from 'clsx';
 import { useModal } from '@lib/hooks/useModal';
 import {
   getActiveHashtag,
@@ -298,7 +299,12 @@ export function InputForm({
     };
 
   return (
-    <div className='flex min-h-[48px] w-full min-w-0 flex-col justify-center gap-4'>
+    <div
+      className={cn(
+        'flex min-h-[48px] w-full min-w-0 flex-col justify-center',
+        quote ? 'gap-2.5' : 'gap-4'
+      )}
+    >
       <Modal
         modalClassName='max-w-xs bg-main-background w-full p-8 rounded-2xl'
         open={open}
@@ -313,7 +319,7 @@ export function InputForm({
           closeModal={closeModal}
         />
       </Modal>
-      <div className='flex min-w-0 flex-col gap-6'>
+      <div className={cn('flex min-w-0 flex-col', quote ? 'gap-3' : 'gap-6')}>
         {isVisibilityShown && (
           <motion.div className='relative self-start' {...fromTop}>
             <button
@@ -389,7 +395,9 @@ export function InputForm({
                   : "What's happening?"
               }
               onBlur={handleShowHideNav(true)}
-              minRows={loading ? 1 : modal && !isUploadingImages ? 3 : 1}
+              minRows={
+                loading ? 1 : modal && !isUploadingImages && !quote ? 3 : 1
+              }
               maxRows={isUploadingImages ? 5 : 15}
               onFocus={handleFormFocus}
               onPaste={handleImageUpload}
