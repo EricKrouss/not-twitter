@@ -9,6 +9,7 @@ import { QuoteTweetsFeed } from '@components/view/quote-tweets-feed';
 import { Loading } from '@components/ui/loading';
 import { Error } from '@components/ui/error';
 import type { ReactElement, ReactNode } from 'react';
+import type { User } from '@lib/types/user';
 
 function getRouteParam(value: string | string[] | undefined): string | null {
   if (Array.isArray(value)) return value[0] ?? null;
@@ -20,7 +21,7 @@ export default function ProfileTweetQuoteTweets(): JSX.Element {
   const actor = getRouteParam(routeQuery.actor);
   const rkey = getRouteParam(routeQuery.rkey);
 
-  const { data: userProfile, error: profileError } = useSWR(
+  const { data: userProfile, error: profileError } = useSWR<User | null, Error>(
     actor ? ['user-profile', actor] : null,
     () => getUser(actor!)
   );

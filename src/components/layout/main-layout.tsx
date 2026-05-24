@@ -198,7 +198,7 @@ export function MainLayout({ children }: LayoutProps): JSX.Element {
           e.preventDefault();
           window.dispatchEvent(new CustomEvent('open-tweet-modal'));
           break;
-        case '/':
+        case '/': {
           const searchInput = document.querySelector('input[placeholder*="Search"]') as HTMLInputElement;
           if (searchInput) {
             e.preventDefault();
@@ -206,6 +206,7 @@ export function MainLayout({ children }: LayoutProps): JSX.Element {
             searchInput.select();
           }
           break;
+        }
         case 'j':
           e.preventDefault();
           handleNextTweet();
@@ -214,7 +215,7 @@ export function MainLayout({ children }: LayoutProps): JSX.Element {
           e.preventDefault();
           handlePrevTweet();
           break;
-        case ' ': // Space
+        case ' ': { // Space
           const currentSelectedForSpace = document.querySelector('.tweet-article.selected-tweet');
           const videoInSelected = currentSelectedForSpace?.querySelector('video') as HTMLVideoElement;
           if (videoInSelected) {
@@ -223,6 +224,7 @@ export function MainLayout({ children }: LayoutProps): JSX.Element {
             else videoInSelected.pause();
           }
           break;
+        }
         case 'l':
           e.preventDefault();
           clickButton('.tweet-article.selected-tweet button[aria-label="Like"], .tweet-article.selected-tweet button[aria-label="Unlike"]');
@@ -261,7 +263,7 @@ export function MainLayout({ children }: LayoutProps): JSX.Element {
           e.preventDefault();
           clickButton('.tweet-article.selected-tweet img[src*="preview"], .tweet-article.selected-tweet img[src*="blob"], .tweet-article.selected-tweet img');
           break;
-        case 'Enter':
+        case 'Enter': {
           const activeTweet = document.querySelector('.tweet-article.selected-tweet');
           if (activeTweet) {
             const link = (activeTweet.querySelector('a.hover-card') ??
@@ -274,7 +276,8 @@ export function MainLayout({ children }: LayoutProps): JSX.Element {
             }
           }
           break;
-        case 'm':
+        }
+        case 'm': {
           const activeTweetForMute = document.querySelector('.tweet-article.selected-tweet');
           const videoInMute = activeTweetForMute?.querySelector('video') as HTMLVideoElement;
           if (videoInMute) {
@@ -282,6 +285,7 @@ export function MainLayout({ children }: LayoutProps): JSX.Element {
             videoInMute.muted = !videoInMute.muted;
           }
           break;
+        }
         case 'g':
         case 'G':
           isGKeyPressedRef.current = true;

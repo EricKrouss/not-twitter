@@ -14,6 +14,7 @@ import { Loading } from '@components/ui/loading';
 import { Error } from '@components/ui/error';
 import type { ReactElement, ReactNode } from 'react';
 import type { TweetThreadPage } from '@lib/atproto/backend';
+import type { User } from '@lib/types/user';
 
 function getRouteParam(value: string | string[] | undefined): string | null {
   if (Array.isArray(value)) return value[0] ?? null;
@@ -26,7 +27,7 @@ export default function ProfileTweetId(): JSX.Element {
   const rkey = getRouteParam(routeQuery.rkey);
 
   // We need to resolve the actor (handle) to get the DID, then construct the AT URI: at://{did}/app.bsky.feed.post/{rkey}
-  const { data: userProfile, error: profileError } = useSWR(
+  const { data: userProfile, error: profileError } = useSWR<User | null, Error>(
     actor ? ['user-profile', actor] : null,
     () => getUser(actor!)
   );
