@@ -27,6 +27,7 @@ import {
   type ComAtprotoModerationDefs,
   type ModerationOpts
 } from '@atproto/api';
+import { TID, type JsonValue } from '@atproto/common-web';
 import {
   BlobRef as AtprotoBlobRef,
   jsonToLex as atprotoJsonToLex
@@ -45,7 +46,6 @@ import {
 } from './identity';
 import { Timestamp } from './timestamp';
 import type { BlobRef as LexiconBlobRef } from '@atproto/lexicon';
-import type { JsonValue } from '@atproto/common-web';
 import type { OAuthSession } from '@atproto/oauth-client';
 import type { Bookmark } from '@lib/types/bookmark';
 import type { ImagesPreview, FilesWithId } from '@lib/types/file';
@@ -336,6 +336,10 @@ type AppViewFeedGeneratorResponse = {
 type AppViewFeedGeneratorsResponse = {
   feeds: AppBskyFeedDefs.GeneratorView[];
 };
+type AppViewFeedGeneratorSearchResponse = {
+  cursor?: string;
+  feeds: AppBskyFeedDefs.GeneratorView[];
+};
 type AppViewPostsResponse = {
   posts: AppBskyFeedDefs.PostView[];
 };
@@ -380,6 +384,19 @@ export type SubscribedHomeFeed = {
   creatorName: string;
   creatorUsername: string;
   pinned: boolean;
+};
+
+export type FeedBrowserFeed = SubscribedHomeFeed & {
+  editable: boolean;
+  href: string;
+  indexedAt: string | null;
+  likeCount: number;
+  saved: boolean;
+};
+
+export type FeedSearchPage = {
+  feeds: FeedBrowserFeed[];
+  cursor: string | null;
 };
 
 export type TweetStatsType = 'retweets' | 'likes' | 'quotes';
@@ -3346,19 +3363,37 @@ export async function setDefaultQuoteSetting(
   return getBlueskySettings();
 }
 
-export async function setInterestsSetting(
-  tags: string[]
-): Promise<BlueskySettings> {
-  const safeTags = Array.from(
+function normalizeInterestTags(tags: string[]): string[] {
+  return Array.from(
     new Set(
       tags
         .map((tag) => tag.trim().replace(/^#/, '').toLowerCase())
         .filter((tag) => /^[a-z0-9][a-z0-9-]{0,63}$/.test(tag))
     )
   ).slice(0, 20);
+}
+
+export async function getInterestsSetting(): Promise<string[]> {
+  const prefs = await getAgent().getPreferences();
+
+  return prefs.interests.tags;
+}
+
+export async function updateInterestsSetting(
+  tags: string[]
+): Promise<string[]> {
+  const safeTags = normalizeInterestTags(tags);
 
   await getAgent().setInterestsPref({ tags: safeTags });
   notify();
+
+  return safeTags;
+}
+
+export async function setInterestsSetting(
+  tags: string[]
+): Promise<BlueskySettings> {
+  await updateInterestsSetting(tags);
 
   return getBlueskySettings();
 }
@@ -3747,12 +3782,13 @@ function mapProfile(profile: ActorProfileView): User {
     verified: (existing?.verified ?? false) || hasProfileVerification(profile),
     following,
     followers,
-    followingCount:
-      isCurrentUser
-        ? existing?.followingCount ?? detailedProfile.followsCount ?? following.length
-        : detailedProfile.followsCount ??
-          existing?.followingCount ??
-          following.length,
+    followingCount: isCurrentUser
+      ? existing?.followingCount ??
+        detailedProfile.followsCount ??
+        following.length
+      : detailedProfile.followsCount ??
+        existing?.followingCount ??
+        following.length,
     followersCount:
       localViewerFollowsTarget !== undefined && existing
         ? existing.followersCount
@@ -4776,6 +4812,10 @@ function isFeedGeneratorUri(uri: string): boolean {
   return /^at:\/\/[^/]+\/app\.bsky\.feed\.generator\/[^/]+$/.test(uri);
 }
 
+function isFeedListUri(uri: string): boolean {
+  return /^at:\/\/[^/]+\/app\.bsky\.graph\.list\/[^/]+$/.test(uri);
+}
+
 function getFeedGeneratorFallbackName(uri: string): string {
   const rkey = getRkeyFromAtUri(uri);
   if (!rkey) return 'Feed';
@@ -4783,6 +4823,50 @@ function getFeedGeneratorFallbackName(uri: string): string {
   return rkey
     .replace(/[-_]+/g, ' ')
     .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function normalizeFeedLabel(label: string): string {
+  return label.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function isReservedHomeFeedName(label: string): boolean {
+  const normalizedLabel = normalizeFeedLabel(label);
+
+  return (
+    normalizedLabel === 'discover' ||
+    normalizedLabel === 'for you' ||
+    normalizedLabel === 'for-you'
+  );
+}
+
+function isReservedHomeFeed(
+  savedFeed: AppBskyActorDefs.SavedFeed,
+  generator?: AppBskyFeedDefs.GeneratorView
+): boolean {
+  if (savedFeed.type === 'timeline') return true;
+  if (savedFeed.type !== 'feed') return false;
+
+  const fallbackName = getFeedGeneratorFallbackName(savedFeed.value);
+  const displayName = generator?.displayName ?? fallbackName;
+
+  return (
+    isReservedHomeFeedName(displayName) ||
+    getRkeyFromAtUri(savedFeed.value) === DISCOVER_HOME_FEED_RKEY
+  );
+}
+
+function getFeedGeneratorHref(
+  feedUri: string,
+  generator?: AppBskyFeedDefs.GeneratorView
+): string {
+  const actor = generator?.creator.handle ?? getRepoFromAtUri(feedUri);
+  const rkey = getRkeyFromAtUri(feedUri);
+
+  if (!actor || !rkey) return getBskyWebUrl(feedUri);
+
+  return `/profile/${encodeURIComponent(actor)}/feed/${encodeURIComponent(
+    rkey
+  )}`;
 }
 
 function mapSubscribedHomeFeed(
@@ -4816,6 +4900,55 @@ function mapSubscribedHomeFeed(
   };
 }
 
+function mapFeedBrowserFeed(
+  savedFeed: AppBskyActorDefs.SavedFeed | null,
+  generator: AppBskyFeedDefs.GeneratorView
+): FeedBrowserFeed {
+  const feedId = savedFeed?.id ?? generator.uri;
+  const pinned = savedFeed?.pinned ?? false;
+  const reserved = savedFeed ? isReservedHomeFeed(savedFeed, generator) : false;
+
+  return {
+    id: feedId,
+    type: 'feed',
+    uri: generator.uri,
+    displayName: generator.displayName,
+    description: generator.description ?? null,
+    avatar: generator.avatar ?? null,
+    creatorName: generator.creator.displayName ?? generator.creator.handle,
+    creatorUsername: generator.creator.handle,
+    pinned,
+    editable: !!savedFeed && !reserved,
+    href: getFeedGeneratorHref(generator.uri, generator),
+    indexedAt: generator.indexedAt ?? null,
+    likeCount: generator.likeCount ?? 0,
+    saved: !!savedFeed
+  };
+}
+
+function mapSavedFeedBrowserFallback(
+  savedFeed: AppBskyActorDefs.SavedFeed
+): FeedBrowserFeed {
+  const displayName = getFeedGeneratorFallbackName(savedFeed.value);
+
+  return {
+    id: savedFeed.id,
+    type: 'feed',
+    uri: savedFeed.value,
+    displayName,
+    description: null,
+    avatar: null,
+    creatorName: 'Bluesky',
+    creatorUsername: getRepoFromAtUri(savedFeed.value) ?? 'bsky.app',
+    pinned: savedFeed.pinned,
+    editable: !isReservedHomeFeed(savedFeed),
+    href: getFeedGeneratorHref(savedFeed.value),
+    indexedAt: null,
+    likeCount: 0,
+    saved: true
+  };
+}
+
 async function getFeedGeneratorsByUri(
   feedUris: string[]
 ): Promise<Map<string, AppBskyFeedDefs.GeneratorView>> {
@@ -4841,18 +4974,35 @@ async function getFeedGeneratorsByUri(
   return generators;
 }
 
-function getLegacySavedHomeFeed(
+function getLegacySavedFeed(
   uri: string,
   pinned: boolean
 ): AppBskyActorDefs.SavedFeed | null {
-  if (!isFeedGeneratorUri(uri)) return null;
+  const type = isFeedGeneratorUri(uri)
+    ? 'feed'
+    : isFeedListUri(uri)
+    ? 'list'
+    : null;
+
+  if (!type) return null;
 
   return {
     id: uri,
-    type: 'feed',
+    type,
     value: uri,
     pinned
   };
+}
+
+function isSavedFeedItem(value: unknown): value is AppBskyActorDefs.SavedFeed {
+  if (!isPlainObject(value)) return false;
+
+  return (
+    typeof value.id === 'string' &&
+    typeof value.type === 'string' &&
+    typeof value.value === 'string' &&
+    typeof value.pinned === 'boolean'
+  );
 }
 
 function isSavedFeedsPrefV2Preference(
@@ -4876,43 +5026,144 @@ function isSavedFeedsPrefPreference(
   );
 }
 
+function findLastSavedFeedsPrefV2(
+  preferences: AppBskyActorDefs.Preferences
+): AppBskyActorDefs.SavedFeedsPrefV2 | null {
+  for (let index = preferences.length - 1; index >= 0; index -= 1) {
+    const preference = preferences[index];
+
+    if (isSavedFeedsPrefV2Preference(preference)) return preference;
+  }
+
+  return null;
+}
+
+function findLastSavedFeedsPref(
+  preferences: AppBskyActorDefs.Preferences
+): AppBskyActorDefs.SavedFeedsPref | null {
+  for (let index = preferences.length - 1; index >= 0; index -= 1) {
+    const preference = preferences[index];
+
+    if (isSavedFeedsPrefPreference(preference)) return preference;
+  }
+
+  return null;
+}
+
+function uniqueSavedFeedItems(
+  items: AppBskyActorDefs.SavedFeed[]
+): AppBskyActorDefs.SavedFeed[] {
+  const seenIds = new Set<string>();
+  const seenValues = new Set<string>();
+  const savedFeeds: AppBskyActorDefs.SavedFeed[] = [];
+
+  for (const item of items) {
+    if (seenIds.has(item.id) || seenValues.has(item.value)) continue;
+
+    seenIds.add(item.id);
+    seenValues.add(item.value);
+    savedFeeds.push(item);
+  }
+
+  return savedFeeds;
+}
+
+function getSavedFeedItemsFromPreferences(
+  preferences: AppBskyActorDefs.Preferences
+): AppBskyActorDefs.SavedFeed[] {
+  const v2Preference = findLastSavedFeedsPrefV2(preferences);
+
+  if (v2Preference)
+    return uniqueSavedFeedItems(v2Preference.items.filter(isSavedFeedItem));
+
+  const legacyPreference = findLastSavedFeedsPref(preferences);
+  if (!legacyPreference) return [];
+
+  const legacyFeeds = [
+    ...legacyPreference.pinned.map((uri) => getLegacySavedFeed(uri, true)),
+    ...legacyPreference.saved.map((uri) =>
+      getLegacySavedFeed(uri, legacyPreference.pinned.includes(uri))
+    )
+  ].filter((feed): feed is AppBskyActorDefs.SavedFeed => !!feed);
+
+  return uniqueSavedFeedItems(legacyFeeds);
+}
+
 function getSavedHomeFeedsFromPreferences(
   preferences: AppBskyActorDefs.Preferences
 ): AppBskyActorDefs.SavedFeed[] {
-  const savedFeeds: AppBskyActorDefs.SavedFeed[] = [];
-  const legacyPinnedUris: string[] = [];
-  const legacySavedUris: string[] = [];
-  const seenFeedUris = new Set<string>();
-  const appendFeed = (feed: AppBskyActorDefs.SavedFeed): void => {
-    if (feed.type !== 'feed' || !isFeedGeneratorUri(feed.value)) return;
-    if (seenFeedUris.has(feed.value)) return;
+  return getSavedFeedItemsFromPreferences(preferences).filter(
+    (feed) => feed.type === 'feed' && isFeedGeneratorUri(feed.value)
+  );
+}
 
-    seenFeedUris.add(feed.value);
-    savedFeeds.push(feed);
+async function getSavedFeedState(): Promise<{
+  items: AppBskyActorDefs.SavedFeed[];
+  preferences: AppBskyActorDefs.Preferences;
+}> {
+  const response = await getAgent().app.bsky.actor.getPreferences();
+  const preferences = response.data.preferences;
+
+  return {
+    items: getSavedFeedItemsFromPreferences(preferences),
+    preferences
   };
+}
 
-  for (const preference of preferences) {
-    if (isSavedFeedsPrefV2Preference(preference)) {
-      preference.items.forEach(appendFeed);
-      continue;
-    }
+function getSavedFeedUriArrays(items: AppBskyActorDefs.SavedFeed[]): {
+  pinned: string[];
+  saved: string[];
+} {
+  const pinned: string[] = [];
+  const saved: string[] = [];
 
-    if (isSavedFeedsPrefPreference(preference)) {
-      legacyPinnedUris.push(...preference.pinned);
-      legacySavedUris.push(...preference.saved);
-    }
+  for (const item of items) {
+    if (item.type !== 'feed' && item.type !== 'list') continue;
+
+    saved.push(item.value);
+    if (item.pinned) pinned.push(item.value);
   }
 
-  legacyPinnedUris.forEach((uri) => {
-    const feed = getLegacySavedHomeFeed(uri, true);
-    if (feed) appendFeed(feed);
-  });
-  legacySavedUris.forEach((uri) => {
-    const feed = getLegacySavedHomeFeed(uri, legacyPinnedUris.includes(uri));
-    if (feed) appendFeed(feed);
-  });
+  return { pinned, saved };
+}
 
-  return savedFeeds;
+async function putSavedFeedItems(
+  preferences: AppBskyActorDefs.Preferences,
+  items: AppBskyActorDefs.SavedFeed[]
+): Promise<void> {
+  const savedFeedsPrefV2: AppBskyActorDefs.SavedFeedsPrefV2 = {
+    $type: 'app.bsky.actor.defs#savedFeedsPrefV2',
+    items: uniqueSavedFeedItems(items)
+  };
+  const savedFeedsPref = findLastSavedFeedsPref(preferences);
+  const updatedPreferences: AppBskyActorDefs.Preferences = [
+    ...preferences.filter(
+      (preference) => !isSavedFeedsPrefV2Preference(preference)
+    ),
+    savedFeedsPrefV2 as AppBskyActorDefs.Preferences[number]
+  ];
+
+  if (savedFeedsPref) {
+    const v1Preference: AppBskyActorDefs.SavedFeedsPref = {
+      ...savedFeedsPref,
+      ...getSavedFeedUriArrays(savedFeedsPrefV2.items)
+    };
+    const nextPreferences: AppBskyActorDefs.Preferences = [
+      ...updatedPreferences.filter(
+        (preference) => !isSavedFeedsPrefPreference(preference)
+      ),
+      v1Preference as AppBskyActorDefs.Preferences[number]
+    ];
+
+    await getAgent().app.bsky.actor.putPreferences({
+      preferences: nextPreferences
+    });
+    return;
+  }
+
+  await getAgent().app.bsky.actor.putPreferences({
+    preferences: updatedPreferences
+  });
 }
 
 export async function getSubscribedHomeFeeds(): Promise<SubscribedHomeFeed[]> {
@@ -4926,6 +5177,159 @@ export async function getSubscribedHomeFeeds(): Promise<SubscribedHomeFeed[]> {
   return savedFeeds.map((savedFeed) =>
     mapSubscribedHomeFeed(savedFeed, generators.get(savedFeed.value))
   );
+}
+
+export async function getFeedBrowserFeeds(): Promise<FeedBrowserFeed[]> {
+  const { items } = await getSavedFeedState();
+  const savedFeeds = items.filter(
+    (feed) => feed.type === 'feed' && isFeedGeneratorUri(feed.value)
+  );
+  const generators = await getFeedGeneratorsByUri(
+    Array.from(new Set(savedFeeds.map(({ value }) => value)))
+  );
+
+  return savedFeeds.map((savedFeed) => {
+    const generator = generators.get(savedFeed.value);
+
+    return generator
+      ? mapFeedBrowserFeed(savedFeed, generator)
+      : mapSavedFeedBrowserFallback(savedFeed);
+  });
+}
+
+export async function searchFeedGenerators(
+  searchQuery = '',
+  cursor?: string,
+  limit = 25
+): Promise<FeedSearchPage> {
+  const [{ items }, response] = await Promise.all([
+    getSavedFeedState(),
+    callAppQueryXrpc<AppViewFeedGeneratorSearchResponse>(
+      'app.bsky.unspecced.getPopularFeedGenerators',
+      {
+        query: searchQuery.trim() || undefined,
+        cursor,
+        limit: clampAppViewLimit(limit)
+      }
+    )
+  ]);
+  const savedFeedsByUri = new Map(
+    items
+      .filter((feed) => feed.type === 'feed')
+      .map((feed) => [feed.value, feed])
+  );
+
+  return {
+    feeds: response.feeds.map((generator) =>
+      mapFeedBrowserFeed(savedFeedsByUri.get(generator.uri) ?? null, generator)
+    ),
+    cursor: response.cursor ?? null
+  };
+}
+
+export async function addSavedHomeFeed(
+  feedUri: string
+): Promise<FeedBrowserFeed[]> {
+  if (!isFeedGeneratorUri(feedUri)) throw new Error('Choose a valid feed.');
+
+  const { items, preferences } = await getSavedFeedState();
+
+  if (!items.some((item) => item.type === 'feed' && item.value === feedUri)) {
+    const generators = await getFeedGeneratorsByUri([feedUri]);
+    if (!generators.has(feedUri))
+      throw new Error('This feed is not available right now.');
+
+    await putSavedFeedItems(preferences, [
+      ...items,
+      {
+        id: TID.nextStr(),
+        type: 'feed',
+        value: feedUri,
+        pinned: true
+      }
+    ]);
+    notify();
+  }
+
+  return getFeedBrowserFeeds();
+}
+
+export async function removeSavedHomeFeed(
+  feedId: string
+): Promise<FeedBrowserFeed[]> {
+  const { items, preferences } = await getSavedFeedState();
+  const feed = items.find((item) => item.id === feedId);
+
+  if (!feed || feed.type !== 'feed') return getFeedBrowserFeeds();
+
+  const generators = await getFeedGeneratorsByUri([feed.value]);
+
+  if (isReservedHomeFeed(feed, generators.get(feed.value)))
+    throw new Error('For you and Following stay fixed on Home.');
+
+  await putSavedFeedItems(
+    preferences,
+    items.filter((item) => item.id !== feedId)
+  );
+  notify();
+
+  return getFeedBrowserFeeds();
+}
+
+export async function reorderSavedHomeFeeds(
+  feedIds: string[]
+): Promise<FeedBrowserFeed[]> {
+  const { items, preferences } = await getSavedFeedState();
+  const savedFeedUris = items
+    .filter((item) => item.type === 'feed')
+    .map(({ value }) => value);
+  const generators = await getFeedGeneratorsByUri(
+    Array.from(new Set(savedFeedUris))
+  );
+  const editableFeeds = items.filter(
+    (item) =>
+      item.type === 'feed' &&
+      isFeedGeneratorUri(item.value) &&
+      !isReservedHomeFeed(item, generators.get(item.value))
+  );
+  const editableFeedsById = new Map(
+    editableFeeds.map((feed) => [feed.id, feed])
+  );
+  const requestedIds = Array.from(new Set(feedIds));
+
+  if (requestedIds.length !== editableFeeds.length)
+    throw new Error('Feed order is out of date. Refresh and try again.');
+
+  const orderedEditableFeeds = requestedIds.map((feedId) => {
+    const feed = editableFeedsById.get(feedId);
+
+    if (!feed)
+      throw new Error('Feed order is out of date. Refresh and try again.');
+
+    return feed;
+  });
+  const editableIds = new Set(editableFeeds.map(({ id }) => id));
+  const nextItems: AppBskyActorDefs.SavedFeed[] = [];
+  let insertedEditableFeeds = false;
+
+  for (const item of items) {
+    if (!editableIds.has(item.id)) {
+      nextItems.push(item);
+      continue;
+    }
+
+    if (!insertedEditableFeeds) {
+      nextItems.push(...orderedEditableFeeds);
+      insertedEditableFeeds = true;
+    }
+  }
+
+  if (!insertedEditableFeeds) nextItems.push(...orderedEditableFeeds);
+
+  await putSavedFeedItems(preferences, nextItems);
+  notify();
+
+  return getFeedBrowserFeeds();
 }
 
 export async function getSubscribedHomeFeedPage(
@@ -7433,8 +7837,11 @@ async function resolveFollowUri(targetDid: string): Promise<string | null> {
   if (cachedFollowUri) return cachedFollowUri;
 
   const viewerFollowUri =
-    (await getAppViewAgent().getProfile({ actor: targetDid }).catch(() => null))
-      ?.data.viewer?.following ?? null;
+    (
+      await getAppViewAgent()
+        .getProfile({ actor: targetDid })
+        .catch(() => null)
+    )?.data.viewer?.following ?? null;
 
   if (viewerFollowUri) {
     followUriCache.set(targetDid, viewerFollowUri);
@@ -7454,10 +7861,7 @@ async function resolveFollowUri(targetDid: string): Promise<string | null> {
     });
 
     for (const record of response.data.records) {
-      if (
-        isPlainObject(record.value) &&
-        record.value.subject === targetDid
-      ) {
+      if (isPlainObject(record.value) && record.value.subject === targetDid) {
         followUriCache.set(targetDid, record.uri);
         return record.uri;
       }

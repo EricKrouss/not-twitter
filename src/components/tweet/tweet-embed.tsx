@@ -9,8 +9,14 @@ import { HeroIcon } from '@components/ui/hero-icon';
 import { NextImage } from '@components/ui/next-image';
 import { TweetText } from './tweet-text';
 import { TweetTranslation } from './tweet-translation';
-import type { KeyboardEvent, MouseEvent, ReactNode } from 'react';
+import type {
+  CSSProperties,
+  KeyboardEvent,
+  MouseEvent,
+  ReactNode
+} from 'react';
 import type { EmbeddedTweet, TweetCard } from '@lib/types/tweet';
+import type { ImageData } from '@lib/types/file';
 import type { YouTubeVideoInfo } from '@lib/youtube';
 
 type TweetEmbedProps = {
@@ -26,6 +32,12 @@ type LinkCardProps = {
 };
 
 type CardEvent = MouseEvent<HTMLElement> | KeyboardEvent<HTMLElement>;
+
+const quotedTweetPreviewTextStyleBase: CSSProperties = {
+  display: '-webkit-box',
+  WebkitBoxOrient: 'vertical',
+  overflow: 'hidden'
+};
 
 function stopOuterTweet(event: CardEvent): void {
   event.preventDefault();
@@ -267,6 +279,76 @@ function TweetUnavailableCard({
   );
 }
 
+function isVideoLikeMedia({ src, type }: ImageData): boolean {
+  return (
+    !!type?.includes('video') || /\.(m3u8|mp4|mov|m4v|webm)($|\?)/i.test(src)
+  );
+}
+
+function isGifLikeMedia({ src, type }: ImageData): boolean {
+  return type === 'gif' || !!type?.includes('gif') || /\.gif($|\?)/i.test(src);
+}
+
+function QuotedTweetMediaThumbnail({
+  media
+}: {
+  media: ImageData;
+}): JSX.Element {
+  const isVideo = isVideoLikeMedia(media);
+  const isGif = isGifLikeMedia(media);
+  const thumbnailSrc = isVideo ? media.poster : media.poster ?? media.src;
+
+  return (
+    <div
+      className='dark:bg-dark-hover relative h-[86px] w-[86px] shrink-0 overflow-hidden
+                 rounded-xl border border-light-border
+                 bg-light-line-reply dark:border-dark-border xs:h-[112px] xs:w-[112px]'
+    >
+      {thumbnailSrc ? (
+        <NextImage
+          className='absolute inset-0'
+          imgClassName='object-cover object-center'
+          layout='fill'
+          src={thumbnailSrc}
+          alt={media.alt}
+          useSkeleton
+        />
+      ) : (
+        <div className='flex h-full w-full items-center justify-center text-light-secondary dark:text-dark-secondary'>
+          <HeroIcon className='h-7 w-7' iconName='PlayIcon' solid />
+        </div>
+      )}
+      {(isVideo || isGif) && (
+        <span
+          className='absolute bottom-1.5 left-1.5 flex min-h-[20px] items-center rounded-sm
+                     bg-black/75 px-1.5 py-0.5 text-[11px] font-bold leading-4 text-white'
+        >
+          {isGif ? (
+            'GIF'
+          ) : (
+            <HeroIcon className='h-3 w-3' iconName='PlayIcon' solid />
+          )}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function getQuotedTweetMaxHeightClassName(): string {
+  return 'max-h-[168px]';
+}
+
+function getQuotedTweetCardClassName(viewTweet?: boolean): string {
+  return cn(viewTweet && 'mt-3', getQuotedTweetMaxHeightClassName());
+}
+
+function getQuotedTweetTextClampStyle(): CSSProperties {
+  return {
+    ...quotedTweetPreviewTextStyleBase,
+    WebkitLineClamp: 5
+  };
+}
+
 function QuotedTweetCard({
   quotedTweet,
   viewTweet,
@@ -284,6 +366,7 @@ function QuotedTweetCard({
   const quotedTweetCard = hideMedia
     ? null
     : quotedTweet.card ?? createYouTubeCardFromText(quotedTweet.text);
+  const compactMedia = hideMedia ? quotedTweet.images?.[0] : null;
   const tweetHref = quotedTweet.id
     ? getTweetPath(quotedTweet.id, quotedTweet.authorUsername)
     : null;
@@ -294,12 +377,17 @@ function QuotedTweetCard({
 
   return (
     <CardShell
-      className={cn(viewTweet && 'mt-3')}
+      className={getQuotedTweetCardClassName(viewTweet)}
       ariaLabel={`Tweet by ${quotedTweet.authorName ?? 'unknown user'}`}
       onClick={openTweet}
       onKeyDown={onEnterOrSpace(openTweet)}
     >
-      <div className='min-w-0 px-3 py-2'>
+      <div
+        className={cn(
+          'min-w-0 overflow-hidden px-3 py-2',
+          getQuotedTweetMaxHeightClassName()
+        )}
+      >
         <div className='flex min-w-0 items-center gap-1 text-[15px]'>
           {quotedTweet.authorAvatar && (
             <NextImage
@@ -337,10 +425,29 @@ function QuotedTweetCard({
             </>
           )}
         </div>
-        {quotedTweet.text && (
+        {compactMedia ? (
+          <div className='mt-2 flex min-w-0 gap-3'>
+            <QuotedTweetMediaThumbnail media={compactMedia} />
+            {quotedTweet.text && (
+              <div className='min-w-0 flex-1 py-0.5'>
+                <TweetText
+                  className='text-[15px] leading-5 text-light-primary dark:text-dark-primary'
+                  style={getQuotedTweetTextClampStyle()}
+                  text={quotedTweet.text}
+                />
+                <TweetTranslation
+                  className='text-[14px] leading-5'
+                  text={quotedTweet.text}
+                  langs={quotedTweet.langs}
+                />
+              </div>
+            )}
+          </div>
+        ) : quotedTweet.text ? (
           <>
             <TweetText
-              className='mt-1 text-[15px] text-light-primary dark:text-dark-primary'
+              className='mt-1 text-[15px] leading-5 text-light-primary dark:text-dark-primary'
+              style={getQuotedTweetTextClampStyle()}
               text={quotedTweet.text}
             />
             <TweetTranslation
@@ -349,7 +456,7 @@ function QuotedTweetCard({
               langs={quotedTweet.langs}
             />
           </>
-        )}
+        ) : null}
         {!hideMedia && quotedTweet.images && (
           <ImagePreview
             tweet

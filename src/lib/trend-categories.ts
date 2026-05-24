@@ -14,8 +14,12 @@ const PROVIDED_CATEGORY_KEYS = ['category', 'categoryName', 'topicCategory'];
 
 const CATEGORY_DISPLAY_NAMES: Record<string, string> = {
   ai: 'Technology',
+  arts: 'Arts',
+  'arts/culture': 'Arts',
+  'arts culture': 'Arts',
   business: 'Business',
   entertainment: 'Entertainment',
+  events: 'Events',
   feeds: 'Feeds',
   gaming: 'Gaming',
   lifestyle: 'Lifestyle',
@@ -32,12 +36,31 @@ const CATEGORY_DISPLAY_NAMES: Record<string, string> = {
 const TREND_CATEGORY_OVERRIDES: Record<string, string> = {
   'andy burnham': 'Politics',
   'ben palmer': 'Politics',
+  'bfc registration': 'Events',
+  'blue sky art show': 'Arts',
+  'bluesky art show': 'Arts',
+  'canadian gp': 'Sports',
+  'colbert show': 'Entertainment',
   'digital art': 'Entertainment',
   desantis: 'Politics',
-  'epstein files': 'Entertainment',
+  'epstein files': 'Politics',
+  'epstein scandals': 'Politics',
+  'european cities': 'World',
+  'formula 1': 'Sports',
   'gop bill delay': 'Politics',
+  habs: 'Sports',
+  'hull fc': 'Sports',
   'ice protests': 'Politics',
+  'indie games': 'Gaming',
+  knicks: 'Sports',
+  'missile threat': 'World',
+  'nba playoffs': 'Sports',
+  royals: 'Sports',
   'stephen colbert': 'Entertainment',
+  svengoolie: 'Entertainment',
+  'tall photography': 'Arts',
+  texier: 'Sports',
+  'the mandalorian': 'Entertainment',
   'trans rights': 'Politics'
 };
 
@@ -48,11 +71,16 @@ const TREND_CATEGORY_RULES: readonly TrendCategoryRule[] = [
       'conflict',
       'diplomacy',
       'foreign policy',
+      'geopolitics',
       'global',
+      'iran',
       'middle east',
+      'missile',
       'nato',
+      'nuclear',
       'palestine',
       'russia',
+      'treaty',
       'ukraine',
       'war',
       'world'
@@ -64,6 +92,7 @@ const TREND_CATEGORY_RULES: readonly TrendCategoryRule[] = [
       'administration',
       'biden',
       'bill',
+      'cabinet',
       'civil rights',
       'congress',
       'court',
@@ -90,6 +119,7 @@ const TREND_CATEGORY_RULES: readonly TrendCategoryRule[] = [
       'protest',
       'republican',
       'senate',
+      'scandal',
       'supreme court',
       'transgender',
       'trump',
@@ -102,15 +132,24 @@ const TREND_CATEGORY_RULES: readonly TrendCategoryRule[] = [
       'baseball',
       'basketball',
       'champions league',
+      'championship',
       'f1',
+      'fc',
       'football',
+      'grand prix',
+      'hockey',
       'mlb',
       'nba',
       'nfl',
       'nhl',
       'olympics',
+      'playoffs',
+      'rugby',
       'soccer',
       'sports',
+      'uefa',
+      'uwcl',
+      'wrestling',
       'wnba',
       'world cup'
     ]
@@ -128,6 +167,7 @@ const TREND_CATEGORY_RULES: readonly TrendCategoryRule[] = [
       'comedy',
       'film',
       'films',
+      'mando',
       'movie',
       'movies',
       'music',
@@ -135,6 +175,7 @@ const TREND_CATEGORY_RULES: readonly TrendCategoryRule[] = [
       'pop culture',
       'review',
       'show',
+      'star wars',
       'television',
       'tv'
     ]
@@ -145,6 +186,7 @@ const TREND_CATEGORY_RULES: readonly TrendCategoryRule[] = [
       'game dev',
       'game development',
       'gaming',
+      'indie game',
       'nintendo',
       'playstation',
       'steam',
@@ -180,6 +222,21 @@ const TREND_CATEGORY_RULES: readonly TrendCategoryRule[] = [
       'stocks',
       'tariff'
     ]
+  },
+  {
+    category: 'Arts',
+    keywords: [
+      'art show',
+      'painting',
+      'photo',
+      'photography',
+      'pixelart',
+      'watercolor'
+    ]
+  },
+  {
+    category: 'Events',
+    keywords: ['conference', 'convention', 'event', 'festival', 'tickets']
   },
   {
     category: 'Science',

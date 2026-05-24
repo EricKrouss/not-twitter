@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/router';
 import cn from 'clsx';
 import useSWR from 'swr';
 import { toast } from 'react-hot-toast';
@@ -102,6 +103,16 @@ const SETTINGS_NAV: SettingsNavItem[] = [
     iconName: 'PaintBrushIcon'
   }
 ];
+
+function getSettingsSection(
+  value: string | string[] | undefined
+): SettingsSection | null {
+  const section = Array.isArray(value) ? value[0] : value;
+
+  return SETTINGS_NAV.some(({ id }) => id === section)
+    ? (section as SettingsSection)
+    : null;
+}
 
 const CONTENT_LABELS: Readonly<
   { label: SettingsContentLabel; title: string; description: string }[]
@@ -210,8 +221,7 @@ const CONTENT_LABELS: Readonly<
   {
     label: 'spam',
     title: 'Spam',
-    description:
-      'Unwanted, repeated, or unrelated actions that bother users.'
+    description: 'Unwanted, repeated, or unrelated actions that bother users.'
   },
   {
     label: 'rumor',
@@ -719,6 +729,7 @@ function SettingsPanelHeader({
 export default function Settings(): JSX.Element {
   const { user, signInWithBluesky } = useAuth();
   const { isMobile } = useWindow();
+  const router = useRouter();
   const displayModal = useModal();
   const [activeSection, setActiveSection] =
     useState<SettingsSection>('account');
@@ -770,6 +781,16 @@ export default function Settings(): JSX.Element {
     setInterestInput(settings.interests.join(', '));
   }, [settings]);
 
+  useEffect(() => {
+    if (!router.isReady) return;
+
+    const section = getSettingsSection(router.query.section);
+    if (!section) return;
+
+    setActiveSection(section);
+    if (isMobile) setMobileDetailOpen(true);
+  }, [isMobile, router.isReady, router.query.section]);
+
   const activeTitle = useMemo(
     () => SETTINGS_NAV.find(({ id }) => id === activeSection)?.title ?? '',
     [activeSection]
@@ -815,6 +836,14 @@ export default function Settings(): JSX.Element {
   const handleSectionSelect = (section: SettingsSection): void => {
     setActiveSection(section);
     if (isMobile) setMobileDetailOpen(true);
+    void router.replace(
+      {
+        pathname: '/settings',
+        query: { section }
+      },
+      undefined,
+      { scroll: false, shallow: true }
+    );
   };
 
   const handleHandleSubmit = (event: FormEvent<HTMLFormElement>): void => {

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter } from 'next/router';
 import { AnimatePresence, motion } from 'framer-motion';
 import cn from 'clsx';
 import useSWR from 'swr';
@@ -235,9 +236,9 @@ function HomeTabs({
                   ? `min-w-[128px] flex-none px-5 text-light-primary
                      dark:text-dark-primary`
                   : `min-w-[128px] max-w-[170px] flex-1 px-4
-                     hover:max-w-none hover:flex-none hover:px-5
-                     focus-visible:max-w-none focus-visible:flex-none focus-visible:px-5
-                     text-light-secondary dark:text-dark-secondary`
+                     text-light-secondary hover:max-w-none hover:flex-none
+                     hover:px-5 focus-visible:max-w-none focus-visible:flex-none
+                     focus-visible:px-5 dark:text-dark-secondary`
               )}
               type='button'
               role='tab'
@@ -273,6 +274,7 @@ function HomeTabs({
 
 export default function Home(): JSX.Element {
   const { isMobile } = useWindow();
+  const { push } = useRouter();
   const { clearHomeBadge } = useLiveUpdates();
   const [activeTab, setActiveTab] = useState<HomeFeedTab>('following');
   const [feed, setFeed] = useState<TweetWithUser[]>([]);
@@ -429,9 +431,17 @@ export default function Home(): JSX.Element {
   const toggleTimelineSettings = (): void =>
     setTimelineSettingsOpen((open) => !open);
 
-  const switchToLatestTweets = (): void => {
-    setActiveTab('following');
+  const openFeedsBrowser = (): void => {
     setTimelineSettingsOpen(false);
+    void push('/feeds');
+  };
+
+  const openContentPreferences = (): void => {
+    setTimelineSettingsOpen(false);
+    void push({
+      pathname: '/settings',
+      query: { section: 'content' }
+    });
   };
 
   const showNewTweets = (): void => {
@@ -509,23 +519,28 @@ export default function Home(): JSX.Element {
                   <Button
                     className='accent-tab flex w-full items-center gap-3 rounded-none px-4 py-3
                                text-left hover:bg-light-primary/10 dark:hover:bg-dark-primary/10'
-                    onClick={switchToLatestTweets}
+                    onClick={openFeedsBrowser}
                   >
-                    <HeroIcon className='h-6 w-6' iconName='ArrowPathIcon' />
+                    <HeroIcon className='h-6 w-6' iconName='ListBulletIcon' />
                     <div>
-                      <p className='font-bold'>See latest Tweets instead</p>
+                      <p className='font-bold'>Manage feeds</p>
                       <p className='text-sm text-light-secondary dark:text-dark-secondary'>
-                        Show Tweets as they happen.
+                        Browse, add, and reorder Home timelines.
                       </p>
                     </div>
                   </Button>
                   <Button
-                    className='accent-tab flex w-full cursor-not-allowed items-center gap-3 rounded-none px-4 py-3
-                               text-left opacity-60 hover:bg-light-primary/10 dark:hover:bg-dark-primary/10'
-                    disabled
+                    className='accent-tab flex w-full items-center gap-3 rounded-none px-4 py-3
+                               text-left hover:bg-light-primary/10 dark:hover:bg-dark-primary/10'
+                    onClick={openContentPreferences}
                   >
                     <HeroIcon className='h-6 w-6' iconName='Cog6ToothIcon' />
-                    <p className='font-bold'>View content preferences</p>
+                    <div>
+                      <p className='font-bold'>View content preferences</p>
+                      <p className='text-sm text-light-secondary dark:text-dark-secondary'>
+                        Manage labels, interests, and feed filters.
+                      </p>
+                    </div>
                   </Button>
                 </motion.div>
               )}
