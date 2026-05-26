@@ -61,8 +61,8 @@ function SearchUserRow({
       onClick={(): void => onSelect(user)}
     >
       <NextImage
-        className='w-10 shrink-0'
-        imgClassName='rounded-full'
+        className='profile-picture w-10 shrink-0'
+        imgClassName='profile-picture'
         width={40}
         height={40}
         src={user.photoURL}

@@ -2,6 +2,7 @@ import Link from 'next/link';
 
 const footerLinks = [
   { label: 'Privacy Policy', href: '/privacy' },
+  { label: 'Help Center', href: '/help-center' },
   { label: 'Bluesky', href: 'https://bsky.app/' },
   { label: 'Repository', href: 'https://github.com/EricKrouss/not-twitter' }
 ];

@@ -96,14 +96,14 @@ export function UserKnownFollowers({
           <span className='flex shrink-0 -space-x-1.5' aria-hidden>
             {displayedFollowers.map(({ id, name, photoURL }, index) => (
               <span
-                className='relative flex h-5 w-5 overflow-hidden rounded-full border-2
+                className='profile-picture relative flex h-5 w-5 overflow-hidden border-2
                            border-main-background bg-main-background dark:border-main-background'
                 style={{ zIndex: displayedFollowers.length - index }}
                 key={id}
               >
                 <NextImage
                   useSkeleton
-                  imgClassName='rounded-full'
+                  imgClassName='profile-picture'
                   width={20}
                   height={20}
                   src={photoURL}

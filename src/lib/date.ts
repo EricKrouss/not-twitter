@@ -1,17 +1,9 @@
 import type { Timestamp } from '@lib/atproto/store';
 
-const RELATIVE_TIME_FORMATTER = new Intl.RelativeTimeFormat('en-gb', {
-  style: 'short',
-  numeric: 'auto'
-});
-
-type Units = Readonly<Partial<Record<Intl.RelativeTimeFormatUnit, number>>>;
-
-const UNITS: Units = {
-  day: 24 * 60 * 60 * 1000,
-  hour: 60 * 60 * 1000,
-  minute: 60 * 1000
-};
+const SECOND = 1000;
+const MINUTE = 60 * SECOND;
+const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
 
 export function formatDate(
   targetDate: Timestamp,
@@ -57,7 +49,7 @@ function getFullTime(date: Date): string {
 }
 
 function getPostTime(date: Date): string {
-  if (isToday(date)) return getRelativeTime(date);
+  if (isWithinLastDay(date)) return getRelativeTime(date);
   if (isYesterday(date))
     return new Intl.DateTimeFormat('en-gb', {
       day: 'numeric',
@@ -93,27 +85,19 @@ function getShortTime(date: Date): string {
 }
 
 function getRelativeTime(date: Date): string {
-  const relativeTime = calculateRelativeTime(date);
+  const elapsed = Date.now() - date.getTime();
 
-  if (relativeTime === 'now') return relativeTime;
+  if (elapsed < SECOND) return 'now';
+  if (elapsed < MINUTE) return `${Math.floor(elapsed / SECOND)}s`;
+  if (elapsed < HOUR) return `${Math.floor(elapsed / MINUTE)}m`;
 
-  const [number, unit] = relativeTime.split(' ');
-
-  return `${number}${unit[0]}`;
+  return `${Math.floor(elapsed / HOUR)}h`;
 }
 
-function calculateRelativeTime(date: Date): string {
-  const elapsed = +date - +new Date();
+function isWithinLastDay(date: Date): boolean {
+  const elapsed = Date.now() - date.getTime();
 
-  if (elapsed > 0) return 'now';
-
-  const unitsItems = Object.entries(UNITS) as [keyof Units, number][];
-
-  for (const [unit, millis] of unitsItems)
-    if (Math.abs(elapsed) > millis)
-      return RELATIVE_TIME_FORMATTER.format(Math.round(elapsed / millis), unit);
-
-  return RELATIVE_TIME_FORMATTER.format(Math.round(elapsed / 1000), 'second');
+  return elapsed >= 0 && elapsed < DAY;
 }
 
 function isToday(date: Date): boolean {

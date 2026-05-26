@@ -39,13 +39,13 @@ export function AccountAvatar({
   return (
     <figure
       className={cn(
-        'blur-picture pointer-events-none flex shrink-0 self-start',
+        'blur-picture profile-picture pointer-events-none flex shrink-0 self-start',
         className
       )}
     >
       <NextImage
         useSkeleton
-        imgClassName='rounded-full'
+        imgClassName='profile-picture'
         width={size}
         height={size}
         src={src}
@@ -161,7 +161,7 @@ export function AddAccountModal({
     e.preventDefault();
 
     if (!trimmedIdentifier) {
-      setErrorMessage('Enter your Bluesky username.');
+      setErrorMessage('Enter your Bluesky handle or DID.');
       return;
     }
 
@@ -210,7 +210,7 @@ export function AddAccountModal({
             htmlFor='add-bluesky-identifier'
           >
             <span className='absolute left-3 top-2 text-sm text-light-secondary dark:text-dark-secondary'>
-              Bluesky username
+              Bluesky handle or DID
             </span>
             <span className='mt-6 flex items-center px-3 pb-2'>
               <CustomIcon

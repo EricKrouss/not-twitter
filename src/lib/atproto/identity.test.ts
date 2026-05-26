@@ -43,6 +43,9 @@ describe('ATProto identity helpers', () => {
     expect(normalizeAtprotoDid('did:web:localhost%3A3000')).toBe(
       'did:web:localhost%3A3000'
     );
+    expect(normalizeAtprotoDid('did:web:LOCALHOST%3a3000')).toBe(
+      'did:web:localhost%3A3000'
+    );
   });
 
   it('rejects unsupported DID methods', () => {
@@ -54,7 +57,13 @@ describe('ATProto identity helpers', () => {
 
   it('keeps search actor shortcuts from treating DIDs like bsky handles', () => {
     expect(normalizeProfileSearchActor('alice')).toBe('alice.bsky.social');
+    expect(normalizeAtprotoLoginIdentifier('did:web:Alice.Example.COM')).toBe(
+      'did:web:alice.example.com'
+    );
     expect(normalizeProfileSearchActor('did:web:alice.example.com')).toBe(
+      'did:web:alice.example.com'
+    );
+    expect(normalizeProfileSearchActor('@did:web:alice.example.com')).toBe(
       'did:web:alice.example.com'
     );
   });

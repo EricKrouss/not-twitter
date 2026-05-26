@@ -344,6 +344,9 @@ function LoggedOutPublicFooter(): JSX.Element {
         <Link href='/privacy'>
           <a className='custom-underline'>Privacy Policy</a>
         </Link>
+        <Link href='/help-center'>
+          <a className='custom-underline'>Help Center</a>
+        </Link>
         <a
           className='custom-underline'
           href='https://bsky.app/'

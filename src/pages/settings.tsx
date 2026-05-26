@@ -1273,6 +1273,14 @@ export default function Settings(): JSX.Element {
           </Link>
         </SettingsRow>
         <SettingsRow
+          title='Help Center'
+          description='Read frontend-specific help for messages, notices, errors, and Bluesky support links.'
+        >
+          <Link href='/help-center'>
+            <a className={secondaryButtonClassName}>Open help</a>
+          </Link>
+        </SettingsRow>
+        <SettingsRow
           title='Default replies'
           description='Choose who can reply to new posts by default.'
         >

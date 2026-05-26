@@ -522,6 +522,7 @@ export function Input({
 
   const handleSubmit = (e: FormEvent<HTMLFormElement>): void => {
     e.preventDefault();
+    if (!isValidTweet || loading) return;
     void sendTweet();
   };
 

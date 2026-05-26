@@ -88,7 +88,7 @@ type NotificationGroup = {
 
 const FOLLOW_GROUP_WINDOW_MS = 12 * 60 * 60 * 1000;
 const NOTIFICATIONS_PAGE_SIZE = 80;
-const NOTIFICATIONS_REFRESH_INTERVAL_MS = 15000;
+const NOTIFICATIONS_REFRESH_INTERVAL_MS = 60000;
 const mentionActions: Readonly<MentionAction[]> = [
   {
     kind: 'reply',
@@ -394,7 +394,7 @@ function NotificationAvatarStack({
     <div className='flex min-w-0 items-center -space-x-2'>
       {users.slice(0, 5).map((user) => (
         <UserAvatar
-          className='rounded-full bg-main-background ring-2 ring-main-background'
+          className='bg-main-background ring-2 ring-main-background'
           username={user.username}
           src={user.photoURL}
           alt={user.name}
@@ -972,8 +972,12 @@ export default function Notifications(): JSX.Element {
         limit: NOTIFICATIONS_PAGE_SIZE
       }),
     {
+      dedupingInterval: NOTIFICATIONS_REFRESH_INTERVAL_MS,
+      focusThrottleInterval: NOTIFICATIONS_REFRESH_INTERVAL_MS,
       refreshInterval: NOTIFICATIONS_REFRESH_INTERVAL_MS,
-      revalidateOnFocus: true
+      revalidateOnFocus: true,
+      revalidateOnReconnect: false,
+      shouldRetryOnError: false
     }
   );
 

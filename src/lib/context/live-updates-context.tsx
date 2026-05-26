@@ -34,7 +34,7 @@ type LiveUpdatesProviderProps = {
 
 const LiveUpdatesContext = createContext<LiveUpdatesContext | null>(null);
 
-const LIVE_UPDATES_REFRESH_INTERVAL_MS = 15000;
+const LIVE_UPDATES_REFRESH_INTERVAL_MS = 60000;
 const LIVE_HOME_FEED_LIMIT = 30;
 const LIVE_NOTIFICATION_LIMIT = 80;
 const LIVE_MESSAGE_LIMIT = 50;
@@ -51,7 +51,9 @@ function countNewHomeTweets(
 }
 
 function getUnreadNotificationsCount(
-  notifications: Awaited<ReturnType<typeof listNotificationsPage>>['notifications']
+  notifications: Awaited<
+    ReturnType<typeof listNotificationsPage>
+  >['notifications']
 ): number {
   return notifications.filter(({ isRead }) => !isRead).length;
 }
@@ -85,7 +87,10 @@ export function LiveUpdatesProvider({
   }, []);
 
   const refreshHomeBadge = useCallback(async (): Promise<void> => {
-    const page = await getFollowingHomeFeedPage(undefined, LIVE_HOME_FEED_LIMIT);
+    const page = await getFollowingHomeFeedPage(
+      undefined,
+      LIVE_HOME_FEED_LIMIT
+    );
     const topTweetId = page.tweets[0]?.id ?? null;
     const previousTopId = homeTopTweetIdRef.current;
 
@@ -135,25 +140,46 @@ export function LiveUpdatesProvider({
 
     if (!user) return;
 
-    void refreshLiveUpdates();
+    let refreshInFlight = false;
+    let lastRefreshAt = 0;
 
-    const refreshSoon = (): void => {
-      void refreshLiveUpdates();
+    const refreshSoon = (force = false): void => {
+      if (document.visibilityState === 'hidden') return;
+
+      const now = Date.now();
+      if (refreshInFlight) return;
+      if (!force && now - lastRefreshAt < LIVE_UPDATES_REFRESH_INTERVAL_MS)
+        return;
+
+      refreshInFlight = true;
+      lastRefreshAt = now;
+
+      void refreshLiveUpdates()
+        .catch(() => undefined)
+        .finally(() => {
+          refreshInFlight = false;
+        });
     };
 
+    refreshSoon(true);
+
+    const handleFocus = (): void => refreshSoon();
+    const handleVisibilityChange = (): void => {
+      if (document.visibilityState === 'visible') refreshSoon();
+    };
     const intervalId = window.setInterval(
-      refreshSoon,
+      () => refreshSoon(),
       LIVE_UPDATES_REFRESH_INTERVAL_MS
     );
-    const unsubscribe = subscribeBackend(refreshSoon, ['content']);
+    const unsubscribe = subscribeBackend(handleFocus, ['content']);
 
-    window.addEventListener('focus', refreshSoon);
-    document.addEventListener('visibilitychange', refreshSoon);
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       window.clearInterval(intervalId);
-      window.removeEventListener('focus', refreshSoon);
-      document.removeEventListener('visibilitychange', refreshSoon);
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       unsubscribe();
     };
   }, [refreshLiveUpdates, user]);

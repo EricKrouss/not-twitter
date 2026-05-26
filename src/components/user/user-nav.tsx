@@ -4,9 +4,10 @@ import { motion } from 'framer-motion';
 import cn from 'clsx';
 import { useAuth } from '@lib/context/auth-context';
 import { useUser } from '@lib/context/user-context';
+import { getNextTabIndexFromShortcut } from '@lib/keyboard-shortcuts';
 import { variants } from '@components/user/user-header';
 import { UserNavLink } from './user-nav-link';
-import type { MouseEvent, PointerEvent } from 'react';
+import type { KeyboardEvent, MouseEvent, PointerEvent } from 'react';
 
 type UserNavProps = {
   follow?: boolean;
@@ -133,6 +134,33 @@ export function UserNav({ follow }: UserNavProps): JSX.Element {
     suppressNextClickRef.current = false;
   };
 
+  const handleKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
+    const tabLinks = Array.from(
+      event.currentTarget.querySelectorAll<HTMLAnchorElement>(
+        '[data-profile-tab-path]'
+      )
+    );
+    const currentTab =
+      event.target instanceof HTMLElement
+        ? (event.target.closest(
+            '[data-profile-tab-path]'
+          ) as HTMLAnchorElement | null)
+        : null;
+    const currentIndex = currentTab ? tabLinks.indexOf(currentTab) : -1;
+    const nextIndex = getNextTabIndexFromShortcut(
+      event.key,
+      currentIndex,
+      tabLinks.length
+    );
+    const nextPath = tabLinks[nextIndex ?? -1]?.dataset.profileTabPath;
+
+    if (nextIndex === null || !nextPath) return;
+
+    event.preventDefault();
+    tabLinks[nextIndex]?.focus();
+    void push(nextPath, undefined, { scroll: false });
+  };
+
   return (
     <motion.nav
       className={cn(
@@ -149,6 +177,7 @@ export function UserNav({ follow }: UserNavProps): JSX.Element {
       onPointerUp={stopDragging}
       onPointerCancel={stopDragging}
       onClickCapture={handleClickCapture}
+      onKeyDown={handleKeyDown}
       {...variants}
       exit={undefined}
     >

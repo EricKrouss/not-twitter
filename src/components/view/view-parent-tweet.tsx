@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import Link from 'next/link';
 import { doc } from '@lib/atproto/store';
 import { useDocument } from '@lib/hooks/useDocument';
 import { tweetsCollection } from '@lib/atproto/collections';
@@ -33,14 +34,9 @@ export function ViewParentTweet({
                      text-light-secondary dark:text-dark-secondary'
         >
           This Tweet was deleted by the Tweet author.{' '}
-          <a
-            className='custom-underline text-main-accent'
-            href='https://bsky.social/about/support'
-            target='_blank'
-            rel='noreferrer'
-          >
-            Learn more
-          </a>
+          <Link href='/help-center/articles/tweet-tombstones-and-notices'>
+            <a className='custom-underline text-main-accent'>Learn more</a>
+          </Link>
         </p>
       </div>
     );

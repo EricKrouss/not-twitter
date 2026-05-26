@@ -12,6 +12,7 @@
     --main-primary: var(--dark-primary);
     --main-secondary: var(--dark-secondary);
     --main-accent: var(--accent-blue);
+    --profile-picture-radius: 9999px;
 
     --dark-background: 0 0 0;
     --dim-background: 22 33 44;
@@ -87,6 +88,16 @@
   .blur-picture {
     @apply hover-animation accent-tab rounded-full transition-colors hover:bg-light-primary/10
            active:bg-light-primary/20 dark:hover:bg-dark-primary/10 dark:active:bg-dark-primary/20;
+  }
+
+  .profile-picture {
+    border-radius: var(--profile-picture-radius);
+  }
+
+  .profile-picture-frame,
+  .profile-picture-frame > span,
+  .profile-picture-frame img {
+    border-radius: var(--profile-picture-radius);
   }
 
   .trim-alt {

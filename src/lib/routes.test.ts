@@ -23,6 +23,16 @@ describe('Bluesky post route helpers', () => {
     );
   });
 
+  it('creates canonical bsky.app share URLs for did:web actors', () => {
+    const didWebTweetId = postIdFromAtUri(
+      'at://did:web:alice.example.com/app.bsky.feed.post/3mmht5rnfc2h'
+    );
+
+    expect(getBskyTweetUrl(didWebTweetId)).toBe(
+      'https://bsky.app/profile/did%3Aweb%3Aalice.example.com/post/3mmht5rnfc2h'
+    );
+  });
+
   it('detects canonical bsky.app post links', () => {
     expect(
       getBskyPostLinkFromText(
@@ -30,6 +40,17 @@ describe('Bluesky post route helpers', () => {
       )
     ).toMatchObject({
       actor: 'krouss.net',
+      rkey: '3mmht5rnfc2h'
+    });
+  });
+
+  it('detects canonical bsky.app post links for did:web actors', () => {
+    expect(
+      getBskyPostLinkFromText(
+        'hey https://bsky.app/profile/did%3Aweb%3Aalice.example.com/post/3mmht5rnfc2h'
+      )
+    ).toMatchObject({
+      actor: 'did:web:alice.example.com',
       rkey: '3mmht5rnfc2h'
     });
   });

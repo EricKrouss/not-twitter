@@ -212,6 +212,13 @@ export default function Privacy(): JSX.Element {
             You can also review Bluesky account and privacy controls directly on
             Bluesky.
           </p>
+          <p>
+            For frontend-specific messages and errors, use the{' '}
+            <Link href='/help-center'>
+              <a className='custom-underline text-main-accent'>Help Center</a>
+            </Link>
+            .
+          </p>
           <Link href='/'>
             <a className='custom-underline text-main-accent'>
               Return to Not Twitter

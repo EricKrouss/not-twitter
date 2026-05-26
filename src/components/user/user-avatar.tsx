@@ -24,7 +24,7 @@ export function UserAvatar({
     <Link href={username ? getUserPath(username) : '#'}>
       <a
         className={cn(
-          'blur-picture flex self-start',
+          'blur-picture profile-picture flex self-start',
           !username && 'pointer-events-none',
           className
         )}
@@ -32,7 +32,7 @@ export function UserAvatar({
       >
         <NextImage
           useSkeleton
-          imgClassName='rounded-full'
+          imgClassName='profile-picture'
           width={pictureSize}
           height={pictureSize}
           src={src}

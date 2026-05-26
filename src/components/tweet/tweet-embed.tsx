@@ -1,3 +1,5 @@
+/* eslint-disable @next/next/no-img-element */
+
 import { useRouter } from 'next/router';
 import { useEffect, useState } from 'react';
 import cn from 'clsx';
@@ -102,6 +104,52 @@ function getCardDescription(card: TweetCard): string | null {
   return card.description;
 }
 
+function isVideoCardImage(src: string): boolean {
+  return /\.(mp4|mov|m4v|webm)($|\?)/i.test(src);
+}
+
+function isAnimatedCardImage(src: string): boolean {
+  return /\.(gif|webp)($|\?)/i.test(src);
+}
+
+function LinkCardPreviewMedia({ card }: LinkCardProps): JSX.Element {
+  const image = card.image as string;
+  const className = 'absolute inset-0 h-full w-full object-cover';
+
+  if (isVideoCardImage(image))
+    return (
+      <video
+        className={className}
+        src={image}
+        autoPlay
+        loop
+        muted
+        playsInline
+      />
+    );
+
+  if (isAnimatedCardImage(image))
+    return (
+      <img
+        className={className}
+        src={image}
+        alt=''
+        draggable={false}
+      />
+    );
+
+  return (
+    <NextImage
+      className='absolute inset-0'
+      imgClassName='object-cover'
+      layout='fill'
+      src={image}
+      alt=''
+      useSkeleton
+    />
+  );
+}
+
 function LinkCardImage({ card, compact }: LinkCardProps): JSX.Element | null {
   if (!card.image && !compact) return null;
 
@@ -115,27 +163,13 @@ function LinkCardImage({ card, compact }: LinkCardProps): JSX.Element | null {
   if (compact)
     return (
       <div className='dark:bg-dark-hover relative h-full w-[94px] shrink-0 bg-light-line-reply'>
-        <NextImage
-          className='absolute inset-0'
-          imgClassName='object-cover'
-          layout='fill'
-          src={card.image}
-          alt=''
-          useSkeleton
-        />
+        <LinkCardPreviewMedia card={card} compact />
       </div>
     );
 
   return (
     <div className='dark:bg-dark-hover relative w-full overflow-hidden bg-light-line-reply pt-[52.35%]'>
-      <NextImage
-        className='absolute inset-0'
-        imgClassName='object-cover'
-        layout='fill'
-        src={card.image}
-        alt=''
-        useSkeleton
-      />
+      <LinkCardPreviewMedia card={card} />
     </div>
   );
 }
@@ -434,8 +468,8 @@ function QuotedTweetHeader({
     <div className='flex min-w-0 items-center gap-1 text-[15px] leading-5'>
       {quotedTweet.authorAvatar && (
         <NextImage
-          className='mr-1 shrink-0'
-          imgClassName='rounded-full'
+          className='profile-picture mr-1 shrink-0'
+          imgClassName='profile-picture'
           width={20}
           height={20}
           src={quotedTweet.authorAvatar}

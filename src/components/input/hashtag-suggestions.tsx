@@ -47,6 +47,8 @@ export function HashtagSuggestions({
     <motion.div
       className='menu-container relative z-30 mt-2 max-h-[296px] overflow-y-auto rounded-2xl
                  bg-main-background py-2'
+      role='listbox'
+      aria-label='Hashtag suggestions'
       {...menuAnimation}
       onMouseDown={(event): void => event.preventDefault()}
     >
@@ -55,6 +57,11 @@ export function HashtagSuggestions({
           className='accent-tab hover-card flex w-full items-center gap-3 px-4 py-3 text-left'
           type='button'
           onMouseDown={selectHashtag(tag)}
+          onClick={(event): void => {
+            if (event.detail === 0) onSelect(tag);
+          }}
+          role='option'
+          aria-selected={false}
           key={tag}
         >
           <span
@@ -99,10 +106,15 @@ function MentionSuggestionRow({
       className='accent-tab hover-card flex w-full items-center gap-3 px-4 py-3 text-left'
       type='button'
       onMouseDown={selectMention}
+      onClick={(event): void => {
+        if (event.detail === 0) onSelect(user.username);
+      }}
+      role='option'
+      aria-selected={false}
     >
       <NextImage
-        className='shrink-0'
-        imgClassName='rounded-full'
+        className='profile-picture shrink-0'
+        imgClassName='profile-picture'
         width={40}
         height={40}
         src={user.photoURL}
@@ -143,6 +155,8 @@ export function MentionSuggestions({
     <motion.div
       className='menu-container relative z-30 mt-2 max-h-[340px] overflow-y-auto rounded-2xl
                  bg-main-background py-2'
+      role='listbox'
+      aria-label='Mention suggestions'
       {...menuAnimation}
       onMouseDown={(event): void => event.preventDefault()}
     >

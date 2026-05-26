@@ -3,7 +3,7 @@ import { ensureValidDid, isValidHandle } from '@atproto/syntax';
 const DID_WEB_PREFIX = 'did:web:';
 const DID_PLC_PREFIX = 'did:plc:';
 const BSKY_SOCIAL_HANDLE_SUFFIX = '.bsky.social';
-const LOCALHOST_DID_WEB_PORT_PATTERN = /^localhost%3A\d+$/i;
+const LOCALHOST_DID_WEB_PORT_PATTERN = /^localhost%3a\d+$/i;
 
 export type AtprotoIdentityDid = `did:plc:${string}` | `did:web:${string}`;
 
@@ -26,13 +26,15 @@ function normalizeDidWeb(did: string): AtprotoIdentityDid | null {
 
   // ATProto only supports hostname-level did:web. Ports are local-dev only.
   // https://atproto.com/specs/did#didweb-in-at-protocol
-  if (hostname.includes('%3A'))
-    return LOCALHOST_DID_WEB_PORT_PATTERN.test(hostname)
-      ? (`${DID_WEB_PREFIX}${hostname.replace(
-          /^localhost/i,
-          'localhost'
-        )}` as AtprotoIdentityDid)
-      : null;
+  if (/%3a/i.test(hostname)) {
+    if (!LOCALHOST_DID_WEB_PORT_PATTERN.test(hostname)) return null;
+
+    const normalizedLocalhost = hostname
+      .replace(/^localhost/i, 'localhost')
+      .replace(/%3a/i, '%3A');
+
+    return `${DID_WEB_PREFIX}${normalizedLocalhost}` as AtprotoIdentityDid;
+  }
 
   if (normalizedHostname === 'localhost')
     return `${DID_WEB_PREFIX}${normalizedHostname}` as AtprotoIdentityDid;

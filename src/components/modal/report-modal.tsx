@@ -4,8 +4,10 @@ import cn from 'clsx';
 import { toast } from 'react-hot-toast';
 import { formatAtprotoDisplayIdentifier } from '@lib/atproto/identity';
 import { useTheme } from '@lib/context/theme-context';
+import { isSubmitShortcut, SUBMIT_KEYSHORTCUTS } from '@lib/keyboard-shortcuts';
 import { Button } from '@components/ui/button';
 import { HeroIcon } from '@components/ui/hero-icon';
+import type { KeyboardEvent } from 'react';
 import type { ModerationReportReason } from '@lib/atproto/backend';
 
 type ReportTarget = 'account' | 'tweet';
@@ -158,6 +160,15 @@ export function ReportModal({
     }
   };
 
+  const handleDetailsKeyDown = (
+    event: KeyboardEvent<HTMLTextAreaElement>
+  ): void => {
+    if (!isSubmitShortcut(event)) return;
+
+    event.preventDefault();
+    if (!loading) void handleSubmit();
+  };
+
   return (
     <div className='flex max-h-[88vh] flex-col overflow-hidden'>
       <header className='flex h-[53px] shrink-0 items-center gap-5 border-b border-light-border px-4 dark:border-dark-border'>
@@ -230,10 +241,12 @@ export function ReportModal({
               maxLength={2000}
               placeholder='Add any extra details for Bluesky moderation (optional)'
               value={details}
+              aria-keyshortcuts={SUBMIT_KEYSHORTCUTS}
               onChange={({ target: { value } }): void => {
                 setDetails(value);
                 if (errorMessage) setErrorMessage('');
               }}
+              onKeyDown={handleDetailsKeyDown}
             />
           </label>
           <div className='mt-2 flex items-center justify-between text-sm text-light-secondary dark:text-dark-secondary'>
@@ -259,6 +272,7 @@ export function ReportModal({
                          focus-visible:bg-accent-red/90 active:bg-accent-red/80'
               loading={loading}
               onClick={handleSubmit}
+              aria-keyshortcuts={SUBMIT_KEYSHORTCUTS}
             >
               Submit report
             </Button>

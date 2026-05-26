@@ -16,6 +16,14 @@ const toastOptions: DefaultToastOptions = {
   success: { duration: 4000 }
 };
 
+const swrOptions = {
+  fetcher: fetchJSON,
+  dedupingInterval: 10000,
+  focusThrottleInterval: 60000,
+  revalidateOnReconnect: false,
+  shouldRetryOnError: false
+};
+
 function MainToaster(): JSX.Element {
   const { isMobile } = useWindow();
 
@@ -34,7 +42,7 @@ export function MainLayout({ children }: LayoutProps): JSX.Element {
       <WindowContextProvider>
         <LiveUpdatesProvider>
           <Sidebar />
-          <SWRConfig value={{ fetcher: fetchJSON }}>{children}</SWRConfig>
+          <SWRConfig value={swrOptions}>{children}</SWRConfig>
         </LiveUpdatesProvider>
         <MainToaster />
       </WindowContextProvider>

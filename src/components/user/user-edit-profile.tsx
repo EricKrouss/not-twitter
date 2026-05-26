@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { toast } from 'react-hot-toast';
 import cn from 'clsx';
+import { isSubmitShortcut } from '@lib/keyboard-shortcuts';
 import { useUser } from '@lib/context/user-context';
 import { useModal } from '@lib/hooks/useModal';
 import { updateUserData } from '@lib/atproto/utils';
@@ -379,13 +380,12 @@ export function UserEditProfile({ hide }: UserEditProfileProps): JSX.Element {
   const clearBirthday = (): void =>
     setEditUserData((currentData) => ({ ...currentData, birthday: null }));
 
-  const handleKeyboardShortcut = ({
-    key,
-    target,
-    ctrlKey
-  }: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>): void => {
-    if (ctrlKey && key === 'Enter' && !inputNameError) {
-      target.blur();
+  const handleKeyboardShortcut = (
+    event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>
+  ): void => {
+    if (isSubmitShortcut(event) && !inputNameError && !loading) {
+      event.preventDefault();
+      event.currentTarget.blur();
       void updateData();
     }
   };

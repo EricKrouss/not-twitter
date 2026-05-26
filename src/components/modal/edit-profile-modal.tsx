@@ -144,13 +144,13 @@ export function EditProfileModal({
             onChange={editImage('profile')}
           />
           <div
-            className='group absolute left-4 top-0 aspect-square w-[120px] -translate-y-1/2
-                       overflow-hidden rounded-full bg-main-background p-1'
+            className='profile-picture group absolute left-4 top-0 aspect-square w-[120px] -translate-y-1/2
+                       overflow-hidden bg-main-background p-1'
           >
             <NextImage
               useSkeleton
-              className='relative h-full w-full overflow-hidden rounded-full'
-              imgClassName='rounded-full'
+              className='profile-picture-frame relative h-full w-full overflow-hidden'
+              imgClassName='profile-picture'
               src={photoURL}
               alt={name}
               layout='fill'

@@ -9,6 +9,7 @@ import {
   type ActiveHashtag,
   type ActiveMention
 } from '@lib/hashtags';
+import { isSubmitShortcut, SUBMIT_KEYSHORTCUTS } from '@lib/keyboard-shortcuts';
 import { Modal } from '@components/modal/modal';
 import { ActionModal } from '@components/modal/action-modal';
 import { HeroIcon } from '@components/ui/hero-icon';
@@ -179,10 +180,7 @@ export function InputForm({
     const closeReplyMenuOnOutsidePointerDown = ({
       target
     }: PointerEvent): void => {
-      if (
-        target instanceof Node &&
-        !replyMenuRef.current?.contains(target)
-      )
+      if (target instanceof Node && !replyMenuRef.current?.contains(target))
         setReplyMenuOpen(false);
     };
 
@@ -210,16 +208,20 @@ export function InputForm({
     setActiveMention(mention);
   }, [inputRef, inputValue]);
 
-  const handleKeyboardShortcut = ({
-    key,
-    ctrlKey
-  }: KeyboardEvent<HTMLTextAreaElement>): void => {
+  const handleKeyboardShortcut = (
+    event: KeyboardEvent<HTMLTextAreaElement>
+  ): void => {
+    const { key } = event;
+
     if (!modal && key === 'Escape')
       if (isValidTweet) {
         inputRef.current?.blur();
         openModal();
       } else discardTweet();
-    else if (ctrlKey && key === 'Enter' && isValidTweet) void sendTweet();
+    else if (isSubmitShortcut(event)) {
+      event.preventDefault();
+      if (isValidTweet && !loading) void sendTweet();
+    }
   };
 
   const handleShowHideNav = (blur?: boolean) => (): void => {
@@ -252,12 +254,11 @@ export function InputForm({
     setActiveMention(mention);
   };
 
-  const handleTextAreaKeyUp = (
+  const handleTextAreaKeyDown = (
     event: KeyboardEvent<HTMLTextAreaElement>
-  ): void => {
-    handleKeyboardShortcut(event);
-    handleTextEntityState();
-  };
+  ): void => handleKeyboardShortcut(event);
+
+  const handleTextAreaKeyUp = (): void => handleTextEntityState();
 
   const selectHashtag = (tag: string): void => {
     const hashtag =
@@ -343,8 +344,10 @@ export function InputForm({
               onPaste={handleImageUpload}
               onClick={handleTextEntityState}
               onSelect={handleTextEntityState}
+              onKeyDown={handleTextAreaKeyDown}
               onKeyUp={handleTextAreaKeyUp}
               onChange={handleChange}
+              aria-keyshortcuts={SUBMIT_KEYSHORTCUTS}
               ref={inputRef}
             />
             <AnimatePresence>

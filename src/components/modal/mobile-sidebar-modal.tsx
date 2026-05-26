@@ -47,8 +47,7 @@ const bottomNavLinks: Readonly<MobileNavLink[]> = [
   {
     href: '/help-center',
     linkName: 'Help center',
-    iconName: 'QuestionMarkCircleIcon',
-    disabled: true
+    iconName: 'QuestionMarkCircleIcon'
   }
 ];
 

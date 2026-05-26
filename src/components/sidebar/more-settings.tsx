@@ -3,7 +3,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Menu } from '@headlessui/react';
 import cn from 'clsx';
 import { useModal } from '@lib/hooks/useModal';
-import { preventBubbling } from '@lib/utils';
 import { Modal } from '@components/modal/modal';
 import { DisplayModal } from '@components/modal/display-modal';
 import { HeroIcon } from '@components/ui/hero-icon';
@@ -40,7 +39,8 @@ export function MoreSettings(): JSX.Element {
           const isActive =
             open ||
             isNavLinkActive(asPath, '/settings') ||
-            isNavLinkActive(asPath, '/privacy');
+            isNavLinkActive(asPath, '/privacy') ||
+            isNavLinkActive(asPath, '/help-center');
 
           return (
             <>
@@ -106,11 +106,10 @@ export function MoreSettings(): JSX.Element {
                       {({ active }): JSX.Element => (
                         <MenuLink
                           className={cn(
-                            'flex w-full cursor-not-allowed gap-3 p-4 duration-200',
+                            'flex w-full gap-3 p-4 duration-200',
                             active && 'bg-main-sidebar-background'
                           )}
                           href='/help-center'
-                          onClick={preventBubbling()}
                         >
                           <HeroIcon iconName='QuestionMarkCircleIcon' />
                           Help center

@@ -10,9 +10,11 @@ type ThemeContext = {
   theme: Theme;
   accent: Accent;
   hideBskySocialSuffix: boolean;
+  squareProfilePictures: boolean;
   changeTheme: ({ target: { value } }: ChangeEvent<HTMLInputElement>) => void;
   changeAccent: ({ target: { value } }: ChangeEvent<HTMLInputElement>) => void;
   toggleHideBskySocialSuffix: () => void;
+  toggleSquareProfilePictures: () => void;
 };
 
 export const ThemeContext = createContext<ThemeContext | null>(null);
@@ -44,6 +46,12 @@ function setInitialHideBskySocialSuffix(): boolean {
   return localStorage.getItem('hideBskySocialSuffix') === 'true';
 }
 
+function setInitialSquareProfilePictures(): boolean {
+  if (typeof window === 'undefined') return false;
+
+  return localStorage.getItem('squareProfilePictures') === 'true';
+}
+
 export function ThemeContextProvider({
   children
 }: ThemeContextProviderProps): JSX.Element {
@@ -51,6 +59,9 @@ export function ThemeContextProvider({
   const [accent, setAccent] = useState<Accent>(setInitialAccent);
   const [hideBskySocialSuffix, setHideBskySocialSuffix] = useState(
     setInitialHideBskySocialSuffix
+  );
+  const [squareProfilePictures, setSquareProfilePictures] = useState(
+    setInitialSquareProfilePictures
   );
 
   const { user } = useAuth();
@@ -86,10 +97,10 @@ export function ThemeContextProvider({
         `var(--${theme}-sidebar-background)`
       );
 
-      if (user) {
-        localStorage.setItem('theme', theme);
+      localStorage.setItem('theme', theme);
+
+      if (user)
         return setTimeout(() => void updateUserTheme(user.id, { theme }), 500);
-      }
 
       return undefined;
     };
@@ -104,10 +115,10 @@ export function ThemeContextProvider({
 
       root.style.setProperty('--main-accent', `var(--accent-${accent})`);
 
-      if (user) {
-        localStorage.setItem('accent', accent);
+      localStorage.setItem('accent', accent);
+
+      if (user)
         return setTimeout(() => void updateUserTheme(user.id, { accent }), 500);
-      }
 
       return undefined;
     };
@@ -123,6 +134,17 @@ export function ThemeContextProvider({
     );
   }, [hideBskySocialSuffix]);
 
+  useEffect(() => {
+    document.documentElement.style.setProperty(
+      '--profile-picture-radius',
+      squareProfilePictures ? '16%' : '9999px'
+    );
+    localStorage.setItem(
+      'squareProfilePictures',
+      squareProfilePictures ? 'true' : 'false'
+    );
+  }, [squareProfilePictures]);
+
   const changeTheme = ({
     target: { value }
   }: ChangeEvent<HTMLInputElement>): void => setTheme(value as Theme);
@@ -134,13 +156,18 @@ export function ThemeContextProvider({
   const toggleHideBskySocialSuffix = (): void =>
     setHideBskySocialSuffix((currentValue) => !currentValue);
 
+  const toggleSquareProfilePictures = (): void =>
+    setSquareProfilePictures((currentValue) => !currentValue);
+
   const value: ThemeContext = {
     theme,
     accent,
     hideBskySocialSuffix,
+    squareProfilePictures,
     changeTheme,
     changeAccent,
-    toggleHideBskySocialSuffix
+    toggleHideBskySocialSuffix,
+    toggleSquareProfilePictures
   };
 
   return (

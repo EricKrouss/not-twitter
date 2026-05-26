@@ -11,6 +11,13 @@ type DisplayModalProps = {
   closeModal: () => void;
 };
 
+type DisplayToggleProps = {
+  checked: boolean;
+  description: string;
+  label: string;
+  onClick: () => void;
+};
+
 const themes: Readonly<[Theme, string][]> = [
   ['light', 'Default'],
   ['dim', 'Dim'],
@@ -26,8 +33,52 @@ const accentsColor: Readonly<Accent[]> = [
   'green'
 ];
 
+function DisplayToggle({
+  checked,
+  description,
+  label,
+  onClick
+}: DisplayToggleProps): JSX.Element {
+  return (
+    <button
+      className='hover-animation flex w-full items-center justify-between gap-4 rounded-2xl
+                 bg-main-sidebar-background px-4 py-3 text-left'
+      type='button'
+      role='switch'
+      aria-checked={checked}
+      onClick={onClick}
+    >
+      <span className='min-w-0'>
+        <span className='block font-bold'>{label}</span>
+        <span className='block text-sm leading-5 text-light-secondary dark:text-dark-secondary'>
+          {description}
+        </span>
+      </span>
+      <span
+        className={`flex h-8 w-14 shrink-0 items-center rounded-full px-1 transition
+                    ${
+                      checked
+                        ? 'bg-main-accent'
+                        : 'bg-light-border dark:bg-dark-border'
+                    }`}
+        aria-hidden='true'
+      >
+        <span
+          className={`h-6 w-6 rounded-full bg-white shadow transition
+                      ${checked ? 'translate-x-6' : ''}`}
+        />
+      </span>
+    </button>
+  );
+}
+
 export function DisplayModal({ closeModal }: DisplayModalProps): JSX.Element {
-  const { hideBskySocialSuffix, toggleHideBskySocialSuffix } = useTheme();
+  const {
+    hideBskySocialSuffix,
+    squareProfilePictures,
+    toggleHideBskySocialSuffix,
+    toggleSquareProfilePictures
+  } = useTheme();
   const previewUsername = formatAtprotoHandleForDisplay(
     'nottwitter.bsky.social',
     hideBskySocialSuffix
@@ -70,35 +121,20 @@ export function DisplayModal({ closeModal }: DisplayModalProps): JSX.Element {
         <p className='text-sm font-bold text-light-secondary dark:text-dark-secondary'>
           Visual tweaks
         </p>
-        <button
-          className='hover-animation flex w-full items-center justify-between gap-4 rounded-2xl
-                     bg-main-sidebar-background px-4 py-3 text-left'
-          type='button'
-          role='switch'
-          aria-checked={hideBskySocialSuffix}
-          onClick={toggleHideBskySocialSuffix}
-        >
-          <span className='min-w-0'>
-            <span className='block font-bold'>Hide .bsky.social suffixes</span>
-            <span className='block text-sm leading-5 text-light-secondary dark:text-dark-secondary'>
-              Only generic Bluesky handles are shortened.
-            </span>
-          </span>
-          <span
-            className={`flex h-8 w-14 shrink-0 items-center rounded-full px-1 transition
-                        ${
-                          hideBskySocialSuffix
-                            ? 'bg-main-accent'
-                            : 'bg-light-border dark:bg-dark-border'
-                        }`}
-            aria-hidden='true'
-          >
-            <span
-              className={`h-6 w-6 rounded-full bg-white shadow transition
-                          ${hideBskySocialSuffix ? 'translate-x-6' : ''}`}
-            />
-          </span>
-        </button>
+        <div className='flex flex-col gap-2'>
+          <DisplayToggle
+            checked={hideBskySocialSuffix}
+            label='Hide .bsky.social suffixes'
+            description='Only generic Bluesky handles are shortened.'
+            onClick={toggleHideBskySocialSuffix}
+          />
+          <DisplayToggle
+            checked={squareProfilePictures}
+            label='Squared profile pictures'
+            description='Use rounded corners instead of circles.'
+            onClick={toggleSquareProfilePictures}
+          />
+        </div>
       </div>
       <div className='flex w-full flex-col gap-1'>
         <p className='text-sm font-bold text-light-secondary dark:text-dark-secondary'>

@@ -1,4 +1,5 @@
 import cn from 'clsx';
+import { SUBMIT_KEYSHORTCUTS } from '@lib/keyboard-shortcuts';
 import type { User, EditableData } from '@lib/types/user';
 import type { KeyboardEvent, ChangeEvent } from 'react';
 
@@ -51,7 +52,10 @@ export function InputField({
             id={inputId}
             placeholder={inputId}
             onChange={!isHittingInputLimit ? handleChange : undefined}
-            onKeyUp={handleKeyboardShortcut}
+            onKeyDown={handleKeyboardShortcut}
+            aria-keyshortcuts={
+              handleKeyboardShortcut ? SUBMIT_KEYSHORTCUTS : undefined
+            }
             value={slicedInputValue}
             rows={3}
           />
@@ -64,7 +68,10 @@ export function InputField({
             placeholder={inputId}
             onChange={!isHittingInputLimit ? handleChange : undefined}
             value={slicedInputValue}
-            onKeyUp={handleKeyboardShortcut}
+            onKeyDown={handleKeyboardShortcut}
+            aria-keyshortcuts={
+              handleKeyboardShortcut ? SUBMIT_KEYSHORTCUTS : undefined
+            }
           />
         )}
         <label

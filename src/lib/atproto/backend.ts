@@ -1826,15 +1826,28 @@ async function callPublicFallbackAppQueryXrpc<T>(
   method: string,
   params: Record<string, unknown>
 ): Promise<T> {
+  if (!PUBLIC_BSKY_APPVIEW_METHODS.has(method))
+    return callAppQueryXrpc<T>(method, params);
+
+  let directError: unknown = null;
+
+  try {
+    return await callDirectAppQueryXrpc<T>(method, params);
+  } catch (error) {
+    directError = error;
+  }
+
   try {
     return await callAppQueryXrpc<T>(method, params);
-  } catch (error) {
-    if (!PUBLIC_BSKY_APPVIEW_METHODS.has(method)) throw error;
-
+  } catch (proxyError) {
     try {
       return await callPublicAppQueryXrpc<T>(method, params);
     } catch {
-      throw error;
+      throw proxyError instanceof Error
+        ? proxyError
+        : directError instanceof Error
+        ? directError
+        : new Error('Bluesky request failed.');
     }
   }
 }
@@ -4459,6 +4472,7 @@ type TenorGifInfo = {
   playbackUrl: string;
   aspectRatio: AppBskyEmbedImages.Image['aspectRatio'];
   alt: string;
+  poster?: string | null;
 };
 
 function parseTenorGifUrl(value: string): TenorGifInfo | null {
@@ -4495,8 +4509,94 @@ function parseTenorGifUrl(value: string): TenorGifInfo | null {
   }
 }
 
-function isTenorGifUrl(value: string): boolean {
-  return !!parseTenorGifUrl(value);
+function isGifServiceHost(hostname: string): boolean {
+  const host = hostname.replace(/^www\./, '');
+
+  return (
+    host === 'tenor.com' ||
+    host.endsWith('.tenor.com') ||
+    host === 'giphy.com' ||
+    host.endsWith('.giphy.com') ||
+    host === 'klipy.com' ||
+    host.endsWith('.klipy.com')
+  );
+}
+
+function isPlayableGifServiceUrl(url: URL): boolean {
+  if (/\.gif(?:$|[?#])/i.test(url.pathname)) return true;
+  if (!isGifServiceHost(url.hostname)) return false;
+
+  return /\.(gif|mp4|webm|webp)(?:$|[?#])/i.test(url.pathname);
+}
+
+function getGiphyMediaId(url: URL): string | null {
+  const segments = url.pathname.split('/').filter(Boolean);
+  const mediaIndex = segments.indexOf('media');
+  const mediaId = mediaIndex >= 0 ? segments[mediaIndex + 1] : null;
+
+  if (mediaId && !mediaId.startsWith('v1.')) return mediaId;
+
+  const slug = segments[segments.length - 1];
+  if (!slug) return null;
+
+  const slugParts = slug.split('-');
+  const id = slugParts[slugParts.length - 1];
+  return id && /^[a-z0-9]+$/i.test(id) ? id : null;
+}
+
+function getGiphyPlaybackUrl(url: URL): string | null {
+  if (!url.hostname.endsWith('giphy.com')) return null;
+  if (isPlayableGifServiceUrl(url)) return url.toString();
+
+  const mediaId = getGiphyMediaId(url);
+  return mediaId ? `https://media.giphy.com/media/${mediaId}/giphy.gif` : null;
+}
+
+function getThirdPartyGifUrl(value: string): URL | null {
+  try {
+    return new URL(value);
+  } catch {
+    return null;
+  }
+}
+
+function parseThirdPartyGifUrl(
+  value: string,
+  title?: string,
+  poster?: string | null
+): TenorGifInfo | null {
+  const tenorGif = parseTenorGifUrl(value);
+  if (tenorGif)
+    return {
+      ...tenorGif,
+      alt: tenorGif.alt ? tenorGif.alt : title ?? 'GIF',
+      poster
+    };
+
+  const url = getThirdPartyGifUrl(value);
+  if (!url) return null;
+
+  const giphyPlaybackUrl = getGiphyPlaybackUrl(url);
+  const playbackUrl =
+    giphyPlaybackUrl ?? (isPlayableGifServiceUrl(url) ? url.toString() : null);
+
+  if (!playbackUrl) return null;
+
+  const width = Number(url.searchParams.get('ww') ?? url.searchParams.get('w'));
+  const height = Number(
+    url.searchParams.get('hh') ?? url.searchParams.get('h')
+  );
+
+  return {
+    playbackUrl,
+    aspectRatio: getImageAspectRatio(width, height),
+    alt: title ?? 'GIF',
+    poster
+  };
+}
+
+function isThirdPartyGifUrl(value: string): boolean {
+  return !!parseThirdPartyGifUrl(value);
 }
 
 function getBskyWebUrl(uri: string): string {
@@ -4607,17 +4707,21 @@ function mapMedia(embed: unknown): ImagesPreview | null {
 
   if (AppBskyEmbedExternal.isView(embed)) {
     const { external } = embed as AppBskyEmbedExternal.View;
-    const tenorGif = parseTenorGifUrl(external.uri);
+    const thirdPartyGif = parseThirdPartyGifUrl(
+      external.uri,
+      external.title,
+      external.thumb
+    );
 
-    if (tenorGif)
+    if (thirdPartyGif)
       return [
         {
-          id: `${external.uri}-tenor-gif`,
-          src: tenorGif.playbackUrl,
-          alt: tenorGif.alt || external.title || 'GIF',
+          id: `${external.uri}-third-party-gif`,
+          src: thirdPartyGif.playbackUrl,
+          alt: thirdPartyGif.alt,
           type: 'gif',
-          poster: external.thumb ?? null,
-          aspectRatio: tenorGif.aspectRatio
+          poster: thirdPartyGif.poster ?? null,
+          aspectRatio: thirdPartyGif.aspectRatio
         }
       ];
   }
@@ -4662,7 +4766,7 @@ function mapCard(embed: unknown): TweetCard | null {
   if (AppBskyEmbedExternal.isView(embed)) {
     const externalEmbed = embed as AppBskyEmbedExternal.View;
 
-    if (isTenorGifUrl(externalEmbed.external.uri)) return null;
+    if (isThirdPartyGifUrl(externalEmbed.external.uri)) return null;
 
     return mapExternalCard(externalEmbed);
   }
@@ -5844,21 +5948,40 @@ export async function getFeedGeneratorPage(
 const DISCOVER_HOME_FEED_ACTOR = 'bsky.app';
 const DISCOVER_HOME_FEED_RKEY = 'whats-hot';
 export const DISCOVER_HOME_FEED_HREF = `/profile/${DISCOVER_HOME_FEED_ACTOR}/feed/${DISCOVER_HOME_FEED_RKEY}`;
+let discoverHomeFeedUriPromise: Promise<string> | null = null;
+
+async function getDiscoverHomeFeedUri(): Promise<string> {
+  if (discoverHomeFeedUriPromise) return discoverHomeFeedUriPromise;
+
+  discoverHomeFeedUriPromise =
+    callPublicFallbackAppQueryXrpc<AppBskyActorDefs.ProfileViewDetailed>(
+      'app.bsky.actor.getProfile',
+      { actor: DISCOVER_HOME_FEED_ACTOR }
+    )
+      .then((profile) => {
+        ensureValidDid(profile.did);
+        return `at://${profile.did}/app.bsky.feed.generator/${DISCOVER_HOME_FEED_RKEY}`;
+      })
+      .catch((error) => {
+        discoverHomeFeedUriPromise = null;
+        throw error;
+      });
+
+  return discoverHomeFeedUriPromise;
+}
 
 export async function getDiscoverHomeFeedPage(
   cursor?: string,
   limit = 30
 ): Promise<HomeFeedPage> {
-  const page = await getFeedGeneratorPage(
-    DISCOVER_HOME_FEED_ACTOR,
-    DISCOVER_HOME_FEED_RKEY,
-    cursor,
-    limit
-  );
+  const feedUri = await getDiscoverHomeFeedUri();
+  const response = await fetchAppViewFeed(feedUri, cursor, limit);
 
   return {
-    tweets: mergeLocalCreatedTweetsWithUsers(page.feed),
-    cursor: page.cursor
+    tweets: mergeLocalCreatedTweetsWithUsers(
+      await mapFeedItemsWithUsers(response.feed)
+    ),
+    cursor: response.cursor ?? null
   };
 }
 
@@ -8489,7 +8612,8 @@ export async function addTweet(data: AddTweetData): Promise<Tweet> {
       ? images.map(({ preview }) => preview)
       : data.images ?? null,
     mediaWarning: null,
-    card: data.card && isTenorGifUrl(data.card.url) ? null : data.card ?? null,
+    card:
+      data.card && isThirdPartyGifUrl(data.card.url) ? null : data.card ?? null,
     quotedTweet: data.quotedTweet ?? null,
     parent: data.parent ?? null,
     userLikes: [],

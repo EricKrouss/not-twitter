@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/router';
+import Link from 'next/link';
 import useSWR from 'swr';
 import TextArea from 'react-textarea-autosize';
 import { toast } from 'react-hot-toast';
@@ -35,6 +36,8 @@ import { useAuth } from '@lib/context/auth-context';
 import { useTheme } from '@lib/context/theme-context';
 import { formatDate } from '@lib/date';
 import { DEFAULT_PROFILE_PHOTO_URL } from '@lib/default-images';
+import { isSubmitShortcut, SUBMIT_KEYSHORTCUTS } from '@lib/keyboard-shortcuts';
+import { getUserPath } from '@lib/routes';
 import { useModal } from '@lib/hooks/useModal';
 import { ProtectedLayout } from '@components/layout/common-layout';
 import { MainLayout } from '@components/layout/main-layout';
@@ -50,6 +53,8 @@ import { TweetText } from '@components/tweet/tweet-text';
 import type {
   ChangeEvent,
   FormEvent,
+  KeyboardEvent,
+  MouseEvent,
   ReactElement,
   ReactNode,
   UIEvent
@@ -140,6 +145,29 @@ function getUnreadTotal(convos: ChatConvo[]): number {
 
 function getUnreadLabel(count: number): string {
   return count > 99 ? '99+' : count.toString();
+}
+
+function isNestedActionTarget(target: EventTarget): boolean {
+  return target instanceof Element && !!target.closest('a,button');
+}
+
+function openFromClickableRow(
+  event: MouseEvent<HTMLElement>,
+  onClick: () => void
+): void {
+  if (isNestedActionTarget(event.target)) return;
+  onClick();
+}
+
+function openFromClickableRowKey(
+  event: KeyboardEvent<HTMLElement>,
+  onClick: () => void
+): void {
+  if (event.target !== event.currentTarget) return;
+  if (event.key !== 'Enter' && event.key !== ' ') return;
+
+  event.preventDefault();
+  onClick();
 }
 
 const BLUESKY_REACTION_VALUES = ['❤️', '😂', '👍', '😮', '😢', '😡'];
@@ -279,26 +307,28 @@ type MessageAvatarProps = {
   alt: string;
   size?: number;
   className?: string;
+  username?: string;
 };
 
 function MessageAvatar({
   src,
   alt,
   size = 40,
-  className
+  className,
+  username
 }: MessageAvatarProps): JSX.Element {
-  return (
+  const avatar = (
     <figure
       className={cn(
-        'flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-main-sidebar-background',
-        className
+        'profile-picture flex shrink-0 items-center justify-center overflow-hidden bg-main-sidebar-background',
+        !username && className
       )}
       style={{ width: size, height: size }}
     >
       {src ? (
         <NextImage
           useSkeleton
-          imgClassName='rounded-full'
+          imgClassName='profile-picture'
           width={size}
           height={size}
           src={src}
@@ -311,6 +341,24 @@ function MessageAvatar({
         />
       )}
     </figure>
+  );
+
+  if (!username) return avatar;
+
+  return (
+    <Link href={getUserPath(username)}>
+      <a
+        className={cn(
+          'blur-picture profile-picture flex shrink-0 outline-none focus-visible:ring-2 focus-visible:ring-main-accent/80',
+          className
+        )}
+        aria-label={`Go to ${alt}'s profile`}
+        onClick={(event): void => event.stopPropagation()}
+        title='Go to profile'
+      >
+        {avatar}
+      </a>
+    </Link>
   );
 }
 
@@ -331,16 +379,28 @@ function NewMessageUserRow({
   });
 
   return (
-    <Button
+    <div
       className={cn(
-        `hover-card flex min-h-[72px] w-full items-center justify-between gap-3 rounded-none
+        `main-tab hover-card flex min-h-[72px] w-full cursor-pointer items-center justify-between gap-3 rounded-none
          px-4 text-left font-normal`,
         selected && 'bg-main-accent/10'
       )}
-      onClick={(): void => onSelect(user)}
+      role='button'
+      tabIndex={0}
+      onClick={(event): void =>
+        openFromClickableRow(event, (): void => onSelect(user))
+      }
+      onKeyDown={(event): void =>
+        openFromClickableRowKey(event, (): void => onSelect(user))
+      }
     >
       <span className='flex min-w-0 items-center gap-3'>
-        <MessageAvatar src={user.photoURL} alt={user.name} size={48} />
+        <MessageAvatar
+          src={user.photoURL}
+          alt={user.name}
+          size={48}
+          username={user.username}
+        />
         <span className='min-w-0'>
           <span className='flex min-w-0 items-center gap-1'>
             <span className='truncate font-bold'>{user.name}</span>
@@ -362,7 +422,7 @@ function NewMessageUserRow({
           iconName='TwitterCheckIcon'
         />
       )}
-    </Button>
+    </div>
   );
 }
 
@@ -403,6 +463,15 @@ function NewMessageModal({
     if (selectedUser) onStart();
   };
 
+  const handleKeyboardShortcut = (
+    event: KeyboardEvent<HTMLFormElement>
+  ): void => {
+    if (!isSubmitShortcut(event)) return;
+
+    event.preventDefault();
+    if (selectedUser && !starting) onStart();
+  };
+
   const handleSearchChange = ({
     target: { value }
   }: ChangeEvent<HTMLInputElement>): void => onSearchChange(value);
@@ -411,6 +480,7 @@ function NewMessageModal({
     <form
       className='flex h-[650px] max-h-[90vh] flex-col overflow-hidden'
       onSubmit={handleSubmit}
+      onKeyDown={handleKeyboardShortcut}
     >
       <header className='flex h-[53px] shrink-0 items-center justify-between border-b border-light-border px-3 dark:border-dark-border'>
         <div className='flex min-w-0 items-center gap-5'>
@@ -445,6 +515,7 @@ function NewMessageModal({
               src={selectedUser.photoURL}
               alt={selectedUser.name}
               size={24}
+              username={selectedUser.username}
             />
             <span className='truncate text-[15px] font-bold'>
               {selectedUser.name}
@@ -510,15 +581,19 @@ function NewMessageToast({ convo, onOpen }: NewMessageToastProps): JSX.Element {
   const participant = convo.members[0];
 
   return (
-    <Button
-      className='flex max-w-sm items-center gap-3 rounded-2xl border border-light-border bg-main-background
-                 px-4 py-3 text-left shadow-lg dark:border-dark-border'
-      onClick={onOpen}
+    <div
+      className='main-tab flex max-w-sm cursor-pointer items-center gap-3 rounded-2xl border border-light-border
+                 bg-main-background px-4 py-3 text-left shadow-lg dark:border-dark-border'
+      role='button'
+      tabIndex={0}
+      onClick={(event): void => openFromClickableRow(event, onOpen)}
+      onKeyDown={(event): void => openFromClickableRowKey(event, onOpen)}
     >
       <MessageAvatar
         src={participant?.photoURL}
         alt={participant?.name ?? 'Conversation'}
         size={40}
+        username={participant?.username}
       />
       <div className='min-w-0'>
         <div className='flex min-w-0 items-center gap-1'>
@@ -534,7 +609,7 @@ function NewMessageToast({ convo, onOpen }: NewMessageToastProps): JSX.Element {
           {getMessagePreview(convo.lastMessage)}
         </p>
       </div>
-    </Button>
+    </div>
   );
 }
 
@@ -631,12 +706,9 @@ function MessageRequestsPanel({
         <p className='max-w-[330px] text-[15px] leading-5 text-light-secondary dark:text-dark-secondary'>
           Message requests from people you don&apos;t follow live here. To reply
           to their messages, you need to accept the request.{' '}
-          <a
-            className='font-bold underline'
-            href='https://bsky.social/about/support'
-          >
-            Learn more
-          </a>
+          <Link href='/help-center/articles/messages-and-chat-settings'>
+            <a className='font-bold underline'>Learn more</a>
+          </Link>
         </p>
         <div className='mt-11 border-t border-light-border dark:border-dark-border' />
       </div>
@@ -665,6 +737,7 @@ function MessageRequestsPanel({
                       src={participant?.photoURL}
                       alt={participant?.name ?? 'Conversation'}
                       size={48}
+                      username={participant?.username}
                     />
                     <div className='min-w-0 flex-1'>
                       <div className='flex min-w-0 items-center gap-1'>
@@ -783,12 +856,9 @@ function ChatSettingsPanel({
           </h2>
           <p className='mt-1 text-[15px] leading-5 text-light-secondary dark:text-dark-secondary'>
             People you follow will always be able to message you.{' '}
-            <a
-              className='font-normal text-main-accent'
-              href='https://bsky.social/about/support'
-            >
-              Learn more
-            </a>
+            <Link href='/help-center/articles/messages-and-chat-settings'>
+              <a className='font-normal text-main-accent'>Learn more</a>
+            </Link>
           </p>
           <div className='mt-2'>
             {CHAT_ALLOW_INCOMING_OPTIONS.map(({ value, label }) => {
@@ -862,19 +932,24 @@ function ConversationRow({
     : null;
 
   return (
-    <Button
+    <article
       className={cn(
-        `accent-tab hover-card flex w-full items-start gap-3 rounded-none border-r-2 border-b
-         border-light-border border-r-transparent px-4 py-4 text-left dark:border-dark-border`,
+        `main-tab accent-tab hover-card flex w-full cursor-pointer items-start gap-3 rounded-none border-r-2
+         border-b border-light-border border-r-transparent px-4 py-4 text-left dark:border-dark-border`,
         active &&
           'border-r-main-accent bg-main-accent/10 dark:bg-main-accent/20'
       )}
-      onClick={onClick}
+      aria-current={active ? 'true' : undefined}
+      role='button'
+      tabIndex={0}
+      onClick={(event): void => openFromClickableRow(event, onClick)}
+      onKeyDown={(event): void => openFromClickableRowKey(event, onClick)}
     >
       <MessageAvatar
         src={participant?.photoURL}
         alt={participant?.name ?? 'Conversation'}
         size={48}
+        username={participant?.username}
       />
       <div className='min-w-0 flex-1'>
         <div className='flex min-w-0 items-center gap-1'>
@@ -921,7 +996,7 @@ function ConversationRow({
           )}
         </div>
       </div>
-    </Button>
+    </article>
   );
 }
 
@@ -944,7 +1019,7 @@ type InfoSectionProps = {
 function InfoSection({ title, children }: InfoSectionProps): JSX.Element {
   return (
     <section className='border-b border-light-border dark:border-dark-border'>
-      <h3 className='px-4 pt-4 pb-2 text-[13px] font-bold text-light-secondary dark:text-dark-secondary'>
+      <h3 className='px-4 pt-5 pb-2.5 text-[13px] font-bold leading-4 text-light-secondary dark:text-dark-secondary'>
         {title}
       </h3>
       {children}
@@ -968,7 +1043,7 @@ function InfoRow({
   return (
     <Button
       className={cn(
-        `hover-card flex min-h-[52px] w-full items-center gap-4 rounded-none
+        `hover-card flex min-h-[58px] w-full items-center gap-4 rounded-none
          px-4 py-3 text-left text-[15px] font-normal`,
         destructive
           ? 'justify-center text-center text-accent-red'
@@ -1025,32 +1100,40 @@ function ConversationInfo({
     <div className='min-h-0 flex-1 overflow-y-auto'>
       <InfoSection title='People'>
         {convo.members.map((member) => (
-          <div
-            className='flex w-full items-center gap-3 px-4 py-3'
-            key={member.id}
-          >
-            <MessageAvatar src={member.photoURL} alt={member.name} size={48} />
-            <div className='min-w-0 flex-1'>
-              <div className='flex min-w-0 items-center gap-1'>
-                <p className='truncate font-bold'>{member.name}</p>
-                {member.verified && (
-                  <CustomIcon
-                    className='h-4 w-4 shrink-0'
-                    iconName='TwitterVerifiedIcon'
-                  />
-                )}
+          <Link href={getUserPath(member.username)} key={member.id}>
+            <a
+              className='hover-card flex min-h-[80px] w-full items-center gap-3 px-4 text-left
+                         outline-none focus-visible:ring-2 focus-visible:ring-main-accent/80'
+              aria-label={`Go to ${member.name}'s profile`}
+              title='Go to profile'
+            >
+              <MessageAvatar
+                src={member.photoURL}
+                alt={member.name}
+                size={48}
+              />
+              <div className='min-w-0 flex-1'>
+                <div className='flex min-w-0 items-center gap-1'>
+                  <p className='truncate font-bold'>{member.name}</p>
+                  {member.verified && (
+                    <CustomIcon
+                      className='h-4 w-4 shrink-0'
+                      iconName='TwitterVerifiedIcon'
+                    />
+                  )}
+                </div>
+                <p className='truncate text-[15px] text-light-secondary dark:text-dark-secondary'>
+                  {formatAtprotoDisplayIdentifier(member.username, {
+                    hideBskySocialSuffix
+                  })}
+                </p>
               </div>
-              <p className='truncate text-[15px] text-light-secondary dark:text-dark-secondary'>
-                {formatAtprotoDisplayIdentifier(member.username, {
-                  hideBskySocialSuffix
-                })}
-              </p>
-            </div>
-            <CustomIcon
-              className='h-5 w-5 shrink-0 text-light-secondary dark:text-dark-secondary'
-              iconName='TwitterChevronRightIcon'
-            />
-          </div>
+              <CustomIcon
+                className='h-5 w-5 shrink-0 text-light-secondary dark:text-dark-secondary'
+                iconName='TwitterChevronRightIcon'
+              />
+            </a>
+          </Link>
         ))}
       </InfoSection>
 
@@ -1062,7 +1145,7 @@ function ConversationInfo({
       </InfoSection>
 
       <InfoSection title='Shared media'>
-        <div className='px-4 py-8 text-center text-[15px] text-light-secondary dark:text-dark-secondary'>
+        <div className='flex h-[104px] items-center justify-center px-4 text-center text-[15px] text-light-secondary dark:text-dark-secondary'>
           No photos or videos shared yet.
         </div>
       </InfoSection>
@@ -1623,7 +1706,7 @@ export default function Messages(): JSX.Element {
   ): Promise<void> => {
     event.preventDefault();
 
-    if (!activeConvoId || !inputValue.trim()) return;
+    if (!activeConvoId || !inputValue.trim() || sending) return;
 
     setSending(true);
 
@@ -1870,6 +1953,23 @@ export default function Messages(): JSX.Element {
     target: { value }
   }: ChangeEvent<HTMLTextAreaElement>): void => setInputValue(value);
 
+  const handleMessageInputKeyDown = (
+    event: KeyboardEvent<HTMLTextAreaElement>
+  ): void => {
+    if (!isSubmitShortcut(event)) return;
+
+    event.preventDefault();
+    if (!activeConvoId || !inputValue.trim() || sending) return;
+
+    const form = event.currentTarget.form;
+
+    if (form?.requestSubmit) form.requestSubmit();
+    else
+      form?.dispatchEvent(
+        new Event('submit', { bubbles: true, cancelable: true })
+      );
+  };
+
   const toggleReactionPicker =
     (messageId: string): (() => void) =>
     (): void => {
@@ -2057,12 +2157,12 @@ export default function Messages(): JSX.Element {
           closeModal={closeDeleteConversationModal}
         />
       </Modal>
-      <MainContainer className='!max-w-[1296px] !pb-0'>
+      <MainContainer className='!h-screen !min-h-0 !max-w-[1296px] !overflow-hidden !pb-0'>
         <SEO title='Messages / Not Twitter' />
-        <div className='flex min-h-screen w-full dark:bg-black'>
+        <div className='flex h-full min-h-0 w-full overflow-hidden dark:bg-black'>
           <section
             className={cn(
-              `flex w-full flex-col border-r border-light-border dark:border-dark-border
+              `flex min-h-0 w-full flex-col border-r border-light-border dark:border-dark-border
              md:shrink-0`,
               showChatSettings ? 'md:w-[600px]' : 'md:w-[360px]',
               showThread && !showMessageRequests && 'hidden md:flex'
@@ -2129,7 +2229,7 @@ export default function Messages(): JSX.Element {
                   </label>
                 </div>
                 <div
-                  className='min-h-0 flex-1 overflow-y-auto'
+                  className='min-h-0 flex-1 overflow-y-auto overscroll-contain'
                   onScroll={handleConvosScroll}
                 >
                   {!data && !error && !convos.length ? (
@@ -2180,7 +2280,7 @@ export default function Messages(): JSX.Element {
 
           <section
             className={cn(
-              'hidden min-w-0 flex-1 flex-col md:flex',
+              'hidden min-h-0 min-w-0 flex-1 flex-col md:flex',
               showThread && '!flex'
             )}
           >
@@ -2267,7 +2367,7 @@ export default function Messages(): JSX.Element {
                   ) : (
                     <>
                       <div
-                        className='min-h-0 flex-1 overflow-y-auto'
+                        className='min-h-0 flex-1 overflow-y-auto overscroll-contain'
                         onScroll={handleMessagesScroll}
                       >
                         <div className='flex min-h-full flex-col justify-end gap-2 px-6 py-6'>
@@ -2327,6 +2427,7 @@ export default function Messages(): JSX.Element {
                                       src={sender?.photoURL}
                                       alt={sender?.name ?? 'Sender'}
                                       size={40}
+                                      username={sender?.username}
                                     />
                                   ) : (
                                     <div className='w-10 shrink-0' />
@@ -2443,7 +2544,9 @@ export default function Messages(): JSX.Element {
                               maxRows={5}
                               placeholder='Start your message'
                               value={inputValue}
+                              aria-keyshortcuts={SUBMIT_KEYSHORTCUTS}
                               onChange={handleInputChange}
+                              onKeyDown={handleMessageInputKeyDown}
                             />
                             <IconButton
                               iconName='TwitterEmojiIcon'
@@ -2456,6 +2559,7 @@ export default function Messages(): JSX.Element {
                             loading={sending}
                             title='Send'
                             type='submit'
+                            aria-keyshortcuts={SUBMIT_KEYSHORTCUTS}
                           >
                             <CustomIcon
                               className='h-5 w-5'
@@ -2482,12 +2586,9 @@ export default function Messages(): JSX.Element {
                         Message requests from people you don&apos;t follow live
                         here. To reply to their messages, you need to accept the
                         request.{' '}
-                        <a
-                          className='font-bold underline'
-                          href='https://bsky.social/about/support'
-                        >
-                          Learn more
-                        </a>
+                        <Link href='/help-center/articles/messages-and-chat-settings'>
+                          <a className='font-bold underline'>Learn more</a>
+                        </Link>
                       </>
                     ) : (
                       'Choose from your existing conversations.'

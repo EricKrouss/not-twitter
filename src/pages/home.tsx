@@ -12,6 +12,7 @@ import {
 } from '@lib/atproto/backend';
 import { useLiveUpdates } from '@lib/context/live-updates-context';
 import { useWindow } from '@lib/context/window-context';
+import { getNextTabIndexFromShortcut } from '@lib/keyboard-shortcuts';
 import { HomeLayout, ProtectedLayout } from '@components/layout/common-layout';
 import { MainLayout } from '@components/layout/main-layout';
 import { SEO } from '@components/common/seo';
@@ -25,7 +26,13 @@ import { HeroIcon } from '@components/ui/hero-icon';
 import { Loading } from '@components/ui/loading';
 import { Error } from '@components/ui/error';
 import { ToolTip } from '@components/ui/tooltip';
-import type { MouseEvent, PointerEvent, ReactElement, ReactNode } from 'react';
+import type {
+  KeyboardEvent,
+  MouseEvent,
+  PointerEvent,
+  ReactElement,
+  ReactNode
+} from 'react';
 import type { HomeFeedPage, SubscribedHomeFeed } from '@lib/atproto/backend';
 import type { TweetWithUser } from '@lib/types/tweet';
 
@@ -36,7 +43,7 @@ type HomeFeedTabData = {
   value: HomeFeedTab;
 };
 
-const HOME_FEED_REFRESH_INTERVAL_MS = 15000;
+const HOME_FEED_REFRESH_INTERVAL_MS = 60000;
 const FOR_YOU_HOME_FEED_TAB = 'for-you';
 const FEED_TAB_PREFIX = 'feed:';
 type HomeFeedRefreshMode = 'banner' | 'replace';
@@ -210,6 +217,28 @@ function HomeTabs({
     suppressNextClickRef.current = false;
   };
 
+  const handleKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
+    const tabButtons = Array.from(
+      event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')
+    );
+    const currentTab =
+      event.target instanceof HTMLElement
+        ? (event.target.closest('[role="tab"]') as HTMLButtonElement | null)
+        : null;
+    const currentIndex = currentTab ? tabButtons.indexOf(currentTab) : -1;
+    const nextIndex = getNextTabIndexFromShortcut(
+      event.key,
+      currentIndex,
+      tabButtons.length
+    );
+
+    if (nextIndex === null) return;
+
+    event.preventDefault();
+    tabButtons[nextIndex]?.focus();
+    setActiveTab(homeFeedTabs[nextIndex].value);
+  };
+
   return (
     <nav
       className='feed-tabs-scroll h-[53px] select-none overflow-x-auto overflow-y-hidden
@@ -222,6 +251,7 @@ function HomeTabs({
       onPointerUp={stopDragging}
       onPointerCancel={stopDragging}
       onClickCapture={handleClickCapture}
+      onKeyDown={handleKeyDown}
     >
       <div className='flex h-full min-w-full'>
         {homeFeedTabs.map(({ label, value }) => {
@@ -291,7 +321,12 @@ export default function Home(): JSX.Element {
   const { data: subscribedFeeds } = useSWR<SubscribedHomeFeed[], Error>(
     'home-subscribed-feeds',
     getSubscribedHomeFeeds,
-    { revalidateOnFocus: false }
+    {
+      dedupingInterval: HOME_FEED_REFRESH_INTERVAL_MS,
+      revalidateOnFocus: false,
+      revalidateOnReconnect: false,
+      shouldRetryOnError: false
+    }
   );
   const homeFeedTabs = useMemo(
     () => getHomeFeedTabs(subscribedFeeds ?? []),
@@ -301,7 +336,12 @@ export default function Home(): JSX.Element {
   const { data, error } = useSWR<HomeFeedPage, Error>(
     ['home-feed', activeTab],
     () => getHomeFeedPage(activeTab),
-    { revalidateOnFocus: false, shouldRetryOnError: false }
+    {
+      dedupingInterval: HOME_FEED_REFRESH_INTERVAL_MS,
+      revalidateOnFocus: false,
+      revalidateOnReconnect: false,
+      shouldRetryOnError: false
+    }
   );
 
   useEffect(() => {
@@ -343,10 +383,26 @@ export default function Home(): JSX.Element {
     if (!data) return;
 
     let canceled = false;
+    let refreshInFlight = false;
+    let lastRefreshAt = Date.now();
 
     const refreshHomeFeed = async (
-      mode: HomeFeedRefreshMode = 'banner'
+      mode: HomeFeedRefreshMode = 'banner',
+      options?: { force?: boolean }
     ): Promise<void> => {
+      if (!options?.force && document.visibilityState === 'hidden') return;
+
+      const now = Date.now();
+      if (refreshInFlight) return;
+      if (
+        !options?.force &&
+        now - lastRefreshAt < HOME_FEED_REFRESH_INTERVAL_MS
+      )
+        return;
+
+      refreshInFlight = true;
+      lastRefreshAt = now;
+
       try {
         const nextPage = await getHomeFeedPage(activeTab);
 
@@ -383,6 +439,8 @@ export default function Home(): JSX.Element {
           );
       } catch {
         // Home can keep its current timeline if a background refresh fails.
+      } finally {
+        refreshInFlight = false;
       }
     };
 
@@ -390,7 +448,7 @@ export default function Home(): JSX.Element {
       void refreshHomeFeed();
     };
     const refreshImmediately = (): void => {
-      void refreshHomeFeed('replace');
+      void refreshHomeFeed('replace', { force: true });
     };
 
     const intervalId = window.setInterval(

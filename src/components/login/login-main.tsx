@@ -60,7 +60,7 @@ export function LoginMain(): JSX.Element {
             </a>
             <p className='text-sm leading-5 text-main-secondary'>
               Create your account on Bluesky, then come back here and sign in
-              with your handle.
+              with your handle or DID.
             </p>
             <p className='pt-8 font-bold text-main-primary'>
               Already have an account?

@@ -17,6 +17,7 @@ import { tweetsCollection } from '@lib/atproto/collections';
 import { query, where, orderBy } from '@lib/atproto/store';
 import { manageBookmark, manageLike, manageRetweet } from '@lib/atproto/utils';
 import { getBskyTweetUrl, getTweetPath, getUserPath } from '@lib/routes';
+import { createYouTubeCardFromText } from '@lib/youtube';
 import { Button } from '@components/ui/button';
 import { HeroIcon } from '@components/ui/hero-icon';
 import { AppIcon, type AppIconName } from '@components/ui/app-icon';
@@ -33,7 +34,12 @@ import {
 } from '@components/tweet/tweet-action-effect';
 import { useOptimisticReactionIds } from '@components/tweet/use-optimistic-reaction-ids';
 import { TweetShare } from '@components/tweet/tweet-share';
+import { TweetEmbed } from '@components/tweet/tweet-embed';
 import { TweetText } from '@components/tweet/tweet-text';
+import {
+  TwitterGifMedia,
+  isGifMedia
+} from '@components/input/twitter-gif-media';
 import type { VariantLabels, Variants } from 'framer-motion';
 import type { ImageData } from '@lib/types/file';
 import type { TweetWithUser } from '@lib/types/tweet';
@@ -302,7 +308,7 @@ function ProfileFullscreenImageModal({
               <img
                 className={cn(
                   'h-full w-full object-contain',
-                  isAvatar && 'rounded-full'
+                  isAvatar && 'profile-picture'
                 )}
                 src={src}
                 alt={alt}
@@ -404,6 +410,11 @@ function ConversationTweet({
   const userId = authUser?.id as string;
   const isOwner = userId === createdBy;
   const tweetLink = getTweetPath(id, username);
+  const hasInlineMedia = !!images?.length;
+  const displayCard = hasInlineMedia
+    ? null
+    : card ?? createYouTubeCardFromText(text);
+  const hideQuotedTweetMedia = hasInlineMedia || !!displayCard;
   const parentDisplayUsername = formatAtprotoDisplayIdentifier(
     parent?.username,
     { hideBskySocialSuffix }
@@ -552,6 +563,13 @@ function ConversationTweet({
             />
           )}
           {!root && <ConversationAttachments images={images} />}
+          {!root && (
+            <TweetEmbed
+              card={displayCard}
+              quotedTweet={quotedTweet}
+              hideQuotedTweetMedia={hideQuotedTweetMedia}
+            />
+          )}
           {root && (
             <Link href={tweetLink}>
               <a
@@ -638,7 +656,8 @@ function ConversationAttachments({
       )}
     >
       {images.slice(0, 4).map((media, index) => {
-        const isVideo = isVideoMedia(media);
+        const isGif = isGifMedia(media);
+        const isVideo = isVideoMedia(media) && !isGif;
 
         return (
           <div
@@ -649,7 +668,12 @@ function ConversationAttachments({
             )}
             key={media.id}
           >
-            {isVideo ? (
+            {isGif ? (
+              <TwitterGifMedia
+                media={media}
+                className='h-full w-full'
+              />
+            ) : isVideo ? (
               <TwitterVideoPlayer
                 className='h-full w-full'
                 src={media.src}

@@ -1,6 +1,6 @@
 /* eslint-disable @next/next/no-img-element */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import cn from 'clsx';
 import { useModal } from '@lib/hooks/useModal';
@@ -13,6 +13,7 @@ import { HeroIcon } from '@components/ui/hero-icon';
 import { ToolTip } from '@components/ui/tooltip';
 import { TwitterVideoPlayer } from '@components/ui/twitter-video-player';
 import { TweetTombstone } from '@components/tweet/tweet-tombstone';
+import { TwitterGifMedia, isGifMedia } from './twitter-gif-media';
 import type { MotionProps } from 'framer-motion';
 import type { CSSProperties, KeyboardEvent } from 'react';
 import type { ImagesPreview, ImageData } from '@lib/types/file';
@@ -52,10 +53,6 @@ const MAX_SINGLE_TWEET_MEDIA_RATIO = 16 / 9;
 
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
-}
-
-function isGifMedia({ src, type }: ImageData): boolean {
-  return type === 'gif' || !!type?.includes('gif') || /\.gif($|\?)/i.test(src);
 }
 
 function isVideoMedia({ src, type }: ImageData): boolean {
@@ -110,115 +107,6 @@ function getTweetMediaStyle({
   );
 
   return { aspectRatio: `${clampedRatio} / 1` };
-}
-
-function TwitterGifIcon({ playing }: { playing: boolean }): JSX.Element {
-  return (
-    <svg
-      className='h-7 w-7 fill-current'
-      viewBox='0 0 24 24'
-      aria-hidden='true'
-    >
-      {playing ? (
-        <path d='M7 5h3v14H7V5zm7 0h3v14h-3V5z' />
-      ) : (
-        <path d='M8 5v14l11-7L8 5z' />
-      )}
-    </svg>
-  );
-}
-
-function TwitterGifMedia({
-  media,
-  className
-}: {
-  media: ImageData;
-  className?: string;
-}): JSX.Element {
-  const [playing, setPlaying] = useState(true);
-  const [animationKey, setAnimationKey] = useState(0);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const videoSource = isVideoMedia(media);
-  const label = playing ? 'Pause this GIF' : 'Play this GIF';
-
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-
-    if (playing) void video.play().catch(() => undefined);
-    else video.pause();
-  }, [playing]);
-
-  const togglePlayback = (): void => {
-    setPlaying((currentPlaying) => {
-      const nextPlaying = !currentPlaying;
-
-      if (nextPlaying && !videoSource) setAnimationKey((key) => key + 1);
-      return nextPlaying;
-    });
-  };
-
-  return (
-    <div
-      className={cn(
-        'group/gif relative h-full w-full overflow-hidden bg-black text-white outline-none',
-        className
-      )}
-      role='button'
-      tabIndex={0}
-      aria-label={label}
-      data-testid='playButton'
-      onClick={preventBubbling(togglePlayback)}
-      onKeyDown={(event): void => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          event.stopPropagation();
-          togglePlayback();
-        }
-      }}
-    >
-      {videoSource ? (
-        <video
-          ref={videoRef}
-          className='h-full w-full object-cover object-center'
-          src={media.src}
-          poster={media.poster ?? undefined}
-          autoPlay
-          loop
-          muted
-          playsInline
-        />
-      ) : (
-        <img
-          className='h-full w-full object-cover object-center'
-          src={playing ? media.src : media.poster ?? media.src}
-          alt={media.alt}
-          key={`${media.src}-${animationKey}-${playing ? 'playing' : 'paused'}`}
-          draggable={false}
-        />
-      )}
-      <span
-        className='absolute bottom-2 left-2 rounded-sm bg-black/75 px-1.5 py-0.5
-                   text-[11px] font-bold leading-4 tracking-[0.02em] text-white'
-      >
-        GIF
-      </span>
-      <span
-        className={cn(
-          `bg-black/45 group-hover/gif:bg-black/55 absolute left-1/2 top-1/2 flex h-16 w-16
-           -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full text-white
-           backdrop-blur-[1px] transition duration-150 group-focus-visible/gif:ring-2
-           group-focus-visible/gif:ring-white/80`,
-          playing
-            ? 'opacity-0 group-hover/gif:opacity-100 group-focus-visible/gif:opacity-100'
-            : 'opacity-100'
-        )}
-        aria-hidden='true'
-      >
-        <TwitterGifIcon playing={playing} />
-      </span>
-    </div>
-  );
 }
 
 export function ImagePreview({

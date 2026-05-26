@@ -40,7 +40,7 @@ export function BlueskySignInModal({
     e.preventDefault();
 
     if (!trimmedIdentifier) {
-      setErrorMessage('Enter your Bluesky username.');
+      setErrorMessage('Enter your Bluesky handle or DID.');
       return;
     }
 
@@ -90,7 +90,7 @@ export function BlueskySignInModal({
             htmlFor='bluesky-identifier'
           >
             <span className='absolute left-3 top-2 text-sm text-main-secondary'>
-              Bluesky username
+              Bluesky handle or DID
             </span>
             <span className='mt-6 flex items-center px-3 pb-2'>
               <CustomIcon

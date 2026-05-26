@@ -21,6 +21,7 @@ const ownerHandle = 'krouss.net';
 
 const asideFooterLinks: Readonly<AsideFooterLink[]> = [
   { label: 'Privacy Policy', href: '/privacy' },
+  { label: 'Help Center', href: '/help-center' },
   {
     label: 'Repo',
     href: 'https://github.com/EricKrouss/not-twitter',

@@ -3,11 +3,10 @@ import cn from 'clsx';
 import type { MouseEvent, ReactNode } from 'react';
 import type { TweetTombstoneKind } from '@lib/types/tweet';
 
-const LEARN_MORE_URL =
-  'https://help.twitter.com/en/rules-and-policies/notices-on-twitter';
+const LEARN_MORE_URL = '/help-center/articles/tweet-tombstones-and-notices';
 
 const TWITTER_RULES_URL =
-  'https://help.twitter.com/en/rules-and-policies/twitter-rules';
+  'https://bsky.social/about/support/community-guidelines';
 
 export const limitedVisibilityTweetMessage =
   'You’re unable to view this Tweet because this account owner limits who can view their Tweets.';
@@ -55,8 +54,9 @@ function TombstoneLink({
     'custom-underline text-main-accent',
     strong ? 'font-bold' : 'font-normal'
   );
+  const isInternal = internal ?? href.startsWith('/');
 
-  if (internal)
+  if (isInternal)
     return (
       <Link href={href}>
         <a className={className} onClick={stopTweetNavigation}>
@@ -165,8 +165,12 @@ export function TweetTombstone({
   country = '<country>',
   onView
 }: TweetTombstoneProps): JSX.Element {
-  const { className: styleClassName, linkIsStrong, mediaAction, strong } =
-    getTombstoneStyle(kind);
+  const {
+    className: styleClassName,
+    linkIsStrong,
+    mediaAction,
+    strong
+  } = getTombstoneStyle(kind);
   const boxClassName = cn(
     `max-w-full border border-light-line-reply bg-main-sidebar-background
      text-light-secondary dark:border-dark-border dark:text-dark-secondary`,
@@ -190,7 +194,11 @@ export function TweetTombstone({
       </div>
     );
 
-  if (kind === 'reported' || kind === 'muted-account' || kind === 'muted-word') {
+  if (
+    kind === 'reported' ||
+    kind === 'muted-account' ||
+    kind === 'muted-word'
+  ) {
     const message =
       kind === 'reported'
         ? 'You reported this Tweet.'
@@ -219,15 +227,17 @@ export function TweetTombstone({
       {kind === 'sensitive' && 'This Tweet may include sensitive content.'}
       {kind === 'age-restricted' && (
         <>
-          Age-restricted adult content. This content might not be appropriate for
-          people under 18 years old.{' '}
+          Age-restricted adult content. This content might not be appropriate
+          for people under 18 years old.{' '}
           <TombstoneLink strong={linkIsStrong}>Learn more</TombstoneLink>
         </>
       )}
       {kind === 'rules-violation' && (
         <>
           This Tweet violated the{' '}
-          <TombstoneLink href={TWITTER_RULES_URL}>Twitter Rules</TombstoneLink>
+          <TombstoneLink href={TWITTER_RULES_URL}>
+            Bluesky Community Guidelines
+          </TombstoneLink>
           . <TombstoneLink strong={linkIsStrong}>Learn more</TombstoneLink>
         </>
       )}

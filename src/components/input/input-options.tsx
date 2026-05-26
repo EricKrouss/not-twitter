@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { motion } from 'framer-motion';
+import { SUBMIT_KEYSHORTCUTS } from '@lib/keyboard-shortcuts';
 import { Button } from '@components/ui/button';
 import { HeroIcon } from '@components/ui/hero-icon';
 import { ToolTip } from '@components/ui/tooltip';
@@ -202,6 +203,7 @@ export function InputOptions({
                      enabled:hover:bg-main-accent/90
                      enabled:active:bg-main-accent/75'
           disabled={!isValidTweet}
+          aria-keyshortcuts={SUBMIT_KEYSHORTCUTS}
         >
           {reply ? 'Reply' : 'Tweet'}
         </Button>
