@@ -1,6 +1,7 @@
 /* eslint-disable @next/next/no-img-element */
 
 import { useEffect, useState } from 'react';
+import { Dialog } from '@headlessui/react';
 import { AnimatePresence, motion } from 'framer-motion';
 import cn from 'clsx';
 import { useModal } from '@lib/hooks/useModal';
@@ -15,7 +16,7 @@ import { TwitterVideoPlayer } from '@components/ui/twitter-video-player';
 import { TweetTombstone } from '@components/tweet/tweet-tombstone';
 import { TwitterGifMedia, isGifMedia } from './twitter-gif-media';
 import type { MotionProps } from 'framer-motion';
-import type { CSSProperties, KeyboardEvent } from 'react';
+import type { ChangeEvent, CSSProperties, KeyboardEvent } from 'react';
 import type { ImagesPreview, ImageData } from '@lib/types/file';
 import type { TweetMediaWarning, TweetWithUser } from '@lib/types/tweet';
 
@@ -27,6 +28,7 @@ type ImagePreviewProps = {
   moderationWarning?: TweetMediaWarning | null;
   tweetData?: TweetWithUser;
   removeImage?: (targetId: string) => () => void;
+  updateAltText?: (targetId: string, altText: string) => void;
 };
 
 const variants: MotionProps = {
@@ -50,6 +52,7 @@ const postImageBorderRadius: Readonly<PostImageBorderRadius> = {
 const DEFAULT_TWEET_MEDIA_RATIO = 16 / 9;
 const MIN_SINGLE_TWEET_MEDIA_RATIO = 4 / 5;
 const MAX_SINGLE_TWEET_MEDIA_RATIO = 16 / 9;
+const ALT_TEXT_LIMIT = 1000;
 
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -109,6 +112,106 @@ function getTweetMediaStyle({
   return { aspectRatio: `${clampedRatio} / 1` };
 }
 
+function getMediaAltText(media: ImageData | undefined): string {
+  return media?.altText?.trim() ?? '';
+}
+
+type AltTextModalProps = {
+  media: ImagesPreview[number];
+  editable: boolean;
+  value: string;
+  setValue: (value: string) => void;
+  closeModal: () => void;
+  saveAltText: () => void;
+};
+
+function AltTextModal({
+  media,
+  editable,
+  value,
+  setValue,
+  closeModal,
+  saveAltText
+}: AltTextModalProps): JSX.Element {
+  const altText = getMediaAltText(media);
+  const mediaKind = isVideoMedia(media) ? 'Video' : 'Image';
+  const characterCount = Array.from(value).length;
+  const overLimit = characterCount > ALT_TEXT_LIMIT;
+
+  const handleChange = ({
+    target: { value: nextValue }
+  }: ChangeEvent<HTMLTextAreaElement>): void => setValue(nextValue);
+
+  return (
+    <div
+      className='w-full overflow-hidden rounded-2xl bg-main-background text-light-primary shadow-xl
+                 dark:text-dark-primary xs:w-[600px]'
+      onClick={preventBubbling(null, true)}
+    >
+      <header
+        className='flex h-[53px] items-center border-b border-light-border px-2
+                   dark:border-dark-border'
+      >
+        <Button
+          className='dark-bg-tab group relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full p-0
+                     hover:bg-light-primary/10 active:bg-light-primary/20
+                     dark:hover:bg-dark-primary/10 dark:active:bg-dark-primary/20'
+          aria-label='Close'
+          onClick={closeModal}
+        >
+          <HeroIcon className='h-5 w-5' iconName='XMarkIcon' />
+        </Button>
+        <Dialog.Title className='ml-5 text-xl font-bold leading-6'>
+          {mediaKind} description
+        </Dialog.Title>
+        {editable && (
+          <Button
+            className='accent-tab ml-auto rounded-full bg-light-primary px-4 py-1.5 text-[15px]
+                       font-bold leading-5 text-white transition hover:bg-light-primary/90
+                       active:bg-light-primary/80 disabled:opacity-50 dark:bg-light-border
+                       dark:text-light-primary dark:hover:bg-light-border/90'
+            disabled={overLimit}
+            onClick={saveAltText}
+          >
+            Done
+          </Button>
+        )}
+      </header>
+      <div className='px-4 py-3'>
+        {editable ? (
+          <>
+            <textarea
+              className='min-h-[160px] w-full resize-none rounded-md border border-light-border
+                         bg-transparent p-3 text-[17px] leading-6 outline-none transition
+                         placeholder:text-light-secondary focus:border-main-accent
+                         dark:border-dark-border dark:placeholder:text-dark-secondary'
+              maxLength={ALT_TEXT_LIMIT}
+              placeholder='Description'
+              value={value}
+              onChange={handleChange}
+              autoFocus
+            />
+            <div
+              className={cn(
+                'mt-2 text-right text-[13px] leading-4',
+                overLimit
+                  ? 'text-accent-red'
+                  : 'text-light-secondary dark:text-dark-secondary'
+              )}
+            >
+              {characterCount}/{ALT_TEXT_LIMIT}
+            </div>
+          </>
+        ) : (
+          <Dialog.Description className='max-h-[50vh] whitespace-pre-wrap break-words text-[17px] leading-6'>
+            {altText}
+          </Dialog.Description>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function ImagePreview({
   tweet,
   viewTweet,
@@ -116,11 +219,16 @@ export function ImagePreview({
   imagesPreview,
   moderationWarning,
   tweetData,
-  removeImage
+  removeImage,
+  updateAltText
 }: ImagePreviewProps): JSX.Element {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [selectedImage, setSelectedImage] = useState<ImageData | null>(null);
   const [warningRevealed, setWarningRevealed] = useState(false);
+  const [altTextMedia, setAltTextMedia] = useState<
+    ImagesPreview[number] | null
+  >(null);
+  const [altTextValue, setAltTextValue] = useState('');
 
   const { open, openModal, closeModal } = useModal();
 
@@ -138,6 +246,23 @@ export function ImagePreview({
     setSelectedImage(imagesPreview[index]);
     setSelectedIndex(index);
     openModal();
+  };
+
+  const closeAltTextModal = (): void => {
+    setAltTextMedia(null);
+    setAltTextValue('');
+  };
+
+  const openAltTextModal = (media: ImagesPreview[number]) => (): void => {
+    setAltTextMedia(media);
+    setAltTextValue(getMediaAltText(media));
+  };
+
+  const saveAltText = (): void => {
+    if (!altTextMedia || !updateAltText) return;
+
+    updateAltText(altTextMedia.id, altTextValue);
+    closeAltTextModal();
   };
 
   const handleNextIndex = (type: 'prev' | 'next') => () => {
@@ -232,11 +357,30 @@ export function ImagePreview({
           closeModal={closeModal}
         />
       </Modal>
+      <Modal
+        modalClassName='w-full max-w-[600px]'
+        open={!!altTextMedia}
+        closeModal={closeAltTextModal}
+      >
+        {altTextMedia && (
+          <AltTextModal
+            media={altTextMedia}
+            editable={!!updateAltText}
+            value={altTextValue}
+            setValue={setAltTextValue}
+            saveAltText={saveAltText}
+            closeModal={closeAltTextModal}
+          />
+        )}
+      </Modal>
       <AnimatePresence>
         {visibleMedia.map((media, index) => {
           const { id, src, alt, poster, viewCount } = media;
           const isGif = isGifMedia(media);
           const isVideo = isVideoMedia(media) && !isGif;
+          const mediaDescriptionKind = isVideo ? 'video' : 'image';
+          const mediaAltText = getMediaAltText(media);
+          const showAltTextBadge = !!mediaAltText || !!updateAltText;
           const imageRadius = isTweet
             ? postImageBorderRadius[visiblePreviewCount][index]
             : 'rounded-2xl';
@@ -307,9 +451,30 @@ export function ImagePreview({
                   }
                   layout='fill'
                   src={src}
-                  alt={alt}
+                  alt={mediaAltText || alt}
                   useSkeleton={isTweet}
                 />
+              )}
+              {showAltTextBadge && !isGif && (
+                <Button
+                  className={cn(
+                    `absolute bottom-0 left-0 z-10 m-2 rounded-md bg-black/70 px-2
+                     py-0.5 text-[13px] font-extrabold leading-4 text-white
+                     backdrop-blur-sm transition hover:bg-black/80 focus-visible:ring-2
+                     focus-visible:ring-white/70 active:bg-black/90`,
+                    !mediaAltText && 'bg-black/55 text-white/90'
+                  )}
+                  aria-label={
+                    updateAltText
+                      ? `${
+                          mediaAltText ? 'Edit' : 'Add'
+                        } ${mediaDescriptionKind} description`
+                      : `View ${mediaDescriptionKind} description`
+                  }
+                  onClick={preventBubbling(openAltTextModal(media))}
+                >
+                  {updateAltText && !mediaAltText ? '+ALT' : 'ALT'}
+                </Button>
               )}
               {removeImage && (
                 <Button

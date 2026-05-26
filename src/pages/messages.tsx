@@ -99,7 +99,11 @@ function mergeConvos(
   currentConvos: ChatConvo[],
   nextConvos: ChatConvo[]
 ): ChatConvo[] {
-  const byId = new Map(currentConvos.map((convo) => [convo.id, convo]));
+  const byId = new Map<string, ChatConvo>();
+
+  currentConvos.forEach((convo) => {
+    byId.set(convo.id, convo);
+  });
 
   nextConvos.forEach((convo) => {
     byId.set(convo.id, { ...byId.get(convo.id), ...convo });
@@ -114,13 +118,30 @@ function mergeMessages(
   currentMessages: ChatMessage[],
   nextMessages: ChatMessage[]
 ): ChatMessage[] {
-  const byId = new Map(currentMessages.map((message) => [message.id, message]));
+  const byId = new Map<string, ChatMessage>();
+
+  currentMessages.forEach((message) => {
+    byId.set(message.id, message);
+  });
 
   nextMessages.forEach((message) => byId.set(message.id, message));
 
   return Array.from(byId.values()).sort(
     (a, b) => +a.sentAt.toDate() - +b.sentAt.toDate()
   );
+}
+
+function mergeThreadPage(
+  currentPage: ChatMessagesPage | null,
+  nextPage: ChatMessagesPage,
+  replaceCursor = false
+): ChatMessagesPage {
+  if (!currentPage) return nextPage;
+
+  return {
+    cursor: replaceCursor ? nextPage.cursor : currentPage.cursor,
+    messages: mergeMessages(currentPage.messages, nextPage.messages)
+  };
 }
 
 function getErrorMessage(error: unknown): string {
@@ -1322,6 +1343,7 @@ export default function Messages(): JSX.Element {
   );
   const [showConversationInfo, setShowConversationInfo] = useState(false);
   const [showMessageRequests, setShowMessageRequests] = useState(false);
+  const [shouldLoadRequests, setShouldLoadRequests] = useState(false);
   const [mutingConvo, setMutingConvo] = useState(false);
   const [leavingConvo, setLeavingConvo] = useState(false);
   const [blockingParticipant, setBlockingParticipant] = useState(false);
@@ -1336,6 +1358,10 @@ export default function Messages(): JSX.Element {
   const [savingAllowIncoming, setSavingAllowIncoming] =
     useState<ChatAllowIncoming | null>(null);
   const unreadCountsRef = useRef<Map<string, number>>(new Map());
+  const threadCacheRef = useRef<Map<string, ChatMessagesPage>>(new Map());
+  const messagePageRequestsRef = useRef<Map<string, Promise<ChatMessagesPage>>>(
+    new Map()
+  );
   const initializedConvosRef = useRef(false);
   const activeConvoIdRef = useRef<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -1356,7 +1382,7 @@ export default function Messages(): JSX.Element {
     error: requestsError,
     mutate: mutateRequests
   } = useSWR<ChatConvoRequestsPage, Error>(
-    user ? `chat-convo-requests:${user.id}` : null,
+    user && shouldLoadRequests ? `chat-convo-requests:${user.id}` : null,
     () => listChatConvoRequests(),
     { revalidateOnFocus: false }
   );
@@ -1380,6 +1406,16 @@ export default function Messages(): JSX.Element {
     );
     initializedConvosRef.current = true;
   }, [data]);
+
+  useEffect(() => {
+    setShouldLoadRequests(false);
+    threadCacheRef.current.clear();
+    messagePageRequestsRef.current.clear();
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (user && (data || error)) setShouldLoadRequests(true);
+  }, [data, error, user]);
 
   useEffect(() => {
     if (!requestsData) return;
@@ -1425,46 +1461,98 @@ export default function Messages(): JSX.Element {
     messagesEndRef.current?.scrollIntoView({ block: 'end' });
   }, [activeConvoId, loadingMessages, loadingMoreMessages, messages.length]);
 
-  const loadThread = useCallback(async (convoId: string): Promise<void> => {
-    activeConvoIdRef.current = convoId;
-    setActiveConvoId(convoId);
-    setMessages([]);
-    setMessageCursor(null);
-    setActiveError(null);
-    setReactionPickerMessageId(null);
-    setShowConversationInfo(false);
-    setLoadingMessages(true);
+  const getMessagePage = useCallback(
+    (convoId: string, cursor?: string | null): Promise<ChatMessagesPage> => {
+      const requestKey = `${convoId}:${cursor ?? ''}`;
+      const existingRequest = messagePageRequestsRef.current.get(requestKey);
+      if (existingRequest) return existingRequest;
 
-    try {
-      const page = await getChatMessages(convoId);
-      const lastMessage = page.messages[page.messages.length - 1];
-
-      setMessages(page.messages);
-      setMessageCursor(page.cursor);
-      unreadCountsRef.current.set(convoId, 0);
-      setConvos((currentConvos) =>
-        currentConvos.map((convo) =>
-          convo.id === convoId
-            ? { ...convo, opened: true, unreadCount: 0 }
-            : convo
-        )
+      const request = getChatMessages(convoId, cursor ?? undefined).finally(
+        () => {
+          if (messagePageRequestsRef.current.get(requestKey) === request)
+            messagePageRequestsRef.current.delete(requestKey);
+        }
       );
 
-      if (lastMessage) void markChatConvoRead(convoId, lastMessage.id);
-    } catch (error) {
-      setActiveError(toError(error));
-    } finally {
-      setLoadingMessages(false);
-    }
-  }, []);
+      messagePageRequestsRef.current.set(requestKey, request);
+      return request;
+    },
+    []
+  );
+
+  const applyMessagesPage = useCallback(
+    (
+      convoId: string,
+      page: ChatMessagesPage,
+      replaceCursor = false
+    ): ChatMessagesPage | null => {
+      const nextPage = mergeThreadPage(
+        threadCacheRef.current.get(convoId) ?? null,
+        page,
+        replaceCursor
+      );
+
+      threadCacheRef.current.set(convoId, nextPage);
+
+      if (activeConvoIdRef.current !== convoId) return null;
+
+      setMessages(nextPage.messages);
+      setMessageCursor(nextPage.cursor);
+      return nextPage;
+    },
+    []
+  );
+
+  const loadThread = useCallback(
+    async (convoId: string): Promise<void> => {
+      activeConvoIdRef.current = convoId;
+      setActiveConvoId(convoId);
+      setActiveError(null);
+      setReactionPickerMessageId(null);
+      setShowConversationInfo(false);
+
+      const cachedPage = threadCacheRef.current.get(convoId);
+
+      setMessages(cachedPage?.messages ?? []);
+      setMessageCursor(cachedPage?.cursor ?? null);
+      setLoadingMessages(!cachedPage);
+
+      try {
+        const page = await getMessagePage(convoId);
+        const nextPage = applyMessagesPage(convoId, page);
+        if (!nextPage) return;
+
+        const lastMessage = nextPage.messages[nextPage.messages.length - 1];
+
+        unreadCountsRef.current.set(convoId, 0);
+        setConvos((currentConvos) =>
+          currentConvos.map((convo) =>
+            convo.id === convoId
+              ? { ...convo, opened: true, unreadCount: 0 }
+              : convo
+          )
+        );
+
+        if (lastMessage) void markChatConvoRead(convoId, lastMessage.id);
+      } catch (error) {
+        if (activeConvoIdRef.current === convoId && !cachedPage)
+          setActiveError(toError(error));
+      } finally {
+        if (activeConvoIdRef.current === convoId) setLoadingMessages(false);
+      }
+    },
+    [applyMessagesPage, getMessagePage]
+  );
 
   const openConversationShell = useCallback(
     (convo: ChatConvo): void => {
+      const cachedPage = threadCacheRef.current.get(convo.id);
+
       activeConvoIdRef.current = convo.id;
       setConvos((currentConvos) => mergeConvos(currentConvos, [convo]));
       setActiveConvoId(convo.id);
-      setMessages([]);
-      setMessageCursor(null);
+      setMessages(cachedPage?.messages ?? []);
+      setMessageCursor(cachedPage?.cursor ?? null);
       setActiveError(null);
       setReactionPickerMessageId(null);
       setShowConversationInfo(false);
@@ -1592,24 +1680,15 @@ export default function Messages(): JSX.Element {
     applyConvoPage(page);
   }, [applyConvoPage]);
 
-  const applyMessagesPage = useCallback(
-    (page: ChatMessagesPage, replaceCursor = false): void => {
-      if (replaceCursor || !messageCursor) setMessageCursor(page.cursor);
-      setMessages((currentMessages) =>
-        mergeMessages(currentMessages, page.messages)
-      );
-    },
-    [messageCursor]
-  );
-
   const refreshActiveMessages = useCallback(async (): Promise<void> => {
     const activeId = activeConvoIdRef.current;
     if (!activeId) return;
 
-    const page = await getChatMessages(activeId);
-    applyMessagesPage(page);
+    const page = await getMessagePage(activeId);
+    const nextPage = applyMessagesPage(activeId, page);
+    if (!nextPage) return;
 
-    const lastMessage = page.messages[page.messages.length - 1];
+    const lastMessage = nextPage.messages[nextPage.messages.length - 1];
     if (lastMessage) {
       unreadCountsRef.current.set(activeId, 0);
       setConvos((currentConvos) =>
@@ -1619,7 +1698,7 @@ export default function Messages(): JSX.Element {
       );
       void markChatConvoRead(activeId, lastMessage.id);
     }
-  }, [applyMessagesPage]);
+  }, [applyMessagesPage, getMessagePage]);
 
   useEffect(() => {
     if (!user) return;
@@ -1667,14 +1746,15 @@ export default function Messages(): JSX.Element {
 
   const loadMoreMessages = async (): Promise<void> => {
     if (!activeConvoId || !messageCursor) return;
+    const convoId = activeConvoId;
 
     skipNextMessageScrollRef.current = true;
     setLoadingMoreMessages(true);
 
     try {
-      const nextPage = await getChatMessages(activeConvoId, messageCursor);
+      const nextPage = await getMessagePage(convoId, messageCursor);
 
-      applyMessagesPage(nextPage, true);
+      applyMessagesPage(convoId, nextPage, true);
     } catch (error) {
       toast.error(getErrorMessage(error));
     } finally {
@@ -1714,9 +1794,17 @@ export default function Messages(): JSX.Element {
       const message = await sendChatMessage(activeConvoId, inputValue);
 
       setInputValue('');
-      setMessages((currentMessages) =>
-        mergeMessages(currentMessages, [message])
-      );
+      setMessages((currentMessages) => {
+        const nextMessages = mergeMessages(currentMessages, [message]);
+        const cachedPage = threadCacheRef.current.get(activeConvoId);
+
+        threadCacheRef.current.set(activeConvoId, {
+          cursor: cachedPage?.cursor ?? messageCursor,
+          messages: nextMessages
+        });
+
+        return nextMessages;
+      });
       setConvos((currentConvos) =>
         mergeConvos(
           currentConvos.map((convo) =>
@@ -1739,6 +1827,7 @@ export default function Messages(): JSX.Element {
     if (!user) return;
 
     setAuthorizingMessages(true);
+    setShouldLoadRequests(true);
 
     try {
       await signInWithBluesky(user.username);
@@ -1773,10 +1862,15 @@ export default function Messages(): JSX.Element {
     (): void => {
       setShowMessageRequests(false);
       setShowChatSettings(false);
+      if (convoId === activeConvoIdRef.current) {
+        setShowConversationInfo(false);
+        return;
+      }
       void loadThread(convoId);
     };
 
   const openMessageRequests = (): void => {
+    setShouldLoadRequests(true);
     setShowMessageRequests(true);
     setShowChatSettings(false);
     setActiveConvoId(null);
@@ -1993,9 +2087,17 @@ export default function Messages(): JSX.Element {
         ? await removeChatReaction(activeConvoId, message.id, value)
         : await addChatReaction(activeConvoId, message.id, value);
 
-      setMessages((currentMessages) =>
-        mergeMessages(currentMessages, [nextMessage])
-      );
+      setMessages((currentMessages) => {
+        const nextMessages = mergeMessages(currentMessages, [nextMessage]);
+        const cachedPage = threadCacheRef.current.get(activeConvoId);
+
+        threadCacheRef.current.set(activeConvoId, {
+          cursor: cachedPage?.cursor ?? messageCursor,
+          messages: nextMessages
+        });
+
+        return nextMessages;
+      });
       setConvos((currentConvos) =>
         currentConvos.map((convo) =>
           convo.id === activeConvoId && convo.lastMessage?.id === nextMessage.id

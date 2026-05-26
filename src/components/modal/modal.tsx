@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { Dialog } from '@headlessui/react';
 import cn from 'clsx';
-import type { ReactNode } from 'react';
+import type { MouseEvent, ReactNode } from 'react';
 import type { Variants } from 'framer-motion';
 
 type ModalProps = {
@@ -35,6 +35,10 @@ const variants: Variants[] = [
 
 export const [backdrop, modal] = variants;
 
+function stopModalClickPropagation(event: MouseEvent<HTMLDivElement>): void {
+  event.stopPropagation();
+}
+
 export function Modal({
   open,
   children,
@@ -56,6 +60,7 @@ export function Modal({
           <motion.div
             className='hover-animation fixed inset-0 bg-black/40 dark:bg-[#5B7083]/40'
             aria-hidden='true'
+            onClick={stopModalClickPropagation}
             {...backdrop}
           />
           <div
@@ -63,6 +68,7 @@ export function Modal({
               'fixed inset-0 overflow-y-auto p-4',
               className ?? 'flex items-center justify-center'
             )}
+            onClick={stopModalClickPropagation}
           >
             <Dialog.Panel
               className={modalClassName}

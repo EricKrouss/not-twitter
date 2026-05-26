@@ -144,7 +144,7 @@ export function EditProfileModal({
             onChange={editImage('profile')}
           />
           <div
-            className='profile-picture group absolute left-4 top-0 aspect-square w-[120px] -translate-y-1/2
+            className='profile-picture-frame group absolute left-4 top-0 aspect-square w-[120px] -translate-y-1/2
                        overflow-hidden bg-main-background p-1'
           >
             <NextImage

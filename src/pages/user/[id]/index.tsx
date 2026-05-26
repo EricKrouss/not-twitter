@@ -24,6 +24,7 @@ export default function UserTweets(): JSX.Element {
     hideBskySocialSuffix
   });
   const profileRestricted = !!user?.blocking || !!user?.blockedBy;
+  const queriesDisabled = !id || profileRestricted;
 
   const { data: pinnedData, loading: pinnedLoading } = useDocument(
     doc(tweetsCollection, pinnedTweet ?? 'null'),
@@ -33,6 +34,8 @@ export default function UserTweets(): JSX.Element {
       includeUser: true
     }
   );
+  const awaitingPinnedTweet = !!pinnedTweet && pinnedLoading;
+  const timelineQueriesDisabled = queriesDisabled || awaitingPinnedTweet;
 
   const { data: ownerTweets, loading: ownerLoading } = useCollection(
     query(
@@ -40,7 +43,7 @@ export default function UserTweets(): JSX.Element {
       where('createdBy', '==', id),
       where('parent', '==', null)
     ),
-    { includeUser: true, allowNull: true, disabled: profileRestricted }
+    { includeUser: true, allowNull: true, disabled: timelineQueriesDisabled }
   );
 
   const { data: peopleTweets, loading: peopleLoading } = useCollection(
@@ -49,17 +52,20 @@ export default function UserTweets(): JSX.Element {
       where('createdBy', '!=', id),
       where('userRetweets', 'array-contains', id)
     ),
-    { includeUser: true, allowNull: true, disabled: profileRestricted }
+    { includeUser: true, allowNull: true, disabled: timelineQueriesDisabled }
   );
 
-  const mergedTweets = mergeData(true, ownerTweets, peopleTweets);
+  const mergedTweets = awaitingPinnedTweet
+    ? null
+    : mergeData(true, ownerTweets, peopleTweets);
   const timelineTweets = pinnedTweet
     ? mergedTweets?.filter(({ id }) => id !== pinnedTweet) ?? null
     : mergedTweets;
 
-  const timelineLoading =
-    ownerLoading || peopleLoading || (!!pinnedTweet && pinnedLoading);
   const hasProfileTweets = !!pinnedData || !!timelineTweets?.length;
+  const timelineLoading =
+    awaitingPinnedTweet ||
+    (!hasProfileTweets && (ownerLoading || peopleLoading));
 
   return (
     <section>

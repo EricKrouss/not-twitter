@@ -80,6 +80,7 @@ export type Tweet = {
   bookmarkCount: number;
   replySetting?: TweetReplySetting | null;
   viewerCanReply?: boolean | null;
+  threadMuted?: boolean | null;
   unavailable?: TweetUnavailableReason;
   tombstone?: TweetTombstoneKind | null;
 };

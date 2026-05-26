@@ -32,6 +32,7 @@ import { MainContainer } from '@components/home/main-container';
 import { MobileSidebar } from '@components/sidebar/mobile-sidebar';
 import { UserAvatar } from '@components/user/user-avatar';
 import { UserName } from '@components/user/user-name';
+import { UserTooltip } from '@components/user/user-tooltip';
 import { UserUsername } from '@components/user/user-username';
 import { Button } from '@components/ui/button';
 import { CustomIcon } from '@components/ui/custom-icon';
@@ -40,6 +41,7 @@ import { Loading } from '@components/ui/loading';
 import { Error as ErrorMessage } from '@components/ui/error';
 import { ToolTip } from '@components/ui/tooltip';
 import { TweetEmbed } from '@components/tweet/tweet-embed';
+import { TweetActions } from '@components/tweet/tweet-actions';
 import { TweetActionEffect } from '@components/tweet/tweet-action-effect';
 import { TweetRetweetMenu } from '@components/tweet/tweet-retweet-menu';
 import { TweetText } from '@components/tweet/tweet-text';
@@ -52,7 +54,7 @@ import type {
 import type { NotificationsTab } from '@lib/routes';
 import type { CustomIconName } from '@components/ui/custom-icon';
 import type { IconName } from '@components/ui/hero-icon';
-import type { ReactElement, ReactNode } from 'react';
+import type { KeyboardEvent, MouseEvent, ReactElement, ReactNode } from 'react';
 
 type NotificationsTabData = {
   label: string;
@@ -127,15 +129,29 @@ const mentionActions: Readonly<MentionAction[]> = [
 
 const notificationTabs: Readonly<NotificationsTabData[]> = [
   { label: 'All', value: 'all' },
-  { label: 'Mentions', value: 'mentions' },
-  { label: 'Tweets', value: 'tweets' }
+  { label: 'Mentions', value: 'mentions' }
 ];
+
+const notificationLinkChildSelector = 'a, [role="link"]';
+const notificationInteractiveChildSelector =
+  'a, button, input, select, textarea, [role="button"], [role="link"]';
+
+function eventStartedInNotificationChild(
+  target: EventTarget | null,
+  currentTarget: HTMLElement,
+  selector: string
+): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+
+  const interactiveChild = target.closest(selector);
+
+  return !!interactiveChild && interactiveChild !== currentTarget;
+}
 
 function getNotificationReasonsForTab(
   activeTab: NotificationsTab
 ): NotificationReason[] | undefined {
   if (activeTab === 'mentions') return ['mention', 'reply', 'quote'];
-  if (activeTab === 'tweets') return ['subscribed-post'];
 
   return undefined;
 }
@@ -148,9 +164,11 @@ function mergeNotifications(
   currentNotifications: NotificationItem[],
   nextNotifications: NotificationItem[]
 ): NotificationItem[] {
-  const notificationsById = new Map(
-    currentNotifications.map((notification) => [notification.id, notification])
-  );
+  const notificationsById = new Map<string, NotificationItem>();
+
+  currentNotifications.forEach((notification) => {
+    notificationsById.set(notification.id, notification);
+  });
 
   nextNotifications.forEach((notification) => {
     notificationsById.set(notification.id, {
@@ -393,14 +411,15 @@ function NotificationAvatarStack({
   return (
     <div className='flex min-w-0 items-center -space-x-2'>
       {users.slice(0, 5).map((user) => (
-        <UserAvatar
-          className='bg-main-background ring-2 ring-main-background'
-          username={user.username}
-          src={user.photoURL}
-          alt={user.name}
-          size={32}
-          key={user.id}
-        />
+        <UserTooltip avatar {...user} key={user.id}>
+          <UserAvatar
+            className='bg-main-background ring-2 ring-main-background'
+            username={user.username}
+            src={user.photoURL}
+            alt={user.name}
+            size={32}
+          />
+        </UserTooltip>
       ))}
     </div>
   );
@@ -453,22 +472,15 @@ function NotificationEmptyState({
   activeTab: NotificationsTab;
 }): JSX.Element {
   const mentions = activeTab === 'mentions';
-  const tweets = activeTab === 'tweets';
 
   return (
     <div className='mx-auto flex max-w-sm flex-col px-8 py-10'>
       <h2 className='text-[31px] font-extrabold leading-9'>
-        {mentions
-          ? 'Join the conversation'
-          : tweets
-          ? 'No Tweet notifications yet'
-          : 'Nothing to see here - yet'}
+        {mentions ? 'Join the conversation' : 'Nothing to see here - yet'}
       </h2>
       <p className='mt-2 text-[15px] text-light-secondary dark:text-dark-secondary'>
         {mentions
           ? "When someone mentions you, you'll find it here."
-          : tweets
-          ? "When accounts you've turned on notifications for Tweet, you'll find them here."
           : 'From likes to Retweets and a whole lot more, this is where all the action happens.'}
       </p>
     </div>
@@ -822,12 +834,42 @@ function TweetNotificationRow({
     reason === 'quote' ? group.tweet?.quotedTweet ?? null : null;
   const hideQuotedTweetMedia =
     !!group.tweet?.images?.length || !!group.tweet?.card;
+  const router = useRouter();
   const {
     open: replyOpen,
     openModal: openReplyModal,
     closeModal: closeReplyModal
   } = useModal();
   const tweetWithUser = group.tweet ? { ...group.tweet, user } : null;
+  const openTweet = useCallback((): void => {
+    void router.push(targetHref);
+  }, [router, targetHref]);
+  const handleTweetClick = (event: MouseEvent<HTMLElement>): void => {
+    if (
+      eventStartedInNotificationChild(
+        event.target,
+        event.currentTarget,
+        notificationLinkChildSelector
+      )
+    )
+      return;
+
+    openTweet();
+  };
+  const handleTweetKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
+    if (event.key !== 'Enter') return;
+    if (
+      eventStartedInNotificationChild(
+        event.target,
+        event.currentTarget,
+        notificationInteractiveChildSelector
+      )
+    )
+      return;
+
+    event.preventDefault();
+    openTweet();
+  };
 
   return (
     <>
@@ -843,43 +885,47 @@ function TweetNotificationRow({
       </Modal>
       <article
         className={cn(
-          `hover-card border-b border-light-border px-4 py-3 outline-none duration-200
-           dark:border-dark-border`,
+          `hover-card cursor-pointer border-b border-light-border px-4 py-3 outline-none
+           duration-200 focus-visible:ring-2 focus-visible:ring-main-accent/80 dark:border-dark-border`,
           !isRead && 'bg-main-accent/[0.07]'
         )}
+        role='link'
+        tabIndex={0}
+        onClick={handleTweetClick}
+        onKeyDown={handleTweetKeyDown}
       >
         <div className='grid grid-cols-[48px,1fr] gap-3'>
-          <UserAvatar
-            className='mt-0.5 [&>figure>span]:[transition:200ms]'
-            username={user.username}
-            src={user.photoURL}
-            alt={user.name}
-          />
+          <UserTooltip avatar {...user}>
+            <UserAvatar
+              className='mt-0.5 [&>figure>span]:[transition:200ms]'
+              username={user.username}
+              src={user.photoURL}
+              alt={user.name}
+            />
+          </UserTooltip>
           <div className='min-w-0'>
             <div className='flex items-start justify-between gap-3'>
               <div className='min-w-0'>
                 <div className='flex min-w-0 items-center gap-1 text-[15px] leading-5 text-light-secondary dark:text-dark-secondary'>
-                  <UserName
-                    name={user.name}
-                    username={user.username}
-                    verified={user.verified}
-                    iconClassName='h-4 w-4'
-                    className='min-w-0 text-light-primary dark:text-dark-primary'
-                    disableUnderline
-                  />
+                  <UserTooltip {...user}>
+                    <UserName
+                      name={user.name}
+                      username={user.username}
+                      verified={user.verified}
+                      iconClassName='h-4 w-4'
+                      className='min-w-0 text-light-primary dark:text-dark-primary'
+                      disableUnderline
+                    />
+                  </UserTooltip>
                   <UserUsername
                     username={user.username}
                     className='hidden min-w-0 xs:block'
+                    disableLink
                   />
                   <span>·</span>
-                  <Link href={targetHref}>
-                    <a
-                      className='shrink-0 rounded-sm outline-none
-                                 focus-visible:ring-2 focus-visible:ring-main-accent/80'
-                    >
-                      <time>{formatDate(createdAt, 'tweet')}</time>
-                    </a>
-                  </Link>
+                  <time className='shrink-0'>
+                    {formatDate(createdAt, 'tweet')}
+                  </time>
                   {!isRead && (
                     <i className='ml-1 h-2 w-2 shrink-0 rounded-full bg-main-accent' />
                   )}
@@ -889,21 +935,35 @@ function TweetNotificationRow({
                   viewerUsername={viewerUsername}
                 />
               </div>
-              <Button
-                className='dark-bg-tab -mt-2 shrink-0 p-2 text-light-secondary hover:bg-main-accent/10
-                           hover:text-main-accent dark:text-dark-secondary'
-                aria-label='More'
-                title='More'
-              >
-                <CustomIcon className='h-5 w-5' iconName='TwitterMoreIcon' />
-              </Button>
+              {group.tweet && (
+                <TweetActions
+                  isOwner={viewerId === group.tweet.createdBy}
+                  ownerId={user.id}
+                  tweetId={group.tweet.id}
+                  parentId={group.tweet.parent?.id}
+                  parentUsername={group.tweet.parent?.username}
+                  username={user.username}
+                  hasImages={
+                    !!group.tweet.images || !!group.tweet.card || !!quotedTweet
+                  }
+                  createdBy={group.tweet.createdBy}
+                  blocking={user.blocking}
+                  blockingByListName={user.blockingByListName}
+                  muting={user.muting}
+                  mutingByListName={user.mutingByListName}
+                  threadMuted={group.tweet.threadMuted}
+                  popoverClassName='relative shrink-0'
+                  buttonClassName='relative -mt-2 shrink-0 text-light-secondary dark:text-dark-secondary'
+                  menuClassName='menu-container group absolute right-0 top-9 z-20 whitespace-nowrap text-light-primary dark:text-dark-primary'
+                />
+              )}
             </div>
             {text && (
-              <Link href={targetHref}>
-                <a className='mt-1 block'>
-                  <TweetText className='text-[15px] leading-5' text={text} />
-                </a>
-              </Link>
+              <TweetText
+                className='mt-1 text-[15px] leading-5'
+                text={text}
+                disableLinks
+              />
             )}
             {quotedTweet && (
               <div className='mt-3 max-w-xl'>
@@ -1043,8 +1103,6 @@ export default function Notifications(): JSX.Element {
         title={
           activeTab === 'mentions'
             ? 'Mentions / Not Twitter'
-            : activeTab === 'tweets'
-            ? 'Tweets / Not Twitter'
             : 'Notifications / Not Twitter'
         }
       />

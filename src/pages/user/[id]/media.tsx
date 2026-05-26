@@ -24,6 +24,7 @@ export default function UserMedia(): JSX.Element {
     hideBskySocialSuffix
   });
   const profileRestricted = !!user?.blocking || !!user?.blockedBy;
+  const queriesDisabled = !id || profileRestricted;
 
   const { data, loading } = useCollection(
     query(
@@ -31,7 +32,7 @@ export default function UserMedia(): JSX.Element {
       where('createdBy', '==', id),
       where('images', '!=', null)
     ),
-    { includeUser: true, allowNull: true, disabled: profileRestricted }
+    { includeUser: true, allowNull: true, disabled: queriesDisabled }
   );
 
   const sortedTweets = mergeData(true, data);

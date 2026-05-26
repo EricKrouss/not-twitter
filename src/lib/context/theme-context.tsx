@@ -1,7 +1,13 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 
-import { useState, useEffect, createContext, useContext } from 'react';
-import { updateUserTheme } from '@lib/atproto/utils';
+import {
+  useState,
+  useEffect,
+  createContext,
+  useContext,
+  useCallback,
+  useMemo
+} from 'react';
 import { useAuth } from './auth-context';
 import type { ReactNode, ChangeEvent } from 'react';
 import type { Theme, Accent } from '@lib/types/theme';
@@ -100,7 +106,11 @@ export function ThemeContextProvider({
       localStorage.setItem('theme', theme);
 
       if (user)
-        return setTimeout(() => void updateUserTheme(user.id, { theme }), 500);
+        return setTimeout(() => {
+          void import('@lib/atproto/utils').then(({ updateUserTheme }) =>
+            updateUserTheme(user.id, { theme })
+          );
+        }, 500);
 
       return undefined;
     };
@@ -118,7 +128,11 @@ export function ThemeContextProvider({
       localStorage.setItem('accent', accent);
 
       if (user)
-        return setTimeout(() => void updateUserTheme(user.id, { accent }), 500);
+        return setTimeout(() => {
+          void import('@lib/atproto/utils').then(({ updateUserTheme }) =>
+            updateUserTheme(user.id, { accent })
+          );
+        }, 500);
 
       return undefined;
     };
@@ -139,36 +153,60 @@ export function ThemeContextProvider({
       '--profile-picture-radius',
       squareProfilePictures ? '16%' : '9999px'
     );
+    document.documentElement.style.setProperty(
+      '--profile-picture-frame-radius',
+      squareProfilePictures ? '19%' : '9999px'
+    );
     localStorage.setItem(
       'squareProfilePictures',
       squareProfilePictures ? 'true' : 'false'
     );
   }, [squareProfilePictures]);
 
-  const changeTheme = ({
-    target: { value }
-  }: ChangeEvent<HTMLInputElement>): void => setTheme(value as Theme);
+  const changeTheme = useCallback(
+    ({ target: { value } }: ChangeEvent<HTMLInputElement>): void =>
+      setTheme(value as Theme),
+    []
+  );
 
-  const changeAccent = ({
-    target: { value }
-  }: ChangeEvent<HTMLInputElement>): void => setAccent(value as Accent);
+  const changeAccent = useCallback(
+    ({ target: { value } }: ChangeEvent<HTMLInputElement>): void =>
+      setAccent(value as Accent),
+    []
+  );
 
-  const toggleHideBskySocialSuffix = (): void =>
-    setHideBskySocialSuffix((currentValue) => !currentValue);
+  const toggleHideBskySocialSuffix = useCallback(
+    (): void => setHideBskySocialSuffix((currentValue) => !currentValue),
+    []
+  );
 
-  const toggleSquareProfilePictures = (): void =>
-    setSquareProfilePictures((currentValue) => !currentValue);
+  const toggleSquareProfilePictures = useCallback(
+    (): void => setSquareProfilePictures((currentValue) => !currentValue),
+    []
+  );
 
-  const value: ThemeContext = {
-    theme,
-    accent,
-    hideBskySocialSuffix,
-    squareProfilePictures,
-    changeTheme,
-    changeAccent,
-    toggleHideBskySocialSuffix,
-    toggleSquareProfilePictures
-  };
+  const value = useMemo<ThemeContext>(
+    () => ({
+      theme,
+      accent,
+      hideBskySocialSuffix,
+      squareProfilePictures,
+      changeTheme,
+      changeAccent,
+      toggleHideBskySocialSuffix,
+      toggleSquareProfilePictures
+    }),
+    [
+      accent,
+      changeAccent,
+      changeTheme,
+      hideBskySocialSuffix,
+      squareProfilePictures,
+      theme,
+      toggleHideBskySocialSuffix,
+      toggleSquareProfilePictures
+    ]
+  );
 
   return (
     <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>

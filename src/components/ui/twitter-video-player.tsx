@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import cn from 'clsx';
-import Hls from 'hls.js';
 import { formatNumber } from '@lib/date';
 import { preventBubbling } from '@lib/utils';
 import { Button } from './button';
+import type Hls from 'hls.js';
 import type { CSSProperties, SVGProps } from 'react';
+
+type HlsConstructor = typeof Hls;
 
 type TwitterVideoPlayerProps = {
   src: string;
@@ -228,6 +230,7 @@ export function TwitterVideoPlayer({
 }: TwitterVideoPlayerProps): JSX.Element {
   const videoRef = useRef<HTMLVideoElement>(null);
   const frameRef = useRef<HTMLDivElement>(null);
+  const hlsConstructorRef = useRef<HlsConstructor | null>(null);
   const hlsRef = useRef<Hls | null>(null);
   const pendingSeekRef = useRef<number | null>(null);
   const resumeAfterSourceChangeRef = useRef(false);
@@ -316,8 +319,28 @@ export function TwitterVideoPlayer({
   }, [setMutedState]);
 
   useEffect(() => {
-    setHlsSupported(Hls.isSupported());
-  }, []);
+    let cancelled = false;
+
+    if (!isHlsPlaylist(activeSrc)) {
+      hlsRef.current?.destroy();
+      hlsRef.current = null;
+      hlsConstructorRef.current = null;
+      setHlsSupported(false);
+      return undefined;
+    }
+
+    void import('hls.js').then(({ default: Hls }) => {
+      if (cancelled) return;
+
+      hlsConstructorRef.current = Hls;
+      setHlsSupported(Hls.isSupported());
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSrc]);
+
 
   useEffect(() => {
     const frame = frameRef.current;
@@ -414,8 +437,9 @@ export function TwitterVideoPlayer({
 
   useEffect(() => {
     const video = videoRef.current;
+    const Hls = hlsConstructorRef.current;
 
-    if (!video || !useHlsJs) return undefined;
+    if (!video || !useHlsJs || !Hls) return undefined;
 
     hlsRef.current?.destroy();
 

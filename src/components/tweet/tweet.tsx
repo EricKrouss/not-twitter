@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { useCallback, useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import cn from 'clsx';
 import { formatAtprotoDisplayIdentifier } from '@lib/atproto/identity';
@@ -32,13 +32,13 @@ import {
 import type { Variants } from 'framer-motion';
 import type { KeyboardEvent, MouseEvent } from 'react';
 import type {
-  Tweet,
+  Tweet as TweetData,
   TweetTombstoneKind,
   TweetWithUser
 } from '@lib/types/tweet';
 import type { User } from '@lib/types/user';
 
-export type TweetProps = Tweet & {
+export type TweetProps = TweetData & {
   user: User;
   modal?: boolean;
   pinned?: boolean;
@@ -84,7 +84,7 @@ function BlockedTweetPlaceholder({
   parentTweet,
   conversationTweet
 }: {
-  unavailable?: Tweet['unavailable'];
+  unavailable?: TweetData['unavailable'];
   tombstoneKind?: TweetTombstoneKind | null;
   onView?: () => void;
   parentTweet?: boolean;
@@ -123,7 +123,7 @@ function BlockedTweetPlaceholder({
   );
 }
 
-export function Tweet(tweet: TweetProps): JSX.Element {
+function TweetComponent(tweet: TweetProps): JSX.Element {
   const {
     id: tweetId,
     text,
@@ -149,6 +149,7 @@ export function Tweet(tweet: TweetProps): JSX.Element {
     replySetting,
     viewerCanReply,
     unavailable,
+    threadMuted,
     user: tweetUserData,
     onReplySent,
     onTweetSent
@@ -172,11 +173,11 @@ export function Tweet(tweet: TweetProps): JSX.Element {
   const userId = user?.id ?? '';
 
   const isOwner = userId === createdBy;
-  const mutedAccountTombstone: Tweet['tombstone'] =
+  const mutedAccountTombstone: TweetData['tombstone'] =
     !isOwner && (tweetUserData.muting || tweetUserData.mutingByListName)
       ? 'muted-account'
       : null;
-  const tweetTombstoneKind: Tweet['tombstone'] =
+  const tweetTombstoneKind: TweetData['tombstone'] =
     tombstone ?? mutedAccountTombstone;
   const tweetIsHiddenByBlock =
     !!unavailable ||
@@ -359,6 +360,7 @@ export function Tweet(tweet: TweetProps): JSX.Element {
                     blockingByListName={tweetUserData.blockingByListName}
                     muting={tweetUserData.muting}
                     mutingByListName={tweetUserData.mutingByListName}
+                    threadMuted={threadMuted}
                   />
                 )}
               </div>
@@ -427,3 +429,6 @@ export function Tweet(tweet: TweetProps): JSX.Element {
     </motion.article>
   );
 }
+
+export const Tweet = memo(TweetComponent);
+Tweet.displayName = 'Tweet';

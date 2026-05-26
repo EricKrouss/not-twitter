@@ -13,6 +13,7 @@
     --main-secondary: var(--dark-secondary);
     --main-accent: var(--accent-blue);
     --profile-picture-radius: 9999px;
+    --profile-picture-frame-radius: 9999px;
 
     --dark-background: 0 0 0;
     --dim-background: 22 33 44;
@@ -94,7 +95,10 @@
     border-radius: var(--profile-picture-radius);
   }
 
-  .profile-picture-frame,
+  .profile-picture-frame {
+    border-radius: var(--profile-picture-frame-radius);
+  }
+
   .profile-picture-frame > span,
   .profile-picture-frame img {
     border-radius: var(--profile-picture-radius);

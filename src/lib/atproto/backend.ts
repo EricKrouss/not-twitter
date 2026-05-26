@@ -2025,9 +2025,14 @@ const SETTINGS_CONTENT_LABELS: readonly SettingsContentLabelConfig[] = [
   }
 ];
 
-const SETTINGS_CONTENT_LABEL_BY_VALUE = new Map(
-  SETTINGS_CONTENT_LABELS.map((config) => [config.label, config])
-);
+const SETTINGS_CONTENT_LABEL_BY_VALUE = new Map<
+  SettingsContentLabel,
+  SettingsContentLabelConfig
+>();
+
+SETTINGS_CONTENT_LABELS.forEach((config) => {
+  SETTINGS_CONTENT_LABEL_BY_VALUE.set(config.label, config);
+});
 
 const NOTIFICATION_KEYS: SettingsNotificationKey[] = [
   'chat',
@@ -3838,6 +3843,9 @@ export async function setSettingsNotificationPreference(
 }
 
 function notify(changeType: BackendChangeType = 'content'): void {
+  if (changeType === 'content' || changeType === 'auth')
+    authorFeedResponseCache.clear();
+
   listeners.forEach((changeTypes, listener) => {
     if (!changeTypes || changeTypes.has(changeType)) listener(changeType);
   });
@@ -4727,13 +4735,18 @@ function mapMedia(embed: unknown): ImagesPreview | null {
   }
 
   if (AppBskyEmbedImages.isView(embed))
-    return (embed as AppBskyEmbedImages.View).images.map((image, index) => ({
-      id: `${image.fullsize}-${index}`,
-      src: image.fullsize,
-      alt: image.alt ? image.alt : 'Image',
-      type: /\.gif($|\?)/i.test(image.fullsize) ? 'gif' : 'image',
-      aspectRatio: image.aspectRatio ?? null
-    }));
+    return (embed as AppBskyEmbedImages.View).images.map((image, index) => {
+      const altText = image.alt?.trim() ?? '';
+
+      return {
+        id: `${image.fullsize}-${index}`,
+        src: image.fullsize,
+        alt: altText || 'Image',
+        altText: altText || null,
+        type: /\.gif($|\?)/i.test(image.fullsize) ? 'gif' : 'image',
+        aspectRatio: image.aspectRatio ?? null
+      };
+    });
 
   if (AppBskyEmbedVideo.isView(embed)) {
     const { viewCount } = embed as AppBskyEmbedVideo.View & {
@@ -4741,11 +4754,14 @@ function mapMedia(embed: unknown): ImagesPreview | null {
     };
     const videoEmbed = embed as AppBskyEmbedVideo.View;
 
+    const altText = videoEmbed.alt?.trim() ?? '';
+
     return [
       {
         id: `${videoEmbed.cid}-video`,
         src: videoEmbed.playlist,
-        alt: videoEmbed.alt ? videoEmbed.alt : 'Video',
+        alt: altText || 'Video',
+        altText: altText || null,
         type: 'video',
         poster: videoEmbed.thumbnail ?? null,
         viewCount: viewCount ?? null,
@@ -4988,7 +5004,8 @@ function mapPost(
     userQuotes: post.quoteCount ?? 0,
     bookmarkCount: getPostBookmarkCount(post),
     replySetting,
-    viewerCanReply: getViewerCanReplyToPost(post, replySetting)
+    viewerCanReply: getViewerCanReplyToPost(post, replySetting),
+    threadMuted: post.viewer?.threadMuted ?? false
   };
 
   postRefCache.set(id, { uri: post.uri, cid: post.cid });
@@ -4997,6 +5014,17 @@ function mapPost(
   mapProfile(post.author);
 
   return tweet;
+}
+
+function mapPostWithUser(
+  post: AppBskyFeedDefs.PostView,
+  parent?: { id: string; username: string } | null
+): TweetWithUser {
+  const tweet = mapPost(post, parent);
+  return {
+    ...tweet,
+    user: getCachedUser(tweet.createdBy) ?? mapProfile(post.author)
+  };
 }
 
 function getThreadParent(
@@ -5180,6 +5208,7 @@ function mapUnavailableThreadItem(
     bookmarkCount: 0,
     replySetting: null,
     viewerCanReply: false,
+    threadMuted: false,
     unavailable,
     user: getUnavailableThreadUser(item)
   };
@@ -5210,6 +5239,7 @@ function mapHiddenThreadPost(
     bookmarkCount: 0,
     replySetting: null,
     viewerCanReply: false,
+    threadMuted: false,
     unavailable,
     user: {
       ...user,
@@ -5485,6 +5515,26 @@ function mapFeedItem(item: ActorFeedPost): Tweet {
   return tweet;
 }
 
+function mapFeedItemWithUser(item: ActorFeedPost): TweetWithUser {
+  const parent =
+    item.reply?.parent && AppBskyFeedDefs.isPostView(item.reply.parent)
+      ? {
+          id: postIdFromUri(item.reply.parent.uri),
+          username: item.reply.parent.author.handle
+        }
+      : null;
+  const tweet = mapPostWithUser(item.post, parent);
+
+  if (item.reason && AppBskyFeedDefs.isReasonRepost(item.reason)) {
+    const repostedBy = item.reason.by.did;
+
+    if (!tweet.userRetweets.includes(repostedBy))
+      tweet.userRetweets = [repostedBy, ...tweet.userRetweets];
+  }
+
+  return tweet;
+}
+
 async function mapFeedItemsWithUsers(
   items: ActorFeedPost[]
 ): Promise<TweetWithUser[]> {
@@ -5495,7 +5545,11 @@ async function mapFeedItemsWithUsers(
     return { item, tweet };
   });
   const users = await hydrateProfiles(feed.map(({ item }) => item.post.author));
-  const usersByDid = new Map(users.map((user) => [user.id, user]));
+  const usersByDid = new Map<string, User>();
+
+  users.forEach((user) => {
+    usersByDid.set(user.id, user);
+  });
 
   return filterDeletedTweets(
     feed.map(({ item, tweet }) => ({
@@ -5608,7 +5662,11 @@ export async function searchTweets(
     })
   );
   const users = await hydrateProfiles(posts.map(({ post }) => post.author));
-  const usersByDid = new Map(users.map((user) => [user.id, user]));
+  const usersByDid = new Map<string, User>();
+
+  users.forEach((user) => {
+    usersByDid.set(user.id, user);
+  });
 
   const tweets = posts
     .map(({ post, tweet }) => ({
@@ -6376,11 +6434,11 @@ export async function searchFeedGenerators(
       }
     )
   ]);
-  const savedFeedsByUri = new Map(
-    items
-      .filter((feed) => feed.type === 'feed')
-      .map((feed) => [feed.value, feed])
-  );
+  const savedFeedsByUri = new Map<string, AppBskyActorDefs.SavedFeed>();
+
+  items.forEach((feed) => {
+    if (feed.type === 'feed') savedFeedsByUri.set(feed.value, feed);
+  });
 
   return {
     feeds: response.feeds.map((generator) =>
@@ -6455,9 +6513,11 @@ export async function reorderSavedHomeFeeds(
       isFeedGeneratorUri(item.value) &&
       !isReservedHomeFeed(item, generators.get(item.value))
   );
-  const editableFeedsById = new Map(
-    editableFeeds.map((feed) => [feed.id, feed])
-  );
+  const editableFeedsById = new Map<string, AppBskyActorDefs.SavedFeed>();
+
+  editableFeeds.forEach((feed) => {
+    editableFeedsById.set(feed.id, feed);
+  });
   const requestedIds = Array.from(new Set(feedIds));
 
   if (requestedIds.length !== editableFeeds.length)
@@ -6683,10 +6743,10 @@ export async function listNotificationsPage(
             !isModerationFilteredNotification(notification, moderationOpts)
         )
     : [];
-  const { tweetByUri, hiddenUris } = await getNotificationTweetByUri(
-    responseNotifications,
-    moderationOpts
-  );
+  const [, { tweetByUri, hiddenUris }] = await Promise.all([
+    hydrateProfiles(responseNotifications.map(({ author }) => author)),
+    getNotificationTweetByUri(responseNotifications, moderationOpts)
+  ]);
 
   return {
     notifications: responseNotifications.flatMap((notification) => {
@@ -6819,16 +6879,50 @@ function isRawChatConvoView(
   );
 }
 
-async function mapChatConvo(
+function getChatConvoMemberProfiles(
   convo: ChatBskyConvoDefs.ConvoView
+): ActorProfileView[] {
+  return convo.members as unknown as ActorProfileView[];
+}
+
+function getHydratedChatUser(
+  profile: ActorProfileView,
+  usersByDid?: Map<string, User>
+): User {
+  return (
+    usersByDid?.get(profile.did) ??
+    getCachedUser(profile.did) ??
+    mapProfile(profile)
+  );
+}
+
+async function getHydratedChatUsersByDid(
+  convos: ChatBskyConvoDefs.ConvoView[]
+): Promise<Map<string, User>> {
+  const usersByDid = new Map<string, User>();
+  const users = await hydrateProfiles(
+    convos.flatMap(getChatConvoMemberProfiles)
+  );
+
+  users.forEach((user) => {
+    usersByDid.set(user.id, user);
+  });
+
+  return usersByDid;
+}
+
+async function mapChatConvo(
+  convo: ChatBskyConvoDefs.ConvoView,
+  usersByDid?: Map<string, User>
 ): Promise<ChatConvo> {
   const convoRecord = convo as ChatBskyConvoDefs.ConvoView & {
     opened?: unknown;
     status?: unknown;
   };
-  const users = await hydrateProfiles(
-    convo.members as unknown as ActorProfileView[]
-  );
+  const memberProfiles = getChatConvoMemberProfiles(convo);
+  const users = usersByDid
+    ? memberProfiles.map((profile) => getHydratedChatUser(profile, usersByDid))
+    : await hydrateProfiles(memberProfiles);
   const visibleMembers = users.filter((user) => user.id !== sessionDid);
 
   return {
@@ -6863,6 +6957,14 @@ async function mapChatConvo(
     ),
     lastMessage: mapChatMessage(convo.lastMessage)
   };
+}
+
+async function mapChatConvos(
+  convos: ChatBskyConvoDefs.ConvoView[]
+): Promise<ChatConvo[]> {
+  const usersByDid = await getHydratedChatUsersByDid(convos);
+
+  return Promise.all(convos.map((convo) => mapChatConvo(convo, usersByDid)));
 }
 
 function sortChatMessages(messages: ChatMessage[]): ChatMessage[] {
@@ -6935,7 +7037,7 @@ export async function listChatConvos(
 
   return {
     cursor: response.data.cursor ?? null,
-    convos: await Promise.all(response.data.convos.map(mapChatConvo))
+    convos: await mapChatConvos(response.data.convos)
   };
 }
 
@@ -6955,10 +7057,8 @@ export async function listChatConvoRequests(
       limit: Math.min(Math.max(limit, 1), 100)
     }
   );
-  const requests = await Promise.all(
-    (response.requests ?? [])
-      .filter(isRawChatConvoView)
-      .map((request) => mapChatConvo(request))
+  const requests = await mapChatConvos(
+    (response.requests ?? []).filter(isRawChatConvoView)
   );
 
   return {
@@ -7644,7 +7744,7 @@ export async function getTweet(id: string): Promise<Tweet | null> {
   if (!post || isModerationFilteredWithoutTombstone(post, moderationOpts))
     return null;
 
-  return mapPost(post);
+  return mapPostWithUser(post);
 }
 
 export async function getTweetThread(
@@ -7887,7 +7987,11 @@ export async function listTweetStatsPage(
   const users = await hydrateProfiles(
     quotePosts.map(({ post }) => post.author)
   );
-  const usersByDid = new Map(users.map((user) => [user.id, user]));
+  const usersByDid = new Map<string, User>();
+
+  users.forEach((user) => {
+    usersByDid.set(user.id, user);
+  });
 
   const tweets = quotePosts.map(({ post, tweet }) => ({
     ...tweet,
@@ -7911,23 +8015,79 @@ async function getTimeline(limitCount?: number): Promise<Tweet[]> {
   ).slice(0, limitCount);
 }
 
+type AuthorFeedFilter = 'posts_with_replies' | 'posts_no_replies';
+
+type AuthorFeedResponse = {
+  feed: ActorFeedPost[];
+  moderationOpts: ModerationOpts | null;
+};
+
+type CachedAuthorFeedResponse = {
+  fetchedAt: number;
+  response: AuthorFeedResponse;
+};
+
+const AUTHOR_FEED_CACHE_MS = 30_000;
+const authorFeedRequests = new Map<string, Promise<AuthorFeedResponse>>();
+const authorFeedResponseCache = new Map<string, CachedAuthorFeedResponse>();
+
+async function getAuthorFeedResponse(
+  actor: string,
+  filter: AuthorFeedFilter
+): Promise<AuthorFeedResponse> {
+  const requestKey = `${actor}:${filter}`;
+  const cachedResponse = authorFeedResponseCache.get(requestKey);
+  if (
+    cachedResponse &&
+    Date.now() - cachedResponse.fetchedAt < AUTHOR_FEED_CACHE_MS
+  )
+    return cachedResponse.response;
+
+  const existingRequest = authorFeedRequests.get(requestKey);
+  if (existingRequest) return existingRequest;
+
+  const request = Promise.all([
+    getSafeModerationOpts(),
+    getAppViewAgent().getAuthorFeed({
+      actor,
+      limit: 50,
+      filter
+    })
+  ]).then(([moderationOpts, response]) => ({
+    moderationOpts,
+    feed: response.data.feed
+  }));
+
+  authorFeedRequests.set(requestKey, request);
+
+  try {
+    const response = await request;
+    authorFeedResponseCache.set(requestKey, {
+      fetchedAt: Date.now(),
+      response
+    });
+    return response;
+  } finally {
+    if (authorFeedRequests.get(requestKey) === request)
+      authorFeedRequests.delete(requestKey);
+  }
+}
+
 async function getAuthorFeed(
   actor: string,
   options?: { includeReplies?: boolean; onlyMedia?: boolean }
-): Promise<Tweet[]> {
-  const moderationOpts = await getSafeModerationOpts();
-  const response = await getAppViewAgent().getAuthorFeed({
-    actor,
-    limit: 50,
-    filter: options?.includeReplies ? 'posts_with_replies' : 'posts_no_replies'
-  });
-  const tweets = response.data.feed
+): Promise<TweetWithUser[]> {
+  const filter = options?.includeReplies
+    ? 'posts_with_replies'
+    : 'posts_no_replies';
+  const { feed, moderationOpts } = await getAuthorFeedResponse(actor, filter);
+  const tweets = feed
     .filter(
       (item) => !isModerationFilteredWithoutTombstone(item.post, moderationOpts)
     )
     .filter((item) => item.post.author.did === actor)
-    .map(mapFeedItem);
-  const mergedTweets = mergeLocalCreatedTweets(
+    .map(mapFeedItemWithUser);
+  const mergedTweets = mergeLocalCreatedTweetsWithUsers(
     options?.onlyMedia ? tweets.filter((tweet) => !!tweet.images) : tweets,
     (tweet) =>
       tweet.createdBy === actor && (!options?.onlyMedia || !!tweet.images)
@@ -7936,15 +8096,13 @@ async function getAuthorFeed(
   return mergedTweets;
 }
 
-async function getRepostedFeed(actor: string): Promise<Tweet[]> {
-  const moderationOpts = await getSafeModerationOpts();
-  const response = await getAppViewAgent().getAuthorFeed({
+async function getRepostedFeed(actor: string): Promise<TweetWithUser[]> {
+  const { feed, moderationOpts } = await getAuthorFeedResponse(
     actor,
-    limit: 50,
-    filter: 'posts_no_replies'
-  });
+    'posts_no_replies'
+  );
 
-  return response.data.feed
+  return feed
     .filter(
       (item) => !isModerationFilteredWithoutTombstone(item.post, moderationOpts)
     )
@@ -7955,7 +8113,7 @@ async function getRepostedFeed(actor: string): Promise<Tweet[]> {
         AppBskyFeedDefs.isReasonRepost(item.reason) &&
         item.reason.by.did === actor
     )
-    .map(mapFeedItem)
+    .map(mapFeedItemWithUser)
     .filter(({ id }) => !locallyDeletedTweetIds.has(id));
 }
 
@@ -8246,6 +8404,10 @@ function isImageUpload(upload: UploadedImage): boolean {
   return !isVideoUpload(upload);
 }
 
+function getAuthoredAltText({ preview }: UploadedImage): string {
+  return preview.altText?.trim() ?? '';
+}
+
 type VideoMetadata = {
   aspectRatio: AppBskyEmbedVideo.Main['aspectRatio'];
   duration: number;
@@ -8411,7 +8573,7 @@ async function uploadVideoToBlueskyService(
 async function uploadVideoForBluesky(
   upload: UploadedImage
 ): Promise<AppBskyEmbedVideo.Main> {
-  const { file, preview } = upload;
+  const { file } = upload;
 
   if (!isVideoUpload(upload))
     throw new Error('Bluesky video uploads must be MP4 files.');
@@ -8444,7 +8606,7 @@ async function uploadVideoForBluesky(
   return {
     $type: 'app.bsky.embed.video',
     video: toRepoRecordBlobRef(jobStatus.blob),
-    alt: preview.alt || undefined,
+    alt: getAuthoredAltText(upload) || undefined,
     aspectRatio: metadata.aspectRatio,
     presentation: 'default'
   };
@@ -8543,7 +8705,7 @@ export async function addTweet(data: AddTweetData): Promise<Tweet> {
                 upload.data.blob,
                 preparedImage.file.size
               ),
-              alt: preview.alt || '',
+              alt: getAuthoredAltText({ file, preview }),
               aspectRatio: preparedImage.aspectRatio
             };
           })
@@ -8625,7 +8787,8 @@ export async function addTweet(data: AddTweetData): Promise<Tweet> {
     userQuotes: data.userQuotes ?? 0,
     bookmarkCount: data.bookmarkCount ?? 0,
     replySetting: data.replySetting ?? 'everyone',
-    viewerCanReply: true
+    viewerCanReply: true,
+    threadMuted: false
   };
   let visibleTweet = localTweet;
 
@@ -8664,13 +8827,28 @@ export async function addTweet(data: AddTweetData): Promise<Tweet> {
   return visibleTweet;
 }
 
-export function stageImages(userId: string, files: FilesWithId): ImagesPreview {
-  const previews = files.map((file) => ({
-    id: file.id,
-    src: URL.createObjectURL(file),
-    alt: file.name,
-    type: file.type
-  }));
+export function stageImages(
+  userId: string,
+  files: FilesWithId,
+  sourcePreviews: ImagesPreview = []
+): ImagesPreview {
+  const sourcePreviewById = new Map<string, ImagesPreview[number]>();
+
+  sourcePreviews.forEach((preview) => {
+    sourcePreviewById.set(preview.id, preview);
+  });
+
+  const previews = files.map((file) => {
+    const sourcePreview = sourcePreviewById.get(file.id);
+
+    return {
+      id: file.id,
+      src: URL.createObjectURL(file),
+      alt: sourcePreview?.alt ?? file.name,
+      altText: sourcePreview?.altText ?? null,
+      type: file.type
+    };
+  });
 
   stagedImages.set(
     userId,
@@ -9359,6 +9537,51 @@ export async function repostPost(
     active: shouldRepost
   });
   updateCachedTweetViewerReaction(tweetId, 'repost', shouldRepost);
+}
+
+async function getThreadRootUri(tweetId: string): Promise<string | null> {
+  const replyRef = postReplyRefCache.get(tweetId);
+  if (replyRef) return replyRef.root.uri;
+
+  const ref = postRefCache.get(tweetId) ?? (await getPostRef(tweetId));
+  const resolvedReplyRef = postReplyRefCache.get(tweetId);
+
+  return resolvedReplyRef?.root.uri ?? ref?.uri ?? null;
+}
+
+function setCachedThreadMuted(rootUri: string, muted: boolean): void {
+  tweetCache.forEach((tweet, id) => {
+    const ref = postRefCache.get(id);
+    const replyRef = postReplyRefCache.get(id);
+    const tweetRootUri = replyRef?.root.uri ?? ref?.uri;
+
+    if (tweetRootUri === rootUri) tweet.threadMuted = muted;
+  });
+
+  locallyCreatedTweets.forEach((tweet, id) => {
+    const ref = postRefCache.get(id);
+    const replyRef = postReplyRefCache.get(id);
+    const tweetRootUri = replyRef?.root.uri ?? ref?.uri;
+
+    if (tweetRootUri === rootUri) tweet.threadMuted = muted;
+  });
+}
+
+export async function setThreadMute(
+  tweetId: string,
+  muted: boolean
+): Promise<void> {
+  if (!sessionDid) throw new Error('Sign in with Bluesky first.');
+
+  const root = await getThreadRootUri(tweetId);
+  if (!root) throw new Error('Tweet reference was not available.');
+
+  await (muted
+    ? getAgent().app.bsky.graph.muteThread({ root })
+    : getAgent().app.bsky.graph.unmuteThread({ root }));
+
+  setCachedThreadMuted(root, muted);
+  notify();
 }
 
 export async function deletePost(tweetId: string): Promise<void> {

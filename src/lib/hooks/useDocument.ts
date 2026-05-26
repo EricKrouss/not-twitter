@@ -10,7 +10,7 @@ type UseDocument<T> = {
   loading: boolean;
 };
 
-type DataWithRef<T> = T & { createdBy: string };
+type DataWithRef<T> = T & { createdBy: string; user?: User };
 type DataWithUser<T> = UseDocument<T & { user: User }>;
 
 export function useDocument<T>(
@@ -45,6 +45,12 @@ export function useDocument<T>(
     setLoading(true);
 
     const populateUser = async (currentData: DataWithRef<T>): Promise<void> => {
+      if (currentData.user) {
+        setData(currentData as T & { user: User });
+        setLoading(false);
+        return;
+      }
+
       const userData = await getDoc(
         doc(usersCollection, currentData.createdBy)
       );

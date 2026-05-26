@@ -38,13 +38,11 @@ const BLUESKY_POST_IMAGE_EXTENSIONS = [
   'webp'
 ] as const;
 
-type BlueskyPostImageExtensions =
-  typeof BLUESKY_POST_IMAGE_EXTENSIONS[number];
+type BlueskyPostImageExtensions = typeof BLUESKY_POST_IMAGE_EXTENSIONS[number];
 
 const BLUESKY_POST_VIDEO_EXTENSIONS = ['mp4'] as const;
 
-type BlueskyPostVideoExtensions =
-  typeof BLUESKY_POST_VIDEO_EXTENSIONS[number];
+type BlueskyPostVideoExtensions = typeof BLUESKY_POST_VIDEO_EXTENSIONS[number];
 
 const BLUESKY_POST_IMAGE_MAX_BYTES = 20 * Math.pow(1024, 2);
 const BLUESKY_POST_VIDEO_MAX_BYTES = 100_000_000;
@@ -167,6 +165,7 @@ export function getImagesData(
     id: imagesId[index].id,
     src: URL.createObjectURL(image),
     alt: imagesId[index].name ?? image.name,
+    altText: null,
     type: image.type
   }));
 

@@ -56,6 +56,7 @@ export function ViewTweet(tweet: ViewTweetProps): JSX.Element {
     tombstone,
     replySetting,
     viewerCanReply,
+    threadMuted,
     viewTweetRef,
     user: tweetUserData,
     onReplySent
@@ -205,6 +206,7 @@ export function ViewTweet(tweet: ViewTweetProps): JSX.Element {
                 blockingByListName={tweetUserData.blockingByListName}
                 muting={tweetUserData.muting}
                 mutingByListName={tweetUserData.mutingByListName}
+                threadMuted={threadMuted}
               />
             </div>
           </div>

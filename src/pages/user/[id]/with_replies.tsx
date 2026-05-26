@@ -25,6 +25,7 @@ export default function UserWithReplies(): JSX.Element {
     hideBskySocialSuffix
   });
   const profileRestricted = !!user?.blocking || !!user?.blockedBy;
+  const queriesDisabled = !id || profileRestricted;
 
   const { data: pinnedData, loading: pinnedLoading } = useDocument(
     doc(tweetsCollection, pinnedTweet ?? 'null'),
@@ -34,6 +35,8 @@ export default function UserWithReplies(): JSX.Element {
       includeUser: true
     }
   );
+  const awaitingPinnedTweet = !!pinnedTweet && pinnedLoading;
+  const timelineQueryDisabled = queriesDisabled || awaitingPinnedTweet;
 
   const { data, loading } = useCollection(
     query(
@@ -41,14 +44,15 @@ export default function UserWithReplies(): JSX.Element {
       where('createdBy', '==', id),
       orderBy('createdAt', 'desc')
     ),
-    { includeUser: true, allowNull: true, disabled: profileRestricted }
+    { includeUser: true, allowNull: true, disabled: timelineQueryDisabled }
   );
 
+  const availableTweets = awaitingPinnedTweet ? null : data;
   const timelineTweets = pinnedTweet
-    ? data?.filter(({ id }) => id !== pinnedTweet) ?? null
-    : data;
+    ? availableTweets?.filter(({ id }) => id !== pinnedTweet) ?? null
+    : availableTweets;
 
-  const timelineLoading = loading || (!!pinnedTweet && pinnedLoading);
+  const timelineLoading = awaitingPinnedTweet || loading;
   const hasProfileTweets = !!pinnedData || !!timelineTweets?.length;
 
   return (

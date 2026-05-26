@@ -1,6 +1,7 @@
 export type ImageData = {
   src: string;
   alt: string;
+  altText?: string | null;
   type?: string;
   poster?: string | null;
   viewCount?: number | null;

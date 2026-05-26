@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import TextArea from 'react-textarea-autosize';
 import { AnimatePresence, motion } from 'framer-motion';
 import cn from 'clsx';
@@ -21,6 +21,7 @@ import type {
   RefObject,
   SetStateAction,
   ChangeEvent,
+  UIEvent,
   KeyboardEvent,
   ClipboardEvent
 } from 'react';
@@ -69,6 +70,11 @@ const variants: Variants[] = [
 ];
 
 export const [fromTop, fromBottom] = variants;
+
+type ComposerTextPart = {
+  text: string;
+  hashtag: boolean;
+};
 
 const replyOptions: Readonly<
   {
@@ -124,6 +130,30 @@ function getActiveTextEntity(
   };
 }
 
+function getComposerTextParts(text: string): ComposerTextPart[] {
+  const parts: ComposerTextPart[] = [];
+  const hashtagRegex = /(^|[\s([{])(#(?:[A-Za-z0-9_]{0,139}))/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = hashtagRegex.exec(text))) {
+    const prefix = match[1];
+    const hashtag = match[2];
+    const hashtagIndex = match.index + prefix.length;
+
+    if (hashtagIndex > lastIndex)
+      parts.push({ text: text.slice(lastIndex, hashtagIndex), hashtag: false });
+
+    parts.push({ text: hashtag, hashtag: true });
+    lastIndex = hashtagIndex + hashtag.length;
+  }
+
+  if (lastIndex < text.length)
+    parts.push({ text: text.slice(lastIndex), hashtag: false });
+
+  return parts;
+}
+
 export function InputForm({
   modal,
   reply,
@@ -155,8 +185,13 @@ export function InputForm({
     null
   );
   const [replyMenuOpen, setReplyMenuOpen] = useState(false);
+  const [highlightScrollTop, setHighlightScrollTop] = useState(0);
   const replyMenuRef = useRef<HTMLDivElement>(null);
 
+  const composerTextParts = useMemo(
+    () => getComposerTextParts(inputValue),
+    [inputValue]
+  );
   const selectedReplyOption = replyOptions.find(
     ({ value }) => value === replySetting
   ) as typeof replyOptions[number];
@@ -260,6 +295,12 @@ export function InputForm({
 
   const handleTextAreaKeyUp = (): void => handleTextEntityState();
 
+  const handleTextAreaScroll = ({
+    currentTarget
+  }: UIEvent<HTMLTextAreaElement>): void => {
+    setHighlightScrollTop(currentTarget.scrollTop);
+  };
+
   const selectHashtag = (tag: string): void => {
     const hashtag =
       activeHashtag ??
@@ -325,10 +366,37 @@ export function InputForm({
       <div className={cn('flex min-w-0 flex-col', quote ? 'gap-3' : 'gap-6')}>
         <div className='flex min-h-[48px] items-center gap-3'>
           <div className='relative min-w-0 flex-1'>
+            {inputValue && (
+              <div
+                className='pointer-events-none absolute inset-0 z-0 overflow-hidden text-[20px] leading-6
+                           text-light-primary dark:text-dark-primary'
+                aria-hidden
+              >
+                <div
+                  className='whitespace-pre-wrap break-words'
+                  style={
+                    highlightScrollTop
+                      ? { transform: `translateY(-${highlightScrollTop}px)` }
+                      : undefined
+                  }
+                >
+                  {composerTextParts.map(({ text, hashtag }, index) => (
+                    <span
+                      className={hashtag ? 'text-main-accent' : undefined}
+                      key={`${text}-${index}`}
+                    >
+                      {text}
+                    </span>
+                  ))}
+                  {inputValue.endsWith('\n') && <span>{'\u200b'}</span>}
+                </div>
+              </div>
+            )}
             <TextArea
               id={formId}
-              className='w-full min-w-0 resize-none bg-transparent text-[20px] leading-6 outline-none
-                         placeholder:text-light-secondary dark:placeholder:text-dark-secondary'
+              className='relative z-10 w-full min-w-0 resize-none bg-transparent text-[20px] leading-6
+                         text-transparent caret-light-primary outline-none placeholder:text-light-secondary
+                         dark:caret-dark-primary dark:placeholder:text-dark-secondary'
               value={inputValue}
               placeholder={
                 quote
@@ -346,6 +414,7 @@ export function InputForm({
               onSelect={handleTextEntityState}
               onKeyDown={handleTextAreaKeyDown}
               onKeyUp={handleTextAreaKeyUp}
+              onScroll={handleTextAreaScroll}
               onChange={handleChange}
               aria-keyshortcuts={SUBMIT_KEYSHORTCUTS}
               ref={inputRef}

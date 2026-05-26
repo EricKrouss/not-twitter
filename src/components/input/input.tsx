@@ -277,7 +277,7 @@ export function Input({
         : null;
       const uploadedImages = selectedGifCard
         ? imagesPreview
-        : await uploadImages(userId, selectedImages);
+        : await uploadImages(userId, selectedImages, imagesPreview);
 
       const tweetData: WithFieldValue<TweetDraft> = {
         text: submittedText || null,
@@ -407,6 +407,18 @@ export function Input({
     if (removedPreview?.type === 'gif') setSelectedGifCard(null);
 
     if (removedPreview) revokePreviewUrl(removedPreview.src);
+  };
+
+  const updateImageAltText = (targetId: string, altText: string): void => {
+    const normalizedAltText = altText.trim();
+
+    setImagesPreview((currentPreviews) =>
+      currentPreviews.map((preview) =>
+        preview.id === targetId
+          ? { ...preview, altText: normalizedAltText || null }
+          : preview
+      )
+    );
   };
 
   const cleanImage = (): void => {
@@ -654,6 +666,7 @@ export function Input({
                 imagesPreview={imagesPreview}
                 previewCount={previewCount}
                 removeImage={!loading ? removeImage : undefined}
+                updateAltText={!loading ? updateImageAltText : undefined}
               />
             )}
             {youtubeCard && !selectedGifCard && !isUploadingImages && (

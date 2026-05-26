@@ -9,6 +9,7 @@ import {
   reportUser,
   repostPost,
   setBookmark,
+  setThreadMute,
   setPinnedPost,
   stageImages,
   unblockUser,
@@ -103,6 +104,15 @@ export async function manageMute(
   else await unmuteUser(targetUserId);
 }
 
+export async function manageThreadMute(
+  type: 'mute' | 'unmute',
+  _userId: string,
+  tweetId: string
+): Promise<void> {
+  void _userId;
+  await setThreadMute(tweetId, type === 'mute');
+}
+
 export function reportTweet(
   tweetId: string,
   reasonType: ModerationReportReason,
@@ -125,9 +135,12 @@ export async function removeTweet(tweetId: string): Promise<void> {
 
 export function uploadImages(
   userId: string,
-  files: FilesWithId
+  files: FilesWithId,
+  previews?: ImagesPreview
 ): Promise<ImagesPreview | null> {
-  return Promise.resolve(files.length ? stageImages(userId, files) : null);
+  return Promise.resolve(
+    files.length ? stageImages(userId, files, previews) : null
+  );
 }
 
 export function manageReply(

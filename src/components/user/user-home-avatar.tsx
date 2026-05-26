@@ -33,7 +33,7 @@ export function UserHomeAvatar({
         />
       </Modal>
       <Button
-        className='accent-tab profile-picture absolute -mt-3 aspect-square w-24 -translate-y-1/2 overflow-hidden p-0
+        className='accent-tab profile-picture-frame absolute -mt-3 aspect-square w-24 -translate-y-1/2 overflow-hidden p-0
                    disabled:cursor-auto disabled:opacity-100 xs:w-32 sm:w-36
                    [&:hover>figure>span]:bg-black/10'
         onClick={openModal}
@@ -51,7 +51,7 @@ export function UserHomeAvatar({
             key={profileData.src}
           />
         ) : (
-          <div className='profile-picture h-full bg-main-background p-1'>
+          <div className='profile-picture-frame h-full bg-main-background p-1'>
             <div className='profile-picture h-full bg-main-sidebar-background' />
           </div>
         )}

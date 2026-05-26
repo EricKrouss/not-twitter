@@ -148,6 +148,10 @@ function isVideoMedia({ src, type }: ImageData): boolean {
   );
 }
 
+function getMediaAltText(media: ImageData): string {
+  return media.altText?.trim() ?? '';
+}
+
 const mediaModalBorder =
   'border-dark-border lg:border-light-border dark:lg:border-dark-border';
 const mediaModalPrimaryText =
@@ -168,9 +172,15 @@ function FullscreenImageModal({
   closeModal
 }: FullscreenImageModalProps): JSX.Element {
   const { src, alt, poster, viewCount } = imageData;
+  const [showAltText, setShowAltText] = useState(false);
 
   const requireArrows = handleNextIndex && previewCount > 1;
   const isVideo = isVideoMedia(imageData);
+  const altText = getMediaAltText(imageData);
+
+  useEffect(() => {
+    setShowAltText(false);
+  }, [altText, src]);
 
   return (
     <div className='flex h-screen w-screen flex-col overflow-hidden bg-black text-white lg:flex-row'>
@@ -241,7 +251,7 @@ function FullscreenImageModal({
                   <img
                     className='h-full w-full object-contain'
                     src={src}
-                    alt={alt}
+                    alt={altText || alt}
                     draggable={false}
                     onClick={preventBubbling()}
                   />
@@ -250,6 +260,35 @@ function FullscreenImageModal({
             </motion.div>
           )}
         </AnimatePresence>
+        {altText && (
+          <div
+            className='pointer-events-auto absolute left-4 bottom-20 z-20 max-w-[min(28rem,calc(100%-2rem))]
+                       lg:bottom-5'
+            onClick={preventBubbling(null, true)}
+          >
+            <Button
+              className='rounded-md bg-black/70 px-2 py-0.5 text-[13px] font-extrabold
+                         leading-4 text-white backdrop-blur-sm transition hover:bg-black/80
+                         focus-visible:ring-2 focus-visible:ring-white/70 active:bg-black/90'
+              aria-expanded={showAltText}
+              aria-label='View image description'
+              onClick={(): void => setShowAltText(!showAltText)}
+            >
+              ALT
+            </Button>
+            <AnimatePresence>
+              {showAltText && (
+                <motion.p
+                  className='mt-2 max-h-[40vh] overflow-y-auto whitespace-pre-wrap break-words rounded-md
+                             bg-black/80 p-3 text-[15px] leading-5 text-white shadow-lg backdrop-blur-sm'
+                  {...mediaFade}
+                >
+                  {altText}
+                </motion.p>
+              )}
+            </AnimatePresence>
+          </div>
+        )}
         {tweetData && <ConversationActionBar tweet={tweetData} mediaOnly />}
       </section>
       {tweetData && <MediaConversation tweet={tweetData} />}
@@ -400,6 +439,7 @@ function ConversationTweet({
     parent,
     createdBy,
     createdAt,
+    threadMuted,
     user
   } = tweet;
 
@@ -464,6 +504,7 @@ function ConversationTweet({
           hasImages={!!images || !!card || !!quotedTweet}
           createdBy={createdBy}
           viewTweet
+          threadMuted={threadMuted}
         />
         {parent && (
           <p className={cn('mt-3', mediaModalSecondaryText)}>
@@ -595,6 +636,7 @@ function ConversationTweet({
           username={username}
           hasImages={!!images || !!card || !!quotedTweet}
           createdBy={createdBy}
+          threadMuted={threadMuted}
         />
       )}
     </article>
@@ -658,6 +700,7 @@ function ConversationAttachments({
       {images.slice(0, 4).map((media, index) => {
         const isGif = isGifMedia(media);
         const isVideo = isVideoMedia(media) && !isGif;
+        const altText = getMediaAltText(media);
 
         return (
           <div
@@ -669,10 +712,7 @@ function ConversationAttachments({
             key={media.id}
           >
             {isGif ? (
-              <TwitterGifMedia
-                media={media}
-                className='h-full w-full'
-              />
+              <TwitterGifMedia media={media} className='h-full w-full' />
             ) : isVideo ? (
               <TwitterVideoPlayer
                 className='h-full w-full'
@@ -685,9 +725,17 @@ function ConversationAttachments({
               <img
                 className='h-full w-full object-cover'
                 src={media.src}
-                alt={media.alt}
+                alt={altText || media.alt}
                 draggable={false}
               />
+            )}
+            {altText && !isGif && (
+              <span
+                className='absolute bottom-0 left-0 m-1.5 rounded-md bg-black/70 px-2 py-0.5
+                           text-[12px] font-extrabold leading-4 text-white'
+              >
+                ALT
+              </span>
             )}
           </div>
         );
@@ -1035,6 +1083,7 @@ export function ImageModal({
   const { src, alt } = imageData;
 
   const isVideo = isVideoMedia(imageData);
+  const altText = getMediaAltText(imageData);
 
   const requireArrows = handleNextIndex && previewCount > 1;
 
@@ -1192,22 +1241,19 @@ export function ImageModal({
                 <img
                   className='max-h-[75vh] rounded-md object-contain md:max-h-[80vh]'
                   src={src}
-                  alt={alt}
+                  alt={altText || alt}
                   onClick={preventBubbling()}
                 />
-                <a
-                  className='trim-alt accent-tab absolute bottom-0 right-0 mx-2 mb-2
-                             rounded-md bg-main-background/40 px-2 py-1 text-sm text-light-primary/80 opacity-0
-                             transition-colors hover:bg-main-accent hover:text-white
-                             focus-visible:bg-main-accent focus-visible:text-white focus-visible:opacity-100
+                {altText && (
+                  <span
+                    className='trim-alt accent-tab absolute bottom-0 right-0 mx-2 mb-2
+                             rounded-md bg-main-background/40 px-2 py-1 text-sm font-bold text-light-primary/80 opacity-0
+                             transition-colors
                              group-hover:opacity-100 dark:text-dark-primary/80'
-                  href={src}
-                  target='_blank'
-                  rel='noreferrer'
-                  onClick={preventBubbling(null, true)}
-                >
-                  {alt}
-                </a>
+                  >
+                    {altText}
+                  </span>
+                )}
               </picture>
             )}
             <a

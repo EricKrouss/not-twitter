@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import { Popover } from '@headlessui/react';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -18,6 +18,7 @@ import {
   manageReply,
   manageFollow,
   managePinnedTweet,
+  manageThreadMute,
   manageTotalTweets,
   manageTotalPhotos,
   reportTweet
@@ -46,7 +47,7 @@ export const variants: Variants = {
   }
 };
 
-type TweetActionsProps = Pick<Tweet, 'createdBy'> & {
+type TweetActionsProps = Pick<Tweet, 'createdBy' | 'threadMuted'> & {
   isOwner: boolean;
   ownerId: string;
   tweetId: string;
@@ -59,6 +60,9 @@ type TweetActionsProps = Pick<Tweet, 'createdBy'> & {
   muting?: boolean;
   mutingByListName?: string | null;
   viewTweet?: boolean;
+  popoverClassName?: string;
+  buttonClassName?: string;
+  menuClassName?: string;
 };
 
 type PinModalData = Record<'title' | 'description' | 'mainBtnLabel', string>;
@@ -78,7 +82,7 @@ const pinModalData: Readonly<PinModalData[]> = [
   }
 ];
 
-export function TweetActions({
+function TweetActionsComponent({
   isOwner,
   ownerId,
   tweetId,
@@ -91,7 +95,11 @@ export function TweetActions({
   muting,
   mutingByListName,
   viewTweet,
-  createdBy
+  createdBy,
+  threadMuted,
+  popoverClassName,
+  buttonClassName,
+  menuClassName
 }: TweetActionsProps): JSX.Element {
   const { user, isAdmin } = useAuth();
   const { hideBskySocialSuffix } = useTheme();
@@ -132,6 +140,14 @@ export function TweetActions({
   const isInAdminControl = isAdmin && !isOwner;
   const tweetIsPinned = pinnedTweet === tweetId;
   const signedIn = !!userId;
+  const [optimisticThreadMuted, setOptimisticThreadMuted] = useState(
+    !!threadMuted
+  );
+  const [updatingThreadMute, setUpdatingThreadMute] = useState(false);
+
+  useEffect(() => {
+    setOptimisticThreadMuted(!!threadMuted);
+  }, [threadMuted]);
 
   const handleRemove = async (): Promise<void> => {
     if (viewTweet)
@@ -208,6 +224,32 @@ export function TweetActions({
     toast.success(`You ${muting ? 'unmuted' : 'muted'} ${displayUsername}`);
     muteCloseModal();
   };
+
+  const handleThreadMute =
+    (closeMenu: () => void) => async (): Promise<void> => {
+      if (!userId || updatingThreadMute) return;
+
+      closeMenu();
+
+      const nextMuted = !optimisticThreadMuted;
+
+      setUpdatingThreadMute(true);
+      setOptimisticThreadMuted(nextMuted);
+
+      try {
+        await manageThreadMute(nextMuted ? 'mute' : 'unmute', userId, tweetId);
+        toast.success(
+          nextMuted
+            ? 'This conversation has been muted'
+            : 'This conversation has been unmuted'
+        );
+      } catch {
+        setOptimisticThreadMuted(!nextMuted);
+        toast.error('Conversation mute could not be updated');
+      } finally {
+        setUpdatingThreadMute(false);
+      }
+    };
 
   const handleReportOpen = (closeMenu: () => void) => (): void => {
     closeMenu();
@@ -325,17 +367,19 @@ export function TweetActions({
           closeModal={reportCloseModal}
         />
       </Modal>
-      <Popover>
+      <Popover className={popoverClassName}>
         {({ open, close }): JSX.Element => (
           <>
             <Popover.Button
               as={Button}
               className={cn(
-                `main-tab group group absolute top-2 right-2 p-2 
+                `main-tab group group p-2
                  hover:bg-accent-blue/10 focus-visible:bg-accent-blue/10
                  focus-visible:!ring-accent-blue/80 active:bg-accent-blue/20`,
+                buttonClassName ?? 'absolute top-2 right-2',
                 open && 'bg-accent-blue/10 [&>div>svg]:text-accent-blue'
               )}
+              onClick={preventBubbling(null, true)}
             >
               <div className='group relative'>
                 <HeroIcon
@@ -349,8 +393,11 @@ export function TweetActions({
             <AnimatePresence>
               {open && (
                 <Popover.Panel
-                  className='menu-container group absolute top-[50px] right-2 whitespace-nowrap text-light-primary 
-                             dark:text-dark-primary'
+                  className={
+                    menuClassName ??
+                    `menu-container group absolute top-[50px] right-2 whitespace-nowrap text-light-primary
+                     dark:text-dark-primary`
+                  }
                   as={motion.div}
                   {...variants}
                   static
@@ -456,6 +503,29 @@ export function TweetActions({
                         : `Mute ${displayUsername}`}
                     </Popover.Button>
                   )}
+                  {signedIn && (
+                    <Popover.Button
+                      className={cn(
+                        `accent-tab flex w-full gap-3 rounded-md rounded-t-none p-4
+                         hover:bg-main-sidebar-background disabled:cursor-not-allowed disabled:opacity-70`,
+                        !optimisticThreadMuted && 'text-accent-red'
+                      )}
+                      as={Button}
+                      disabled={updatingThreadMute}
+                      onClick={preventBubbling(handleThreadMute(close))}
+                    >
+                      <HeroIcon
+                        iconName={
+                          optimisticThreadMuted
+                            ? 'SpeakerWaveIcon'
+                            : 'SpeakerXMarkIcon'
+                        }
+                      />
+                      {optimisticThreadMuted
+                        ? 'Unmute this conversation'
+                        : 'Mute this conversation'}
+                    </Popover.Button>
+                  )}
                   {signedIn && !isOwner && (
                     <Popover.Button
                       className='accent-tab flex w-full gap-3 rounded-md rounded-t-none p-4 text-accent-red
@@ -476,3 +546,6 @@ export function TweetActions({
     </>
   );
 }
+
+export const TweetActions = memo(TweetActionsComponent);
+TweetActions.displayName = 'TweetActions';

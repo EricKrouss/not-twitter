@@ -10,7 +10,7 @@ type UseCollection<T> = {
   loading: boolean;
 };
 
-type DataWithRef<T> = (T & { createdBy: string })[];
+type DataWithRef<T> = (T & { createdBy: string; user?: User })[];
 type DataWithUser<T> = UseCollection<T & { user: User }>;
 
 export type UseCollectionOptions = {
@@ -58,14 +58,30 @@ export function useCollection<T>(
     }
 
     const populateUser = async (currentData: DataWithRef<T>): Promise<void> => {
-      const dataWithUser = await Promise.all(
-        currentData.map(async (currentData) => {
-          const user = (
-            await getDoc(doc(usersCollection, currentData.createdBy))
-          ).data();
-          return { ...currentData, user };
-        })
+      const usersById = new Map<string, User>();
+
+      currentData.forEach(({ createdBy, user }) => {
+        if (user) usersById.set(createdBy, user);
+      });
+
+      await Promise.all(
+        Array.from(
+          new Set(
+            currentData
+              .map(({ createdBy }) => createdBy)
+              .filter((createdBy) => !usersById.has(createdBy))
+          )
+        ).map(async (createdBy) => {
+            const user = (await getDoc(doc(usersCollection, createdBy))).data();
+            usersById.set(createdBy, user as User);
+          })
       );
+
+      const dataWithUser = currentData.map((currentData) => ({
+        ...currentData,
+        user: usersById.get(currentData.createdBy) as User
+      }));
+
       setData(dataWithUser);
       setLoading(false);
     };

@@ -129,14 +129,7 @@ function LinkCardPreviewMedia({ card }: LinkCardProps): JSX.Element {
     );
 
   if (isAnimatedCardImage(image))
-    return (
-      <img
-        className={className}
-        src={image}
-        alt=''
-        draggable={false}
-      />
-    );
+    return <img className={className} src={image} alt='' draggable={false} />;
 
   return (
     <NextImage
@@ -388,7 +381,7 @@ function QuotedTweetMediaThumbnail({
 
   return (
     <div
-      className='dark:bg-dark-hover relative grid h-[102px] w-[102px] shrink-0
+      className='dark:bg-dark-hover relative grid h-[110px] w-[110px] shrink-0
                  grid-cols-2 grid-rows-2 gap-0.5 overflow-hidden rounded-xl bg-light-line-reply'
     >
       {visibleMedia.map((item, index) => {
@@ -439,7 +432,11 @@ function getQuotedTweetCardClassName(
   viewTweet?: boolean,
   expanded?: boolean
 ): string {
-  return cn('!rounded-xl', viewTweet && 'mt-3', expanded && 'overflow-visible');
+  return cn(
+    '!rounded-2xl',
+    viewTweet && 'mt-3',
+    expanded && 'overflow-visible'
+  );
 }
 
 function getQuotedTweetTextClampStyle(
@@ -572,26 +569,28 @@ function QuotedTweetCard({
         )}
       >
         {compactMedia ? (
-          <div className='flex min-w-0 gap-3'>
-            <QuotedTweetMediaThumbnail media={compactMedia} />
-            <div className='min-w-0 flex-1'>
-              <QuotedTweetHeader quotedTweet={quotedTweet} />
-              {quotedTweet.text && (
-                <TweetText
-                  className='mt-px text-[15px] leading-5 text-light-primary dark:text-dark-primary'
-                  style={getQuotedTweetTextClampStyle()}
-                  text={quotedTweet.text}
-                />
-              )}
-              {quotedTweet.text && (
-                <TweetTranslation
-                  className='text-[14px] leading-5'
-                  text={quotedTweet.text}
-                  langs={quotedTweet.langs}
-                />
-              )}
+          <>
+            <QuotedTweetHeader quotedTweet={quotedTweet} />
+            <div className='mt-2 flex min-w-0 gap-3'>
+              <QuotedTweetMediaThumbnail media={compactMedia} />
+              <div className='min-w-0 flex-1'>
+                {quotedTweet.text && (
+                  <TweetText
+                    className='text-[15px] leading-5 text-light-primary dark:text-dark-primary'
+                    style={getQuotedTweetTextClampStyle()}
+                    text={quotedTweet.text}
+                  />
+                )}
+                {quotedTweet.text && (
+                  <TweetTranslation
+                    className='text-[14px] leading-5'
+                    text={quotedTweet.text}
+                    langs={quotedTweet.langs}
+                  />
+                )}
+              </div>
             </div>
-          </div>
+          </>
         ) : quotedTweet.text ? (
           <>
             <QuotedTweetHeader quotedTweet={quotedTweet} />

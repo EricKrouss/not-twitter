@@ -22,6 +22,10 @@ type ServerConnectionModalTheme = {
   logOutButton: string;
 };
 
+type ServerConnectionModalProps = {
+  defaultOpen?: boolean;
+};
+
 const baseRefreshButton =
   'h-12 rounded-full bg-[#1da1f2] px-5 py-0 text-[15px] font-bold text-white hover:bg-[#1a91da] focus-visible:bg-[#1a91da] focus-visible:!ring-[#1da1f2]/70 active:bg-[#1681c2]';
 
@@ -57,13 +61,19 @@ const serverConnectionModalThemes: Record<Theme, ServerConnectionModalTheme> = {
   }
 };
 
-export function ServerConnectionModal(): JSX.Element {
+export function ServerConnectionModal({
+  defaultOpen
+}: ServerConnectionModalProps): JSX.Element {
   const { signOut, user } = useAuth();
   const { theme } = useTheme();
   const modalTheme = serverConnectionModalThemes[theme];
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen ?? false);
   const [loggingOut, setLoggingOut] = useState(false);
   const showLogOutButton = !!user;
+
+  useEffect(() => {
+    if (defaultOpen) setOpen(true);
+  }, [defaultOpen]);
 
   useEffect(() => {
     ensureServerConnectionFetchWatcher();

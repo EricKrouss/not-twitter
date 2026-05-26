@@ -4,41 +4,58 @@ import {
   useContext,
   createContext,
   useMemo,
-  useCallback
+  useCallback,
+  useRef
 } from 'react';
-import {
-  getSavedBlueskyAccounts,
-  removeBlueskyAccount as removeBlueskyAccountAuth,
-  signInWithBluesky as signInWithBlueskyAuth,
-  switchBlueskyAccount as switchBlueskyAccountAuth,
-  onAuthStateChanged,
-  signOut as signOutAtproto
-} from '@lib/atproto/auth';
-import {
-  doc,
-  getDoc,
-  setDoc,
-  onSnapshot,
-  serverTimestamp
-} from '@lib/atproto/store';
-import { auth } from '@lib/atproto/app';
-import {
-  usersCollection,
-  userStatsCollection,
-  userBookmarksCollection
-} from '@lib/atproto/collections';
 import {
   DEFAULT_PROFILE_COVER_URL,
   DEFAULT_PROFILE_PHOTO_URL
 } from '@lib/default-images';
 import { getRandomId, getRandomInt } from '@lib/random';
-import { checkUsernameAvailability } from '@lib/atproto/utils';
+import type * as AuthApi from '@lib/atproto/auth';
+import type * as CollectionsApi from '@lib/atproto/collections';
+import type * as StoreApi from '@lib/atproto/store';
 import type { ReactNode } from 'react';
-import type { BlueskyAccount, User as AuthUser } from '@lib/atproto/auth';
-import type { WithFieldValue } from '@lib/atproto/store';
 import type { User } from '@lib/types/user';
 import type { Bookmark } from '@lib/types/bookmark';
 import type { Stats } from '@lib/types/stats';
+
+type Auth = AuthApi.Auth;
+type AuthUser = AuthApi.User;
+type BlueskyAccount = AuthApi.BlueskyAccount;
+type WithFieldValue<T> = StoreApi.WithFieldValue<T>;
+
+type AuthRuntime = {
+  auth: Auth;
+  api: typeof AuthApi;
+};
+
+type DataRuntime = {
+  collections: typeof CollectionsApi;
+  store: typeof StoreApi;
+};
+
+const auth: Auth = { backend: 'atproto' };
+let authRuntimePromise: Promise<AuthRuntime> | null = null;
+let dataRuntimePromise: Promise<DataRuntime> | null = null;
+
+function loadAuthRuntime(): Promise<AuthRuntime> {
+  authRuntimePromise ??= import('@lib/atproto/auth').then((api) => ({
+    api,
+    auth
+  }));
+
+  return authRuntimePromise;
+}
+
+function loadDataRuntime(): Promise<DataRuntime> {
+  dataRuntimePromise ??= Promise.all([
+    import('@lib/atproto/collections'),
+    import('@lib/atproto/store')
+  ]).then(([collections, store]) => ({ collections, store }));
+
+  return dataRuntimePromise;
+}
 
 type AuthContext = {
   user: User | null;
@@ -63,6 +80,7 @@ type AuthContextProviderProps = {
 export function AuthContextProvider({
   children
 }: AuthContextProviderProps): JSX.Element {
+  const mounted = useRef(false);
   const [user, setUser] = useState<User | null>(null);
   const [userBookmarks, setUserBookmarks] = useState<Bookmark[] | null>(null);
   const [accounts, setAccounts] = useState<BlueskyAccount[]>([]);
@@ -70,14 +88,43 @@ export function AuthContextProvider({
   const [loading, setLoading] = useState(true);
 
   const syncAccounts = useCallback((): void => {
-    setAccounts(getSavedBlueskyAccounts(auth));
+    void loadAuthRuntime().then(({ api }) => {
+      if (mounted.current) setAccounts(api.getSavedBlueskyAccounts(auth));
+    });
   }, []);
 
   useEffect(() => {
-    const manageUser = async (authUser: AuthUser): Promise<void> => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    let authGeneration = 0;
+    let unsubscribeAuthState: (() => void) | undefined;
+    let unsubscribeUserData: (() => void) | undefined;
+
+    const manageUser = async (
+      authUser: AuthUser,
+      generation: number
+    ): Promise<void> => {
       const { uid, displayName, photoURL } = authUser;
+      const {
+        collections: {
+          userBookmarksCollection,
+          usersCollection,
+          userStatsCollection
+        },
+        store: { doc, getDoc, onSnapshot, serverTimestamp, setDoc }
+      } = await loadDataRuntime();
+
+      if (!active || generation !== authGeneration) return;
 
       const userSnapshot = await getDoc(doc(usersCollection, uid));
+
+      if (!active || generation !== authGeneration) return;
 
       if (!userSnapshot.exists()) {
         let available = false;
@@ -89,9 +136,11 @@ export function AuthContextProvider({
 
           randomUsername = `${normalizeName as string}${randomInt}`;
 
-          const isUsernameAvailable = await checkUsernameAvailability(
-            randomUsername
+          const { checkUsernameAvailability } = await import(
+            '@lib/atproto/utils'
           );
+          const isUsernameAvailable =
+            await checkUsernameAvailability(randomUsername);
 
           if (isUsernameAvailable) available = true;
         }
@@ -142,26 +191,50 @@ export function AuthContextProvider({
           ]);
 
           const newUser = (await getDoc(doc(usersCollection, uid))).data();
-          setUser(newUser as User);
+          if (active && generation === authGeneration) setUser(newUser as User);
         } catch (error) {
-          setError(error as Error);
+          if (active && generation === authGeneration)
+            setError(error as Error);
         }
       } else {
         const userData = userSnapshot.data();
-        setUser(userData);
+        if (active && generation === authGeneration) setUser(userData);
       }
+
+      if (!active || generation !== authGeneration) return;
 
       setLoading(false);
       syncAccounts();
+
+      const unsubscribeUser = onSnapshot(doc(usersCollection, uid), (doc) => {
+        setUser(doc.data() as User);
+      });
+
+      const unsubscribeBookmarks = onSnapshot(
+        userBookmarksCollection(uid),
+        (snapshot) => {
+          const bookmarks = snapshot.docs.map((doc) => doc.data());
+          setUserBookmarks(bookmarks);
+        }
+      );
+
+      unsubscribeUserData = (): void => {
+        unsubscribeUser();
+        unsubscribeBookmarks();
+      };
     };
 
     const handleUserAuth = (authUser: AuthUser | null): void => {
+      const generation = ++authGeneration;
+
       setLoading(true);
       syncAccounts();
+      unsubscribeUserData?.();
+      unsubscribeUserData = undefined;
 
       if (authUser) {
         setUserBookmarks(null);
-        void manageUser(authUser);
+        void manageUser(authUser, generation);
       } else {
         setUser(null);
         setUserBookmarks(null);
@@ -170,91 +243,101 @@ export function AuthContextProvider({
       }
     };
 
-    onAuthStateChanged(auth, handleUserAuth);
-  }, [syncAccounts]);
-
-  useEffect(() => {
-    if (!user) return;
-
-    const { id } = user;
-
-    const unsubscribeUser = onSnapshot(doc(usersCollection, id), (doc) => {
-      setUser(doc.data() as User);
-    });
-
-    const unsubscribeBookmarks = onSnapshot(
-      userBookmarksCollection(id),
-      (snapshot) => {
-        const bookmarks = snapshot.docs.map((doc) => doc.data());
-        setUserBookmarks(bookmarks);
-      }
-    );
+    void loadAuthRuntime()
+      .then(({ api }) => {
+        if (!active) return;
+        unsubscribeAuthState = api.onAuthStateChanged(auth, handleUserAuth);
+      })
+      .catch((error) => {
+        if (!active) return;
+        setError(error as Error);
+        setLoading(false);
+      });
 
     return () => {
-      unsubscribeUser();
-      unsubscribeBookmarks();
+      active = false;
+      unsubscribeAuthState?.();
+      unsubscribeUserData?.();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id]);
+  }, [syncAccounts]);
 
-  const signInWithBluesky = async (identifier: string): Promise<void> => {
+  const signInWithBluesky = useCallback(async (identifier: string) => {
     try {
       setError(null);
-      await signInWithBlueskyAuth(auth, identifier);
+      const { api } = await loadAuthRuntime();
+      await api.signInWithBluesky(auth, identifier);
       syncAccounts();
     } catch (error) {
       setError(error as Error);
       throw error;
     }
-  };
+  }, [syncAccounts]);
 
-  const switchBlueskyAccount = async (id: string): Promise<void> => {
+  const switchBlueskyAccount = useCallback(async (id: string) => {
     try {
       setError(null);
-      await switchBlueskyAccountAuth(auth, id);
+      const { api } = await loadAuthRuntime();
+      await api.switchBlueskyAccount(auth, id);
       syncAccounts();
     } catch (error) {
       setError(error as Error);
       throw error;
     }
-  };
+  }, [syncAccounts]);
 
-  const removeBlueskyAccount = async (id: string): Promise<void> => {
+  const removeBlueskyAccount = useCallback(async (id: string) => {
     try {
       setError(null);
-      await removeBlueskyAccountAuth(auth, id);
+      const { api } = await loadAuthRuntime();
+      await api.removeBlueskyAccount(auth, id);
       syncAccounts();
     } catch (error) {
       setError(error as Error);
       throw error;
     }
-  };
+  }, [syncAccounts]);
 
-  const signOut = async (): Promise<void> => {
+  const signOut = useCallback(async (): Promise<void> => {
     try {
-      await signOutAtproto(auth);
+      const { api } = await loadAuthRuntime();
+      await api.signOut(auth);
       syncAccounts();
     } catch (error) {
       setError(error as Error);
     }
-  };
+  }, [syncAccounts]);
 
   const isAdmin = user ? user.username === 'ccrsxx' : false;
   const randomSeed = useMemo(getRandomId, [user?.id]);
 
-  const value: AuthContext = {
-    user,
-    error,
-    loading,
-    isAdmin,
-    randomSeed,
-    userBookmarks,
-    accounts,
-    signOut,
-    signInWithBluesky,
-    switchBlueskyAccount,
-    removeBlueskyAccount
-  };
+  const value = useMemo<AuthContext>(
+    () => ({
+      user,
+      error,
+      loading,
+      isAdmin,
+      randomSeed,
+      userBookmarks,
+      accounts,
+      signOut,
+      signInWithBluesky,
+      switchBlueskyAccount,
+      removeBlueskyAccount
+    }),
+    [
+      accounts,
+      error,
+      isAdmin,
+      loading,
+      randomSeed,
+      removeBlueskyAccount,
+      signInWithBluesky,
+      signOut,
+      switchBlueskyAccount,
+      user,
+      userBookmarks
+    ]
+  );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

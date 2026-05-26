@@ -7,16 +7,20 @@ import {
   useRef,
   useState
 } from 'react';
-import {
-  getFollowingHomeFeedPage,
-  isChatAccessError,
-  listChatConvos,
-  listNotificationsPage,
-  subscribeBackend
-} from '@lib/atproto/backend';
 import { useAuth } from './auth-context';
+import type * as BackendApi from '@lib/atproto/backend';
 import type { ReactNode } from 'react';
 import type { TweetWithUser } from '@lib/types/tweet';
+
+type BackendRuntime = typeof BackendApi;
+
+let backendRuntimePromise: Promise<BackendRuntime> | null = null;
+
+function loadBackendRuntime(): Promise<BackendRuntime> {
+  backendRuntimePromise ??= import('@lib/atproto/backend');
+
+  return backendRuntimePromise;
+}
 
 type LiveUpdatesContext = {
   homeBadgeCount: number;
@@ -52,14 +56,14 @@ function countNewHomeTweets(
 
 function getUnreadNotificationsCount(
   notifications: Awaited<
-    ReturnType<typeof listNotificationsPage>
+    ReturnType<BackendRuntime['listNotificationsPage']>
   >['notifications']
 ): number {
   return notifications.filter(({ isRead }) => !isRead).length;
 }
 
 function getUnreadMessagesCount(
-  convos: Awaited<ReturnType<typeof listChatConvos>>['convos']
+  convos: Awaited<ReturnType<BackendRuntime['listChatConvos']>>['convos']
 ): number {
   return convos.reduce((total, { unreadCount }) => total + unreadCount, 0);
 }
@@ -87,6 +91,7 @@ export function LiveUpdatesProvider({
   }, []);
 
   const refreshHomeBadge = useCallback(async (): Promise<void> => {
+    const { getFollowingHomeFeedPage } = await loadBackendRuntime();
     const page = await getFollowingHomeFeedPage(
       undefined,
       LIVE_HOME_FEED_LIMIT
@@ -108,6 +113,7 @@ export function LiveUpdatesProvider({
   }, []);
 
   const refreshNotifications = useCallback(async (): Promise<void> => {
+    const { listNotificationsPage } = await loadBackendRuntime();
     const page = await listNotificationsPage(undefined, {
       limit: LIVE_NOTIFICATION_LIMIT
     });
@@ -116,6 +122,8 @@ export function LiveUpdatesProvider({
   }, []);
 
   const refreshMessages = useCallback(async (): Promise<void> => {
+    const { isChatAccessError, listChatConvos } = await loadBackendRuntime();
+
     try {
       const page = await listChatConvos(undefined, LIVE_MESSAGE_LIMIT);
       setMessageCount(getUnreadMessagesCount(page.convos));
@@ -171,12 +179,19 @@ export function LiveUpdatesProvider({
       () => refreshSoon(),
       LIVE_UPDATES_REFRESH_INTERVAL_MS
     );
-    const unsubscribe = subscribeBackend(handleFocus, ['content']);
+    let unsubscribe = (): void => undefined;
+    let subscriptionCancelled = false;
+
+    void loadBackendRuntime().then(({ subscribeBackend }) => {
+      if (subscriptionCancelled) return;
+      unsubscribe = subscribeBackend(handleFocus, ['content']);
+    });
 
     window.addEventListener('focus', handleFocus);
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
+      subscriptionCancelled = true;
       window.clearInterval(intervalId);
       window.removeEventListener('focus', handleFocus);
       document.removeEventListener('visibilitychange', handleVisibilityChange);

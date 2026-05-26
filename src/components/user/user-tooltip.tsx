@@ -109,7 +109,7 @@ export function UserTooltip({
             <div className='flex justify-between'>
               <div className='mb-10'>
                 <UserAvatar
-                  className='absolute -translate-y-1/2 bg-main-background p-1 
+                  className='profile-picture-frame absolute -translate-y-1/2 bg-main-background p-1
                              [&:hover>figure>span]:bg-black/10
                              [&>figure>span]:[transition:background-color_200ms]'
                   src={photoURL}

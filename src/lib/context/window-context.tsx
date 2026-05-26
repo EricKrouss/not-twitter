@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useMemo } from 'react';
 import type { ReactNode } from 'react';
 
 type WindowSize = {
@@ -30,24 +30,49 @@ export function WindowContextProvider({
   const [windowSize, setWindowSize] = useState<WindowSize>(initialWindowSize);
 
   useEffect(() => {
-    const handleResize = (): void =>
-      setWindowSize({
+    let animationFrameId = 0;
+
+    const syncWindowSize = (): void => {
+      const nextWindowSize = {
         width: window.innerWidth,
         height: window.innerHeight
-      });
+      };
 
-    handleResize();
+      setWindowSize((currentWindowSize) =>
+        currentWindowSize.width === nextWindowSize.width &&
+        currentWindowSize.height === nextWindowSize.height
+          ? currentWindowSize
+          : nextWindowSize
+      );
+    };
+
+    const handleResize = (): void => {
+      if (animationFrameId) return;
+
+      animationFrameId = window.requestAnimationFrame(() => {
+        animationFrameId = 0;
+        syncWindowSize();
+      });
+    };
+
+    syncWindowSize();
     window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    return () => {
+      if (animationFrameId) window.cancelAnimationFrame(animationFrameId);
+      window.removeEventListener('resize', handleResize);
+    };
   }, []);
 
-  const value: WindowContext = {
-    ...windowSize,
-    isMobile:
-      windowSize.width < mobileWidth ||
-      (windowSize.width < compactLandscapeMaxWidth &&
-        windowSize.height < compactLandscapeMaxHeight)
-  };
+  const value = useMemo<WindowContext>(
+    () => ({
+      ...windowSize,
+      isMobile:
+        windowSize.width < mobileWidth ||
+        (windowSize.width < compactLandscapeMaxWidth &&
+          windowSize.height < compactLandscapeMaxHeight)
+    }),
+    [windowSize]
+  );
 
   return (
     <WindowContext.Provider value={value}>{children}</WindowContext.Provider>

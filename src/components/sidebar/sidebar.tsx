@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import cn from 'clsx';
 import { useAuth } from '@lib/context/auth-context';
 import { useLiveUpdates } from '@lib/context/live-updates-context';
@@ -6,13 +7,17 @@ import { useWindow } from '@lib/context/window-context';
 import { useModal } from '@lib/hooks/useModal';
 import { getUserPath } from '@lib/routes';
 import { Modal } from '@components/modal/modal';
-import { Input } from '@components/input/input';
 import { CustomIcon } from '@components/ui/custom-icon';
 import { Button } from '@components/ui/button';
 import { SidebarLink } from './sidebar-link';
 import { MoreSettings } from './more-settings';
 import { navLinks } from './nav-links';
 import { SidebarProfile } from './sidebar-profile';
+
+const Input = dynamic<{ modal?: boolean; closeModal?: () => void }>(
+  () => import('@components/input/input').then((module) => module.Input),
+  { ssr: false }
+);
 
 export function Sidebar(): JSX.Element {
   const { user } = useAuth();
