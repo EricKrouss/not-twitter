@@ -1830,6 +1830,15 @@ async function callPublicFallbackAppQueryXrpc<T>(
     return callAppQueryXrpc<T>(method, params);
 
   let directError: unknown = null;
+  let proxyError: unknown = null;
+
+  if (sessionDid || agent) {
+    try {
+      return await callAppQueryXrpc<T>(method, params);
+    } catch (error) {
+      proxyError = error;
+    }
+  }
 
   try {
     return await callDirectAppQueryXrpc<T>(method, params);
@@ -1839,7 +1848,8 @@ async function callPublicFallbackAppQueryXrpc<T>(
 
   try {
     return await callAppQueryXrpc<T>(method, params);
-  } catch (proxyError) {
+  } catch (error) {
+    proxyError = error;
     try {
       return await callPublicAppQueryXrpc<T>(method, params);
     } catch {
