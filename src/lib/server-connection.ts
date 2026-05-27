@@ -77,11 +77,9 @@ function isServerRequest(input: FetchInput): boolean {
     const url = new URL(rawUrl, window.location.href);
     const host = url.host.toLowerCase();
 
-    if (
-      url.pathname.startsWith('/xrpc/') &&
-      host === window.location.host.toLowerCase()
-    )
-      return true;
+    if (!url.pathname.startsWith('/xrpc/')) return false;
+
+    if (host === window.location.host.toLowerCase()) return true;
 
     return getConfiguredServerHosts().has(host);
   } catch {
@@ -114,7 +112,7 @@ function isServerConnectionProblem(error: unknown): boolean {
 }
 
 function shouldReportResponse(response: Response): boolean {
-  return response.status >= 500;
+  return response.status === 0 || response.type === 'error';
 }
 
 function notifyServerConnectionProblem(): void {
