@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
+import { useRouter } from 'next/router';
 import cn from 'clsx';
 import { useAuth } from '@lib/context/auth-context';
 import { useLiveUpdates } from '@lib/context/live-updates-context';
@@ -23,10 +24,13 @@ export function Sidebar(): JSX.Element {
   const { user } = useAuth();
   const { isMobile } = useWindow();
   const { homeBadgeCount, messageCount, notificationCount } = useLiveUpdates();
+  const { asPath } = useRouter();
 
   const { open, openModal, closeModal } = useModal();
 
   const username = user?.username as string;
+  const isMessagesRoute =
+    (asPath.split(/[?#]/)[0] || '/').replace(/\/+$/g, '') === '/messages';
 
   return (
     <header
@@ -109,7 +113,10 @@ export function Sidebar(): JSX.Element {
                bg-main-accent text-center text-lg font-bold text-white outline-none
                transition-colors hover:bg-main-accent/90 active:bg-main-accent/75`,
               isMobile
-                ? 'absolute right-4 -translate-y-[72px]'
+                ? cn(
+                    'absolute right-4 -translate-y-[72px]',
+                    isMessagesRoute && 'hidden'
+                  )
                 : 'static translate-y-0 xl:w-11/12'
             )}
             onClick={openModal}

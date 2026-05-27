@@ -298,6 +298,7 @@ function MessagesError({
 type IconButtonProps = {
   iconName: CustomIconName;
   label: string;
+  className?: string;
   disabled?: boolean;
   iconClassName?: string;
   onClick?: () => void;
@@ -306,14 +307,18 @@ type IconButtonProps = {
 function IconButton({
   iconName,
   label,
+  className,
   disabled,
   iconClassName,
   onClick
 }: IconButtonProps): JSX.Element {
   return (
     <Button
-      className='dark-bg-tab group relative p-2 text-main-accent hover:bg-main-accent/10
-                 active:bg-main-accent/20 disabled:cursor-default disabled:opacity-60'
+      className={cn(
+        `dark-bg-tab group relative shrink-0 p-2 text-main-accent hover:bg-main-accent/10
+         active:bg-main-accent/20 disabled:cursor-default disabled:opacity-60`,
+        className
+      )}
       disabled={disabled}
       onClick={onClick}
       title={label}
@@ -2259,7 +2264,7 @@ export default function Messages(): JSX.Element {
           closeModal={closeDeleteConversationModal}
         />
       </Modal>
-      <MainContainer className='!h-screen !min-h-0 !max-w-[1296px] !overflow-hidden !pb-0'>
+      <MainContainer className='!h-[100dvh] !min-h-0 !max-w-[1296px] !overflow-hidden !pb-0'>
         <SEO title='Messages / Not Twitter' />
         <div className='flex h-full min-h-0 w-full overflow-hidden dark:bg-black'>
           <section
@@ -2382,7 +2387,8 @@ export default function Messages(): JSX.Element {
 
           <section
             className={cn(
-              'hidden min-h-0 min-w-0 flex-1 flex-col md:flex',
+              `hidden min-h-0 min-w-0 flex-1 flex-col pb-[calc(53px+env(safe-area-inset-bottom))]
+               md:flex md:pb-0`,
               showThread && '!flex'
             )}
           >
@@ -2627,10 +2633,11 @@ export default function Messages(): JSX.Element {
                         </div>
                       </div>
                       <form
-                        className='shrink-0 border-t border-light-border bg-main-background px-5 py-4 dark:border-dark-border'
+                        className='shrink-0 border-t border-light-border bg-main-background px-3 py-2 dark:border-dark-border
+                                   md:px-5 md:py-4'
                         onSubmit={handleSubmit}
                       >
-                        <div className='flex items-end gap-3'>
+                        <div className='flex items-end gap-2 md:gap-3'>
                           <IconButton
                             iconName='TwitterMediaIcon'
                             label='Add media'
@@ -2639,10 +2646,14 @@ export default function Messages(): JSX.Element {
                             iconName='TwitterGifIcon'
                             label='Add GIF'
                           />
-                          <div className='flex min-h-[50px] flex-1 items-end rounded-[28px] bg-main-sidebar-background px-4'>
+                          <div
+                            className='flex min-h-[44px] min-w-0 flex-1 items-end rounded-[24px] bg-main-sidebar-background
+                                       px-4 md:min-h-[50px] md:rounded-[28px]'
+                          >
                             <TextArea
-                              className='max-h-32 min-h-[48px] flex-1 resize-none bg-transparent py-3 text-[17px] leading-6 outline-none
-                                     placeholder:text-light-secondary dark:placeholder:text-dark-secondary'
+                              className='max-h-32 min-h-[42px] min-w-0 flex-1 resize-none bg-transparent py-2.5 text-[17px]
+                                         leading-6 outline-none placeholder:text-light-secondary dark:placeholder:text-dark-secondary
+                                         md:min-h-[48px] md:py-3'
                               maxRows={5}
                               placeholder='Start your message'
                               value={inputValue}
@@ -2651,12 +2662,16 @@ export default function Messages(): JSX.Element {
                               onKeyDown={handleMessageInputKeyDown}
                             />
                             <IconButton
+                              className='hidden xs:flex'
                               iconName='TwitterEmojiIcon'
                               label='Emoji'
                             />
                           </div>
                           <Button
-                            className='dark-bg-tab p-2.5 text-main-accent hover:bg-main-accent/10 active:bg-main-accent/20'
+                            className='flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-main-accent p-0 text-white
+                                       hover:bg-main-accent/90 active:bg-main-accent/75 disabled:bg-main-accent
+                                       disabled:opacity-50 md:h-auto md:w-auto md:bg-transparent md:p-2.5 md:text-main-accent
+                                       md:hover:bg-main-accent/10 md:active:bg-main-accent/20'
                             disabled={!inputValue.trim()}
                             loading={sending}
                             title='Send'
