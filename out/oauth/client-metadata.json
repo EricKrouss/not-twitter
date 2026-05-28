@@ -1,6 +1,6 @@
 {
   "client_id": "https://erickrouss.github.io/not-twitter/oauth/client-metadata.json",
-  "client_name": "Twitter Clone",
+  "client_name": "Not Twitter",
   "client_uri": "https://erickrouss.github.io/not-twitter",
   "redirect_uris": [
     "https://erickrouss.github.io/not-twitter/"

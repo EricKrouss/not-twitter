@@ -50,7 +50,7 @@ const neoFreeBirdMetadataUrl = `${siteUrl}/oauth/neofreebird-client-metadata.jso
 const neoFreeBirdRedirectUri = 'io.github.erickrouss:/not-twitter/oauth/neofreebird-callback';
 const metadata = {
   client_id: metadataUrl,
-  client_name: 'Twitter Clone',
+  client_name: 'Not Twitter',
   client_uri: siteUrl,
   redirect_uris: [`${siteUrl}/`],
   scope: OAUTH_SCOPE,
