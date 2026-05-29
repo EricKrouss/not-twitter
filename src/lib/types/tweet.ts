@@ -36,6 +36,16 @@ export type TweetCard = {
   description: string | null;
   image: string | null;
   domain: string | null;
+  source?: {
+    url: string;
+    title: string;
+    description: string | null;
+    icon: string | null;
+  } | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  readingTime?: number | null;
+  associatedRefs?: { uri: string; cid: string }[] | null;
 };
 
 export type TweetMediaWarning = {

@@ -104,6 +104,42 @@ function getCardDescription(card: TweetCard): string | null {
   return card.description;
 }
 
+function isStandardSiteCard(card: TweetCard): boolean {
+  return (
+    !!card.source ||
+    !!card.readingTime ||
+    !!card.createdAt ||
+    !!card.associatedRefs?.some(({ uri }) => uri.includes('/site.standard.'))
+  );
+}
+
+function formatCardPublishedDate(value?: string | null): string | null {
+  if (!value) return null;
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+
+  return new Intl.DateTimeFormat('en-gb', {
+    day: 'numeric',
+    month: 'short',
+    year:
+      date.getFullYear() === new Date().getFullYear() ? undefined : 'numeric'
+  }).format(date);
+}
+
+function getCardReadingTimeLabel(readingTime?: number | null): string | null {
+  if (!readingTime || readingTime < 1) return null;
+
+  return `${readingTime} min read`;
+}
+
+function getEnhancedCardMeta(card: TweetCard): string[] {
+  return [
+    formatCardPublishedDate(card.createdAt),
+    getCardReadingTimeLabel(card.readingTime)
+  ].filter((item): item is string => !!item);
+}
+
 function isVideoCardImage(src: string): boolean {
   return /\.(mp4|mov|m4v|webm)($|\?)/i.test(src);
 }
@@ -143,13 +179,60 @@ function LinkCardPreviewMedia({ card }: LinkCardProps): JSX.Element {
   );
 }
 
+function LinkCardSourceIcon({
+  card,
+  className,
+  size = 20
+}: LinkCardProps & { className?: string; size?: number }): JSX.Element {
+  const sourceTitle = card.source?.title ?? card.domain ?? 'Link';
+
+  if (card.source?.icon)
+    return (
+      <NextImage
+        className={cn(
+          'dark:bg-dark-hover shrink-0 overflow-hidden rounded bg-light-line-reply',
+          className
+        )}
+        imgClassName='object-cover'
+        src={card.source.icon}
+        alt=''
+        width={size}
+        height={size}
+        useSkeleton
+      />
+    );
+
+  return (
+    <span
+      className={cn(
+        `dark:bg-dark-hover flex shrink-0 items-center justify-center rounded
+         bg-light-line-reply text-[13px] font-bold uppercase text-light-secondary
+         dark:text-dark-secondary`,
+        className
+      )}
+      aria-hidden='true'
+    >
+      {sourceTitle.slice(0, 1)}
+    </span>
+  );
+}
+
 function LinkCardImage({ card, compact }: LinkCardProps): JSX.Element | null {
   if (!card.image && !compact) return null;
 
   if (!card.image)
     return (
       <div className='dark:bg-dark-hover flex h-full w-[94px] shrink-0 items-center justify-center bg-light-line-reply text-light-secondary dark:text-dark-secondary'>
-        <HeroIcon className='h-7 w-7' iconName='LinkIcon' />
+        {isStandardSiteCard(card) ? (
+          <LinkCardSourceIcon
+            card={card}
+            compact
+            className='h-10 w-10'
+            size={40}
+          />
+        ) : (
+          <HeroIcon className='h-7 w-7' iconName='LinkIcon' />
+        )}
       </div>
     );
 
@@ -163,6 +246,24 @@ function LinkCardImage({ card, compact }: LinkCardProps): JSX.Element | null {
   return (
     <div className='dark:bg-dark-hover relative w-full overflow-hidden bg-light-line-reply pt-[52.35%]'>
       <LinkCardPreviewMedia card={card} />
+    </div>
+  );
+}
+
+function EnhancedLinkCardSourceRow({ card }: LinkCardProps): JSX.Element {
+  const sourceTitle = card.source?.title ?? card.domain ?? card.url;
+  const meta = getEnhancedCardMeta(card);
+
+  return (
+    <div className='mb-1 flex min-w-0 items-center gap-1.5 text-[13px] leading-4 text-light-secondary dark:text-dark-secondary'>
+      <LinkCardSourceIcon card={card} className='h-5 w-5' />
+      <span className='truncate'>{sourceTitle}</span>
+      {meta.map((item) => (
+        <span className='flex shrink-0 items-center gap-1.5' key={item}>
+          <span aria-hidden='true'>·</span>
+          <span>{item}</span>
+        </span>
+      ))}
     </div>
   );
 }
@@ -228,6 +329,7 @@ function TweetLinkCard({ card, compact }: LinkCardProps): JSX.Element {
   const title = getCardTitle(card);
   const description = getCardDescription(card);
   const youtubeVideo = getYouTubeVideoInfo(card.url);
+  const enhanced = isStandardSiteCard(card);
   const isCompact = compact === true || card.type === 'summary' || !card.image;
   const openCard = (event: CardEvent): void => {
     stopOuterTweet(event);
@@ -254,10 +356,19 @@ function TweetLinkCard({ card, compact }: LinkCardProps): JSX.Element {
         <div className='flex h-full min-h-[112px] min-w-0 max-w-full'>
           <LinkCardImage card={card} compact />
           <div className='flex min-w-0 flex-1 flex-col justify-center px-3 py-2'>
-            <p className='truncate text-sm text-light-secondary dark:text-dark-secondary'>
-              {card.domain ?? card.url}
-            </p>
-            <p className='truncate text-[15px] text-light-primary dark:text-dark-primary'>
+            {enhanced ? (
+              <EnhancedLinkCardSourceRow card={card} />
+            ) : (
+              <p className='truncate text-sm text-light-secondary dark:text-dark-secondary'>
+                {card.domain ?? card.url}
+              </p>
+            )}
+            <p
+              className={cn(
+                'text-[15px] leading-5 text-light-primary dark:text-dark-primary',
+                enhanced ? 'line-clamp-2' : 'truncate'
+              )}
+            >
               {title}
             </p>
             {description && (
@@ -278,10 +389,19 @@ function TweetLinkCard({ card, compact }: LinkCardProps): JSX.Element {
     >
       <LinkCardImage card={card} />
       <div className='min-w-0 px-3 py-2'>
-        <p className='truncate text-sm text-light-secondary dark:text-dark-secondary'>
-          {card.domain ?? card.url}
-        </p>
-        <p className='truncate text-[15px] text-light-primary dark:text-dark-primary'>
+        {enhanced ? (
+          <EnhancedLinkCardSourceRow card={card} />
+        ) : (
+          <p className='truncate text-sm text-light-secondary dark:text-dark-secondary'>
+            {card.domain ?? card.url}
+          </p>
+        )}
+        <p
+          className={cn(
+            'text-[15px] leading-5 text-light-primary dark:text-dark-primary',
+            enhanced ? 'line-clamp-2' : 'truncate'
+          )}
+        >
           {title}
         </p>
         {description && (

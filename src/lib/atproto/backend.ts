@@ -4635,17 +4635,56 @@ function getBskyWebUrl(uri: string): string {
   return `https://bsky.app/profile/${actor}`;
 }
 
+function getCardAssociatedRefs(
+  refs: AppBskyEmbedExternal.ViewExternal['associatedRefs']
+): TweetCard['associatedRefs'] {
+  if (!refs?.length) return null;
+
+  return refs
+    .map(({ uri, cid }) => (uri && cid ? { uri, cid } : null))
+    .filter((ref): ref is { uri: string; cid: string } => !!ref);
+}
+
+function getCardReadingTime(
+  readingTime: AppBskyEmbedExternal.ViewExternal['readingTime']
+): number | null {
+  return typeof readingTime === 'number' && Number.isFinite(readingTime)
+    ? Math.max(1, Math.round(readingTime))
+    : null;
+}
+
+function getExternalSourceCardData(
+  source: AppBskyEmbedExternal.ViewExternal['source']
+): TweetCard['source'] {
+  if (!source) return null;
+
+  return {
+    url: source.uri,
+    title: source.title,
+    description: source.description ?? null,
+    icon: source.icon ?? null
+  };
+}
+
 function mapExternalCard(embed: AppBskyEmbedExternal.View): TweetCard {
   const { external } = embed;
   const youtubeInfo = getYouTubeVideoInfo(external.uri);
+  const title = external.title
+    ? external.title
+    : youtubeInfo?.title ?? external.uri;
 
   return {
     type: youtubeInfo ? 'youtube' : 'external',
     url: youtubeInfo?.url ?? external.uri,
-    title: external.title || youtubeInfo?.title || external.uri,
+    title,
     description: external.description || null,
     image: external.thumb ?? youtubeInfo?.thumbnail ?? null,
-    domain: youtubeInfo?.domain ?? getHostname(external.uri)
+    domain: youtubeInfo?.domain ?? getHostname(external.uri),
+    source: getExternalSourceCardData(external.source),
+    createdAt: external.createdAt ?? null,
+    updatedAt: external.updatedAt ?? null,
+    readingTime: getCardReadingTime(external.readingTime),
+    associatedRefs: getCardAssociatedRefs(external.associatedRefs)
   };
 }
 
@@ -8671,7 +8710,10 @@ async function buildExternalEmbed(
       uri: card.url,
       title: card.title || card.url,
       description: card.description ?? '',
-      thumb: await uploadExternalThumbForBluesky(api, card.image, card.title)
+      thumb: await uploadExternalThumbForBluesky(api, card.image, card.title),
+      associatedRefs: card.associatedRefs?.length
+        ? card.associatedRefs
+        : undefined
     }
   };
 }
