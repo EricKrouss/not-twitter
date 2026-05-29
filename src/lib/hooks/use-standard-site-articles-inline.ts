@@ -11,9 +11,11 @@ type StandardSiteArticlesInlineSetting = {
 };
 
 function getStandardSiteArticlesInline(): boolean {
-  if (typeof window === 'undefined') return false;
+  if (typeof window === 'undefined') return true;
 
-  return localStorage.getItem(standardSiteArticlesInlineKey) === 'true';
+  const storedValue = localStorage.getItem(standardSiteArticlesInlineKey);
+
+  return storedValue === null ? true : storedValue === 'true';
 }
 
 function writeStandardSiteArticlesInline(value: boolean): void {

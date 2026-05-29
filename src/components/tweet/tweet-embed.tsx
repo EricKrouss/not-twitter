@@ -181,10 +181,13 @@ function getCardReadingTimeLabel(readingTime?: number | null): string | null {
   return `${readingTime} min read`;
 }
 
-function getEnhancedCardMeta(card: TweetCard): string[] {
+function getEnhancedCardMeta(
+  card: TweetCard,
+  includeReadingTime = true
+): string[] {
   return [
     formatCardPublishedDate(card.createdAt),
-    getCardReadingTimeLabel(card.readingTime)
+    includeReadingTime ? getCardReadingTimeLabel(card.readingTime) : null
   ].filter((item): item is string => !!item);
 }
 
@@ -1204,9 +1207,12 @@ function LinkCardImage({ card, compact }: LinkCardProps): JSX.Element | null {
   );
 }
 
-function EnhancedLinkCardSourceRow({ card }: LinkCardProps): JSX.Element {
+function EnhancedLinkCardSourceRow({
+  card,
+  includeReadingTime = true
+}: LinkCardProps & { includeReadingTime?: boolean }): JSX.Element {
   const sourceTitle = card.source?.title ?? card.domain ?? card.url;
-  const meta = getEnhancedCardMeta(card);
+  const meta = getEnhancedCardMeta(card, includeReadingTime);
 
   return (
     <div className='mb-1 flex min-w-0 items-center gap-1.5 text-[13px] leading-4 text-light-secondary dark:text-dark-secondary'>
@@ -1256,6 +1262,7 @@ function TweetStandardSiteArticleCard({
   const { article, loading } = useStandardSiteArticleReader(card);
   const visibleTitle = article?.title ?? title;
   const visibleDescription = article?.description ?? description;
+  const readingTimeLabel = getCardReadingTimeLabel(card.readingTime);
 
   return (
     <article
@@ -1272,10 +1279,17 @@ function TweetStandardSiteArticleCard({
     >
       <ArticleCover card={card} />
       <div className='min-w-0 px-4 py-3'>
-        <EnhancedLinkCardSourceRow card={card} />
-        <h2 className='line-clamp-3 text-[22px] font-extrabold leading-7 text-light-primary dark:text-dark-primary'>
-          {visibleTitle}
-        </h2>
+        <EnhancedLinkCardSourceRow card={card} includeReadingTime={false} />
+        <div className='flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5'>
+          <h2 className='min-w-0 flex-1 basis-[240px] text-[22px] font-extrabold leading-7 text-light-primary dark:text-dark-primary'>
+            <span className='line-clamp-3'>{visibleTitle}</span>
+          </h2>
+          {readingTimeLabel && (
+            <span className='shrink-0 text-[13px] leading-5 text-light-secondary dark:text-dark-secondary'>
+              {readingTimeLabel}
+            </span>
+          )}
+        </div>
         {visibleDescription && (
           <p className='line-clamp-3 mt-1 text-[15px] leading-5 text-light-secondary dark:text-dark-secondary'>
             {visibleDescription}
@@ -1517,7 +1531,11 @@ function TweetLinkCard({
   if (youtubeVideo && compact !== true)
     return <TweetYouTubeCard card={card} video={youtubeVideo} />;
 
-  if (standardSiteArticlesInline && enhanced && compact !== true)
+  if (
+    (standardSiteArticlesInline || fullArticleReader) &&
+    enhanced &&
+    compact !== true
+  )
     return (
       <TweetStandardSiteArticleCard
         card={card}
