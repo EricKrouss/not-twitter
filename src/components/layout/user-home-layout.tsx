@@ -1,5 +1,7 @@
 import { useRouter } from 'next/router';
+import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
+import { toast } from 'react-hot-toast';
 import { useAuth } from '@lib/context/auth-context';
 import { useTheme } from '@lib/context/theme-context';
 import { useUser } from '@lib/context/user-context';
@@ -21,7 +23,70 @@ import { UserEditProfile } from '@components/user/user-edit-profile';
 import { UserBirthdayBalloons } from '@components/user/user-birthday-balloons';
 import { UserShare } from '@components/user/user-share';
 import type { LayoutProps } from './common-layout';
-import type { User } from '@lib/types/user';
+import type {
+  ActivityNotificationCategory,
+  User
+} from '@lib/types/user';
+
+const activityNotificationCategoryIds: ActivityNotificationCategory[] = [
+  'all',
+  'tweets',
+  'articles',
+  'retweets',
+  'replies'
+];
+
+const activityNotificationIndividualCategories: ActivityNotificationCategory[] =
+  ['tweets', 'articles', 'retweets', 'replies'];
+
+const activityNotificationTitles: Record<ActivityNotificationCategory, string> =
+  {
+    all: 'All',
+    tweets: 'Tweets',
+    articles: 'Articles',
+    retweets: 'Retweets',
+    replies: 'Replies'
+  };
+
+function normalizeActivityNotificationCategories(
+  categories: readonly ActivityNotificationCategory[]
+): ActivityNotificationCategory[] {
+  if (categories.includes('all')) return ['all'];
+
+  const next = activityNotificationIndividualCategories.filter((category) =>
+    categories.includes(category)
+  );
+
+  return next.length === activityNotificationIndividualCategories.length
+    ? ['all']
+    : next;
+}
+
+function activityNotificationCategoriesInclude(
+  categories: readonly ActivityNotificationCategory[],
+  category: ActivityNotificationCategory
+): boolean {
+  const normalized = normalizeActivityNotificationCategories(categories);
+
+  return normalized.includes('all') || normalized.includes(category);
+}
+
+function getToggledActivityNotificationCategories(
+  current: readonly ActivityNotificationCategory[],
+  category: ActivityNotificationCategory
+): ActivityNotificationCategory[] {
+  const normalized = normalizeActivityNotificationCategories(current);
+  if (category === 'all') return normalized.includes('all') ? [] : ['all'];
+
+  const expanded = normalized.includes('all')
+    ? [...activityNotificationIndividualCategories]
+    : [...normalized];
+  const next = expanded.includes(category)
+    ? expanded.filter((item) => item !== category)
+    : [...expanded, category];
+
+  return normalizeActivityNotificationCategories(next);
+}
 
 function canViewerMessageUser(
   targetUser: User,
@@ -34,6 +99,123 @@ function canViewerMessageUser(
     return targetUser.following.includes(viewerId);
 
   return false;
+}
+
+function ActivityNotificationButton({
+  targetUser
+}: {
+  targetUser: User;
+}): JSX.Element | null {
+  const { user } = useAuth();
+  const [open, setOpen] = useState(false);
+  const [updating, setUpdating] = useState(false);
+  const [categories, setCategories] = useState<ActivityNotificationCategory[]>(
+    targetUser.activityNotificationCategories
+  );
+
+  useEffect(() => {
+    if (!updating) setCategories(targetUser.activityNotificationCategories);
+  }, [targetUser.activityNotificationCategories, updating]);
+
+  if (!user || user.id === targetUser.id) return null;
+
+  const enabled = categories.length > 0;
+
+  const handleToggle = async (
+    category: ActivityNotificationCategory
+  ): Promise<void> => {
+    if (updating) return;
+
+    const previous = categories;
+    const next = getToggledActivityNotificationCategories(categories, category);
+
+    setUpdating(true);
+    setCategories(next);
+
+    try {
+      const { setActivityNotificationCategoriesForUser } = await import(
+        '@lib/atproto/backend'
+      );
+      const saved = await setActivityNotificationCategoriesForUser(
+        targetUser.id,
+        next
+      );
+      setCategories(saved);
+    } catch {
+      setCategories(previous);
+      toast.error('Could not update notifications for this account');
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  return (
+    <div className='relative'>
+      <Button
+        className='dark-bg-tab group relative border border-light-line-reply p-2
+                   hover:bg-light-primary/10 active:bg-light-primary/20 dark:border-light-secondary
+                   dark:hover:bg-dark-primary/10 dark:active:bg-dark-primary/20'
+        aria-label='Notifications'
+        aria-expanded={open}
+        disabled={updating}
+        onClick={(event): void => {
+          event.stopPropagation();
+          setOpen((value) => !value);
+        }}
+      >
+        <CustomIcon
+          className='h-5 w-5'
+          iconName={
+            enabled
+              ? 'TwitterNotificationsFilledIcon'
+              : 'TwitterNotificationsIcon'
+          }
+        />
+        <ToolTip tip='Notifications' />
+      </Button>
+      {open && (
+        <div
+          className='absolute right-0 top-11 z-10 w-52 overflow-hidden rounded-2xl border border-light-border
+                     bg-main-background py-1 text-left text-[15px] shadow-xl dark:border-dark-border'
+        >
+          {activityNotificationCategoryIds.map((category) => {
+            const checked = activityNotificationCategoriesInclude(
+              categories,
+              category
+            );
+
+            return (
+              <button
+                className='flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-light-primary/5
+                           focus-visible:bg-light-primary/5 focus-visible:outline-none
+                           dark:hover:bg-dark-primary/5 dark:focus-visible:bg-dark-primary/5'
+                type='button'
+                key={category}
+                disabled={updating}
+                onClick={(): void => void handleToggle(category)}
+              >
+                <span
+                  className='flex h-5 w-5 shrink-0 items-center justify-center rounded border
+                             border-light-secondary text-main-accent dark:border-dark-secondary'
+                  aria-hidden='true'
+                >
+                  {checked && (
+                    <CustomIcon
+                      className='h-3.5 w-3.5'
+                      iconName='TwitterCheckIcon'
+                    />
+                  )}
+                </span>
+                <span className='font-bold'>
+                  {activityNotificationTitles[category]}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function UserHomeLayout({ children }: LayoutProps): JSX.Element {
@@ -127,14 +309,6 @@ export function UserHomeLayout({ children }: LayoutProps): JSX.Element {
                   <UserEditProfile />
                 ) : (
                   <div className='flex gap-2 self-start'>
-                    <UserShare
-                      targetId={userData.id}
-                      username={userData.username}
-                      blocking={userData.blocking}
-                      blockingByListName={userData.blockingByListName}
-                      muting={userData.muting}
-                      mutingByListName={userData.mutingByListName}
-                    />
                     {showMessageButton && (
                       <Button
                         className='dark-bg-tab group relative border border-light-line-reply p-2
@@ -149,6 +323,15 @@ export function UserHomeLayout({ children }: LayoutProps): JSX.Element {
                         <ToolTip tip='Message' />
                       </Button>
                     )}
+                    <ActivityNotificationButton targetUser={userData} />
+                    <UserShare
+                      targetId={userData.id}
+                      username={userData.username}
+                      blocking={userData.blocking}
+                      blockingByListName={userData.blockingByListName}
+                      muting={userData.muting}
+                      mutingByListName={userData.mutingByListName}
+                    />
                     <FollowButton
                       userTargetId={userData.id}
                       userTargetUsername={userData.username}

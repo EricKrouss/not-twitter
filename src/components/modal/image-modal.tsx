@@ -608,6 +608,7 @@ function ConversationTweet({
             <TweetEmbed
               card={displayCard}
               quotedTweet={quotedTweet}
+              articleTweetPath={tweetLink}
               hideQuotedTweetMedia={hideQuotedTweetMedia}
             />
           )}

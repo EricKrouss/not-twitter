@@ -14,6 +14,7 @@ import {
   RichText,
   type AppBskyActorProfile,
   type AppBskyActorDefs,
+  type AppBskyEmbedGetEmbedExternalView,
   type AppBskyFeedPost,
   type AppBskyFeedThreadgate,
   type AppBskyNotificationListNotifications,
@@ -53,6 +54,7 @@ import type { ImagesPreview, FilesWithId } from '@lib/types/file';
 import type { Stats } from '@lib/types/stats';
 import type {
   EmbeddedTweet,
+  StandardSiteArticle,
   Tweet,
   TweetCard,
   TweetMediaWarning,
@@ -61,11 +63,17 @@ import type {
   TweetUnavailableReason,
   TweetWithUser
 } from '@lib/types/tweet';
-import type { User, UserKnownFollower } from '@lib/types/user';
+import type {
+  ActivityNotificationCategory,
+  User,
+  UserKnownFollower
+} from '@lib/types/user';
 
 const OAUTH_SUB_KEY = 'twitter-clone:bsky-oauth-sub';
 const OAUTH_ACCOUNTS_KEY = 'twitter-clone:bsky-oauth-accounts';
 const CREDENTIAL_SESSION_KEY = 'twitter-clone:bsky-credential-session';
+const ACTIVITY_NOTIFICATION_CATEGORIES_KEY =
+  'twitter-clone:activity-notification-categories';
 const BSKY_APPVIEW_DID = 'did:web:api.bsky.app';
 const DEFAULT_ATPROTO_PDS_URL = 'https://bsky.social';
 const BSKY_APPVIEW_SERVICE = 'bsky_appview';
@@ -118,6 +126,7 @@ const THEME_KEY = 'twitter-clone:bsky-theme';
 const DEFAULT_PROFILE_PHOTO_URL = '/assets/twitter-default-egg.png';
 const DEFAULT_PROFILE_COVER_URL = '/assets/twitter-default-cover.png';
 const CHAT_DECLARATION_COLLECTION = 'chat.bsky.actor.declaration';
+const STANDARD_SITE_DOCUMENT_COLLECTION = 'site.standard.document';
 
 type BskyServiceConfig = {
   did: string;
@@ -158,6 +167,7 @@ const PUBLIC_BSKY_APPVIEW_METHODS = new Set([
   'app.bsky.actor.getProfiles',
   'app.bsky.actor.searchActors',
   'app.bsky.actor.searchActorsTypeahead',
+  'app.bsky.embed.getEmbedExternalView',
   'app.bsky.feed.getActorLikes',
   'app.bsky.feed.getAuthorFeed',
   'app.bsky.feed.getFeed',
@@ -774,6 +784,123 @@ let moderationLabelerDids: string[] = [];
 
 function hasStorage(): boolean {
   return typeof window !== 'undefined' && !!window.localStorage;
+}
+
+export const activityNotificationCategoryIds: ActivityNotificationCategory[] = [
+  'all',
+  'tweets',
+  'articles',
+  'retweets',
+  'replies'
+];
+
+const activityNotificationIndividualCategories: ActivityNotificationCategory[] =
+  ['tweets', 'articles', 'retweets', 'replies'];
+
+export function getActivityNotificationCategoryTitle(
+  category: ActivityNotificationCategory
+): string {
+  switch (category) {
+    case 'all':
+      return 'All';
+    case 'tweets':
+      return 'Tweets';
+    case 'articles':
+      return 'Articles';
+    case 'retweets':
+      return 'Retweets';
+    case 'replies':
+      return 'Replies';
+  }
+}
+
+export function normalizeActivityNotificationCategories(
+  categories: readonly ActivityNotificationCategory[] | undefined
+): ActivityNotificationCategory[] {
+  if (!categories?.length) return [];
+  if (categories.includes('all')) return ['all'];
+
+  const next = activityNotificationIndividualCategories.filter((category) =>
+    categories.includes(category)
+  );
+
+  return next.length === activityNotificationIndividualCategories.length
+    ? ['all']
+    : next;
+}
+
+export function activityNotificationCategoriesInclude(
+  categories: readonly ActivityNotificationCategory[] | undefined,
+  category: ActivityNotificationCategory
+): boolean {
+  const normalized = normalizeActivityNotificationCategories(categories);
+
+  return normalized.includes('all') || normalized.includes(category);
+}
+
+function readActivityNotificationCategoriesByDid(): Record<
+  string,
+  ActivityNotificationCategory[]
+> {
+  if (!hasStorage()) return {};
+
+  try {
+    const value = window.localStorage.getItem(
+      ACTIVITY_NOTIFICATION_CATEGORIES_KEY
+    );
+    const parsed: unknown = value ? JSON.parse(value) : {};
+
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+      return {};
+
+    return Object.fromEntries(
+      Object.entries(parsed as Record<string, unknown>).map(
+        ([did, categories]) => [
+          did,
+          normalizeActivityNotificationCategories(
+            Array.isArray(categories)
+              ? (categories as ActivityNotificationCategory[])
+              : []
+          )
+        ]
+      )
+    );
+  } catch {
+    return {};
+  }
+}
+
+function writeActivityNotificationCategoriesByDid(
+  value: Record<string, ActivityNotificationCategory[]>
+): void {
+  if (!hasStorage()) return;
+
+  window.localStorage.setItem(
+    ACTIVITY_NOTIFICATION_CATEGORIES_KEY,
+    JSON.stringify(value)
+  );
+}
+
+function getStoredActivityNotificationCategories(
+  did: string
+): ActivityNotificationCategory[] | null {
+  const stored = readActivityNotificationCategoriesByDid();
+
+  return Object.prototype.hasOwnProperty.call(stored, did)
+    ? stored[did] ?? []
+    : null;
+}
+
+function getProfileActivityNotificationCategories(
+  did: string,
+  activitySubscription?: { post?: boolean; reply?: boolean } | null
+): ActivityNotificationCategory[] {
+  const stored = getStoredActivityNotificationCategories(did);
+  if (stored) return stored;
+
+  return activitySubscription?.post || activitySubscription?.reply
+    ? ['all']
+    : [];
 }
 
 function splitAtprotoServiceList(value: string | undefined): string[] {
@@ -4265,6 +4392,13 @@ function mapProfile(profile: ActorProfileView): User {
     : hasViewerState
     ? 0
     : existing?.knownFollowersCount ?? knownFollowers.length;
+  const viewerActivitySubscription = (
+    detailedProfile.viewer as
+      | {
+          activitySubscription?: { post?: boolean; reply?: boolean } | null;
+        }
+      | undefined
+  )?.activitySubscription;
 
   if (detailedProfile.viewer?.following) {
     followUriCache.set(did, detailedProfile.viewer.following);
@@ -4304,6 +4438,10 @@ function mapProfile(profile: ActorProfileView): User {
       existing?.birthday ??
       null,
     messageAllowIncoming: existing?.messageAllowIncoming ?? null,
+    activityNotificationCategories: getProfileActivityNotificationCategories(
+      did,
+      viewerActivitySubscription
+    ),
     name: profile.displayName || existing?.name || profile.handle,
     theme: existing?.theme ?? null,
     accent: existing?.accent ?? null,
@@ -4643,6 +4781,206 @@ function getCardAssociatedRefs(
   return refs
     .map(({ uri, cid }) => (uri && cid ? { uri, cid } : null))
     .filter((ref): ref is { uri: string; cid: string } => !!ref);
+}
+
+const standardSiteArticleCache = new Map<
+  string,
+  Promise<StandardSiteArticle | null>
+>();
+
+function getStandardSiteArticleCacheKey(card: TweetCard): string | null {
+  const uris = card.associatedRefs?.map(({ uri }) => uri).sort() ?? [];
+
+  if (
+    !uris.some((uri) => uri.includes(`/${STANDARD_SITE_DOCUMENT_COLLECTION}/`))
+  )
+    return null;
+
+  return `${card.url}|${uris.join('|')}`;
+}
+
+function getRecordString(
+  record: Record<string, unknown>,
+  key: string
+): string | null {
+  const value = record[key];
+
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function getRecordTags(record: Record<string, unknown>): string[] {
+  const tags = record.tags;
+
+  if (!Array.isArray(tags)) return [];
+
+  return tags
+    .filter((tag): tag is string => typeof tag === 'string' && !!tag.trim())
+    .map((tag) => tag.trim());
+}
+
+function removeMdxComponentBlocks(lines: string[]): string[] {
+  const nextLines: string[] = [];
+  let skippingComponentBlock = false;
+
+  lines.forEach((line) => {
+    const trimmedLine = line.trim();
+
+    if (skippingComponentBlock) {
+      if (/\/>\s*$/.test(trimmedLine) || /^<\/[A-Z]/.test(trimmedLine))
+        skippingComponentBlock = false;
+
+      return;
+    }
+
+    if (/^import\s/.test(trimmedLine) || /^export\s/.test(trimmedLine)) return;
+
+    if (/^<[A-Z][\w.:-]*(\s|>|\/>)/.test(trimmedLine)) {
+      if (!/\/>\s*$/.test(trimmedLine)) skippingComponentBlock = true;
+      return;
+    }
+
+    nextLines.push(line.replace(/<\/?[^>]+>/g, ''));
+  });
+
+  return nextLines;
+}
+
+function stripReaderMarkdownPreamble(text: string): string {
+  const normalizedText = text.replace(/\r\n?/g, '\n');
+  const lines = normalizedText.split('\n');
+  const scanLimit = Math.min(lines.length, 12);
+  let sawTitle = false;
+  let sawURLSource = false;
+
+  for (let index = 0; index < scanLimit; index++) {
+    const line = lines[index].trim();
+
+    if (/^title:\s+/i.test(line)) sawTitle = true;
+    if (/^url source:\s+/i.test(line)) sawURLSource = true;
+
+    if (
+      /^markdown content:\s*$/i.test(line) &&
+      sawTitle &&
+      sawURLSource
+    )
+      return lines
+        .slice(index + 1)
+        .join('\n')
+        .replace(/^\n+/, '')
+        .trim();
+  }
+
+  return normalizedText.trim();
+}
+
+function normalizeStandardSiteArticleText(text: string): string {
+  return stripReaderMarkdownPreamble(
+    removeMdxComponentBlocks(text.replace(/\r\n?/g, '\n').split('\n'))
+      .join('\n')
+      .replace(/[ \t]+\n/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+  );
+}
+
+function getTextFromUnknownContent(value: unknown, depth = 0): string[] {
+  if (depth > 5 || value === null || value === undefined) return [];
+  if (typeof value === 'string') return [value];
+
+  if (Array.isArray(value))
+    return value.flatMap((item) => getTextFromUnknownContent(item, depth + 1));
+
+  if (!isPlainObject(value)) return [];
+
+  return ['text', 'plainText', 'markdown', 'content', 'children', 'value']
+    .flatMap((key) => getTextFromUnknownContent(value[key], depth + 1))
+    .filter((item) => item.trim());
+}
+
+function getStandardSiteDocumentText(
+  record: Record<string, unknown>
+): string | null {
+  const textContent = getRecordString(record, 'textContent');
+  const text = textContent
+    ? textContent
+    : getTextFromUnknownContent(record.content).join('\n\n');
+  const normalizedText = normalizeStandardSiteArticleText(text);
+
+  return normalizedText ? normalizedText : null;
+}
+
+function getStandardSiteDocumentRecord(
+  records: AppBskyEmbedGetEmbedExternalView.OutputSchema['associatedRecords']
+): Record<string, unknown> | null {
+  const record = records?.find(
+    (item): item is Record<string, unknown> =>
+      isPlainObject(item) && item.$type === STANDARD_SITE_DOCUMENT_COLLECTION
+  );
+
+  return record ?? null;
+}
+
+async function fetchStandardSiteArticle(
+  card: TweetCard
+): Promise<StandardSiteArticle | null> {
+  const uris = card.associatedRefs?.map(({ uri }) => uri).slice(0, 4) ?? [];
+
+  if (!uris.length) return null;
+
+  const response =
+    await callPublicFallbackAppQueryXrpc<AppBskyEmbedGetEmbedExternalView.OutputSchema>(
+      'app.bsky.embed.getEmbedExternalView',
+      { url: card.url, uris }
+    );
+  const documentRecord = getStandardSiteDocumentRecord(
+    response.associatedRecords
+  );
+
+  if (!documentRecord) return null;
+
+  const textContent = getStandardSiteDocumentText(documentRecord);
+
+  if (!textContent) return null;
+
+  const documentURI =
+    uris.find((uri) =>
+      uri.includes(`/${STANDARD_SITE_DOCUMENT_COLLECTION}/`)
+    ) ?? null;
+
+  return {
+    url:
+      getRecordString(documentRecord, 'canonicalUrl') ??
+      response.view?.external.uri ??
+      card.url,
+    title: getRecordString(documentRecord, 'title') ?? card.title,
+    description:
+      getRecordString(documentRecord, 'description') ?? card.description,
+    textContent,
+    content: documentRecord.content,
+    documentURI,
+    publishedAt:
+      getRecordString(documentRecord, 'publishedAt') ?? card.createdAt ?? null,
+    updatedAt:
+      getRecordString(documentRecord, 'updatedAt') ?? card.updatedAt ?? null,
+    tags: getRecordTags(documentRecord)
+  };
+}
+
+export async function getStandardSiteArticle(
+  card: TweetCard
+): Promise<StandardSiteArticle | null> {
+  const cacheKey = getStandardSiteArticleCacheKey(card);
+
+  if (!cacheKey) return null;
+
+  const cachedArticle = standardSiteArticleCache.get(cacheKey);
+
+  if (cachedArticle) return cachedArticle;
+
+  const articlePromise = fetchStandardSiteArticle(card).catch(() => null);
+  standardSiteArticleCache.set(cacheKey, articlePromise);
+
+  return articlePromise;
 }
 
 function getCardReadingTime(
@@ -5180,6 +5518,7 @@ function getUnavailableThreadUser(
     pronouns: null,
     birthday: null,
     messageAllowIncoming: null,
+    activityNotificationCategories: [],
     name: 'Unavailable',
     theme: null,
     accent: null,
@@ -6761,6 +7100,51 @@ function mapNotification(
   };
 }
 
+function isStandardSiteArticleCard(card: TweetCard | null): boolean {
+  if (!card) return false;
+  if (card.domain?.toLowerCase() === 'standard.site') return true;
+  if (/^https?:\/\/(?:www\.)?standard\.site\//i.test(card.url)) return true;
+
+  return (
+    card.associatedRefs?.some(({ uri }) =>
+      uri.includes('/site.standard.document/')
+    ) ?? false
+  );
+}
+
+function subscribedPostNotificationMatchesActivityPreferences(
+  notification: AppBskyNotificationListNotifications.Notification,
+  tweetByUri: Map<string, Tweet>
+): boolean {
+  if (notification.reason !== 'subscribed-post') return true;
+
+  const stored = getStoredActivityNotificationCategories(notification.author.did);
+  if (!stored) return true;
+
+  const categories = normalizeActivityNotificationCategories(stored);
+  if (!categories.length) return false;
+  if (categories.includes('all')) return true;
+
+  const tweetUri = getNotificationTweetUri(notification);
+  const tweet = tweetUri ? tweetByUri.get(tweetUri) : null;
+  const isArticle = isStandardSiteArticleCard(tweet?.card ?? null);
+  const isReply = !!tweet?.parent;
+
+  if (
+    isArticle &&
+    activityNotificationCategoriesInclude(categories, 'articles')
+  )
+    return true;
+  if (isReply && activityNotificationCategoriesInclude(categories, 'replies'))
+    return true;
+
+  return (
+    !isArticle &&
+    !isReply &&
+    activityNotificationCategoriesInclude(categories, 'tweets')
+  );
+}
+
 export async function listNotificationsPage(
   cursor?: string,
   options?: {
@@ -6802,6 +7186,13 @@ export async function listNotificationsPage(
       try {
         const tweetUri = getNotificationTweetUri(notification);
         if (tweetUri && hiddenUris.has(tweetUri)) return [];
+        if (
+          !subscribedPostNotificationMatchesActivityPreferences(
+            notification,
+            tweetByUri
+          )
+        )
+          return [];
 
         return [mapNotification(notification, tweetByUri)];
       } catch {
@@ -6818,6 +7209,45 @@ export async function markNotificationsSeen(): Promise<void> {
     new Date().toISOString() as Parameters<Agent['updateSeenNotifications']>[0]
   );
   notify();
+}
+
+export async function setActivityNotificationCategoriesForUser(
+  targetDid: string,
+  categories: readonly ActivityNotificationCategory[]
+): Promise<ActivityNotificationCategory[]> {
+  const nextCategories = normalizeActivityNotificationCategories(categories);
+  const stored = readActivityNotificationCategoriesByDid();
+  const previousCategories = stored[targetDid] ?? null;
+  stored[targetDid] = nextCategories;
+  writeActivityNotificationCategoriesByDid(stored);
+
+  const cachedUser = userCache.get(targetDid);
+  if (cachedUser) cachedUser.activityNotificationCategories = nextCategories;
+
+  try {
+    await ensureAppViewAccessScope(
+      'app.bsky.notification.putActivitySubscription'
+    );
+    await callAppXrpc('app.bsky.notification.putActivitySubscription', {
+      subject: targetDid,
+      activitySubscription: {
+        post: nextCategories.length > 0,
+        reply: activityNotificationCategoriesInclude(nextCategories, 'replies')
+      }
+    });
+  } catch (error) {
+    const rollback = readActivityNotificationCategoriesByDid();
+    if (previousCategories) rollback[targetDid] = previousCategories;
+    else delete rollback[targetDid];
+    writeActivityNotificationCategoriesByDid(rollback);
+    if (cachedUser)
+      cachedUser.activityNotificationCategories = previousCategories ?? [];
+    throw error;
+  }
+
+  notify('relationship');
+
+  return nextCategories;
 }
 
 type RawChatMessage =

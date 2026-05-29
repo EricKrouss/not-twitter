@@ -1,5 +1,6 @@
 import { formatAtprotoHandleForDisplay } from '@lib/atproto/identity';
 import { useTheme } from '@lib/context/theme-context';
+import { useStandardSiteArticlesInline } from '@lib/hooks/use-standard-site-articles-inline';
 import { InputAccentRadio } from '@components/input/input-accent-radio';
 import { InputThemeRadio } from '@components/input/input-theme-radio';
 import { Button } from '@components/ui/button';
@@ -79,6 +80,8 @@ export function DisplayModal({ closeModal }: DisplayModalProps): JSX.Element {
     toggleHideBskySocialSuffix,
     toggleSquareProfilePictures
   } = useTheme();
+  const { standardSiteArticlesInline, toggleStandardSiteArticlesInline } =
+    useStandardSiteArticlesInline();
   const previewUsername = formatAtprotoHandleForDisplay(
     'nottwitter.bsky.social',
     hideBskySocialSuffix
@@ -133,6 +136,12 @@ export function DisplayModal({ closeModal }: DisplayModalProps): JSX.Element {
             label='Squared profile pictures'
             description='Use rounded corners instead of circles.'
             onClick={toggleSquareProfilePictures}
+          />
+          <DisplayToggle
+            checked={standardSiteArticlesInline}
+            label='Inline Standard.site articles'
+            description='Show supported links as inline article readers in Tweets.'
+            onClick={toggleStandardSiteArticlesInline}
           />
         </div>
       </div>

@@ -40,6 +40,7 @@ import { useAuth } from '@lib/context/auth-context';
 import { useTheme } from '@lib/context/theme-context';
 import { useWindow } from '@lib/context/window-context';
 import { useModal } from '@lib/hooks/useModal';
+import { useStandardSiteArticlesInline } from '@lib/hooks/use-standard-site-articles-inline';
 import { MainLayout } from '@components/layout/main-layout';
 import { ProtectedLayout } from '@components/layout/common-layout';
 import { SEO } from '@components/common/seo';
@@ -762,6 +763,8 @@ function SettingsPanelHeader({
 export default function Settings(): JSX.Element {
   const { user, signInWithBluesky } = useAuth();
   const { hideBskySocialSuffix, toggleHideBskySocialSuffix } = useTheme();
+  const { standardSiteArticlesInline, toggleStandardSiteArticlesInline } =
+    useStandardSiteArticlesInline();
   const { isMobile } = useWindow();
   const router = useRouter();
   const displayModal = useModal();
@@ -1762,6 +1765,16 @@ export default function Settings(): JSX.Element {
           checked={hideBskySocialSuffix}
           label='Hide .bsky.social suffixes'
           onChange={toggleHideBskySocialSuffix}
+        />
+      </SettingsRow>
+      <SettingsRow
+        title='Standard.site articles'
+        description='Show supported Standard.site links as inline article readers.'
+      >
+        <Toggle
+          checked={standardSiteArticlesInline}
+          label='Inline Standard.site articles'
+          onChange={toggleStandardSiteArticlesInline}
         />
       </SettingsRow>
     </>

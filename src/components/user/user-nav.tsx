@@ -22,6 +22,7 @@ const allNavs: ReadonlyArray<ReadonlyArray<UserNavData>> = [
   [
     { name: 'Tweets', path: '' },
     { name: 'Tweets & replies', path: 'with_replies' },
+    { name: 'Articles', path: 'articles' },
     { name: 'Media', path: 'media' },
     { name: 'Likes', path: 'likes' },
     { name: 'Lists', path: 'lists' },

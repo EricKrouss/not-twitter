@@ -8,6 +8,7 @@ import TweetPage from './tweet/[id]';
 import UserFollowersPage from './user/[id]/followers';
 import UserFollowersYouKnowPage from './user/[id]/followers_you_follow';
 import UserFollowingPage from './user/[id]/following';
+import UserArticlesPage from './user/[id]/articles';
 import UserLikesPage from './user/[id]/likes';
 import UserListsPage from './user/[id]/lists';
 import UserMediaPage from './user/[id]/media';
@@ -46,6 +47,8 @@ export default function NotFound(): JSX.Element {
         return <>{renderPage(UserFollowersYouKnowPage)}</>;
       case 'following':
         return <>{renderPage(UserFollowingPage)}</>;
+      case 'articles':
+        return <>{renderPage(UserArticlesPage)}</>;
       case 'likes':
         return <>{renderPage(UserLikesPage)}</>;
       case 'lists':

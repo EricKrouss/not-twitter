@@ -11,6 +11,7 @@ import { createYouTubeCardFromText } from '@lib/youtube';
 import { Modal } from '@components/modal/modal';
 import { TweetReplyModal } from '@components/modal/tweet-reply-modal';
 import { ImagePreview } from '@components/input/image-preview';
+import { FollowButton } from '@components/ui/follow-button';
 import { UserAvatar } from '@components/user/user-avatar';
 import { UserTooltip } from '@components/user/user-tooltip';
 import { UserName } from '@components/user/user-name';
@@ -191,7 +192,16 @@ export function ViewTweet(tweet: ViewTweetProps): JSX.Element {
                 <UserUsername username={username} />
               </UserTooltip>
             </div>
-            <div className='px-4'>
+            <div className='flex shrink-0 items-start gap-2 pl-3'>
+              <FollowButton
+                userTargetId={ownerId}
+                userTargetUsername={username}
+                userTargetFollowers={tweetUserData.followers}
+                userTargetFollowing={tweetUserData.following}
+                userTargetBlocking={tweetUserData.blocking}
+                userTargetBlockedBy={tweetUserData.blockedBy}
+                userTargetBlockingByListName={tweetUserData.blockingByListName}
+              />
               <TweetActions
                 viewTweet
                 isOwner={isOwner}
@@ -237,6 +247,8 @@ export function ViewTweet(tweet: ViewTweetProps): JSX.Element {
           card={displayCard}
           quotedTweet={quotedTweet}
           viewTweet
+          articleAuthor={tweetUserData}
+          articleTweetPath={tweetLink}
           hideQuotedTweetMedia={hideQuotedTweetMedia}
         />
         <div

@@ -8,6 +8,7 @@ import { isPlural } from '@lib/utils';
 import { tweetsCollection } from '@lib/atproto/collections';
 import { formatAtprotoDisplayIdentifier } from '@lib/atproto/identity';
 import { getProfileRouteId, getProfileRouteView } from '@lib/static-routes';
+import { isStandardSiteArticleCard } from '@lib/standard-site';
 import { orderBy, query, where } from '@lib/atproto/store';
 import { UserName } from './user-name';
 import type { Variants } from 'framer-motion';
@@ -44,6 +45,7 @@ export function UserHeader(): JSX.Element {
     currentPage
   );
   const isInFollowPage = ['following', 'followers'].includes(currentPage);
+  const isArticlesPage = currentPage === 'articles';
   const isMediaPage = currentPage === 'media';
   const isLikesPage = currentPage === 'likes';
   const likesVisible = !!authUser && authUser.id === userId;
@@ -61,6 +63,18 @@ export function UserHeader(): JSX.Element {
     }
   );
 
+  const { data: articleTweets, loading: articlesLoading } = useCollection(
+    query(
+      tweetsCollection,
+      where('createdBy', '==', userId ?? ''),
+      where('parent', '==', null)
+    ),
+    {
+      allowNull: true,
+      disabled: !userId || !isArticlesPage || profileRestricted
+    }
+  );
+
   const { data: likedTweets, loading: likesLoading } = useCollection(
     query(
       tweetsCollection,
@@ -73,13 +87,20 @@ export function UserHeader(): JSX.Element {
     }
   );
 
+  const totalArticles =
+    isArticlesPage && !profileRestricted
+      ? articleTweets?.filter(({ card }) => isStandardSiteArticleCard(card))
+          .length ?? 0
+      : 0;
   const [totalTweets, totalMedia, totalLikes] = [
     user?.totalTweets ?? 0,
     isMediaPage && !profileRestricted ? mediaTweets?.length ?? 0 : 0,
     isLikesPage && likesVisible ? likedTweets?.length ?? 0 : 0
   ];
   const statsLoading =
-    (isMediaPage && mediaLoading) || (isLikesPage && likesLoading);
+    (isArticlesPage && articlesLoading) ||
+    (isMediaPage && mediaLoading) ||
+    (isLikesPage && likesLoading);
 
   return (
     <AnimatePresence initial={false} mode='wait'>
@@ -119,6 +140,10 @@ export function UserHeader(): JSX.Element {
                     totalMedia
                   )}`
                 : 'No Photo & GIF'
+              : isArticlesPage
+              ? totalArticles
+                ? `${totalArticles} Article${isPlural(totalArticles)}`
+                : 'No Article'
               : totalLikes
               ? `${totalLikes} Like${isPlural(totalLikes)}`
               : 'No Like'}

@@ -3,6 +3,7 @@ import { isProfileRouteActor } from '@lib/atproto/profile-route';
 export type UserRouteView =
   | 'tweets'
   | 'with_replies'
+  | 'articles'
   | 'media'
   | 'likes'
   | 'lists'
@@ -30,6 +31,7 @@ export type StaticRouteMatch =
 
 const PROFILE_TABS = new Set<UserRouteView>([
   'with_replies',
+  'articles',
   'media',
   'likes',
   'lists',

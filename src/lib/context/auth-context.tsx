@@ -151,6 +151,7 @@ export function AuthContextProvider({
           pronouns: null,
           birthday: null,
           messageAllowIncoming: null,
+          activityNotificationCategories: [],
           name: displayName as string,
           theme: null,
           accent: null,

@@ -4,6 +4,13 @@ import type { ProfileBirthday } from '@lib/profile-birthday';
 
 export type UserMessageAllowIncoming = 'all' | 'following' | 'none';
 
+export type ActivityNotificationCategory =
+  | 'all'
+  | 'tweets'
+  | 'articles'
+  | 'retweets'
+  | 'replies';
+
 export type UserKnownFollower = {
   id: string;
   name: string;
@@ -18,6 +25,7 @@ export type User = {
   pronouns: string | null;
   birthday: ProfileBirthday | null;
   messageAllowIncoming: UserMessageAllowIncoming | null;
+  activityNotificationCategories: ActivityNotificationCategory[];
   name: string;
   theme: Theme | null;
   accent: Accent | null;
@@ -67,6 +75,7 @@ export const userConverter: DataConverter<User> = {
     return {
       ...data,
       muting: data.muting ?? false,
+      activityNotificationCategories: data.activityNotificationCategories ?? [],
       birthday: data.birthday ?? null,
       messageAllowIncoming: data.messageAllowIncoming ?? null,
       knownFollowers: data.knownFollowers ?? [],

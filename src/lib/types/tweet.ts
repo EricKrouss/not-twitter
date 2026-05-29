@@ -48,6 +48,18 @@ export type TweetCard = {
   associatedRefs?: { uri: string; cid: string }[] | null;
 };
 
+export type StandardSiteArticle = {
+  url: string;
+  title: string;
+  description: string | null;
+  textContent: string;
+  content?: unknown;
+  documentURI?: string | null;
+  publishedAt: string | null;
+  updatedAt: string | null;
+  tags: string[];
+};
+
 export type TweetMediaWarning = {
   title: string;
   description: string;

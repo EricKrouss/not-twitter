@@ -399,6 +399,8 @@ function TweetComponent(tweet: TweetProps): JSX.Element {
               <TweetEmbed
                 card={displayCard}
                 quotedTweet={quotedTweet}
+                articleAuthor={tweetUserData}
+                articleTweetPath={tweetLink}
                 hideQuotedTweetMedia={hideQuotedTweetMedia}
               />
               <TweetReplyRestrictionIndicator
